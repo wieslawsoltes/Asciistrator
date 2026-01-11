@@ -2719,7 +2719,7 @@ const AppState = {
     // Grid
     showGrid: true,
     snapToGrid: true,
-    gridSize: 5,
+    gridSize: 1,
     
     // Layers
     layers: [],
@@ -6158,9 +6158,6 @@ class Asciistrator extends EventEmitter {
         
         // Setup rulers
         this._setupRulers();
-        
-        // Draw initial demo content
-        this._drawDemoContent();
         
         this.initialized = true;
         console.log('✅ Asciistrator initialized');
