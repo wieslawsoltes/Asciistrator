@@ -2718,7 +2718,7 @@ const AppState = {
     // Grid
     showGrid: true,
     snapToGrid: true,
-    gridSize: 1,
+    gridSize: 5,
     
     // Layers
     layers: [],
@@ -2829,6 +2829,12 @@ class AsciiCanvasRenderer extends EventEmitter {
         }
         // Don't override CSS styles - let the stylesheet handle font, line-height, padding
         
+        // Create grid overlay element
+        this.gridOverlay = createElement('div', { class: 'grid-overlay' });
+        if (this.wrapper) {
+            this.wrapper.appendChild(this.gridOverlay);
+        }
+        
         // Initialize scrollbars
         this._initScrollbars();
         
@@ -2903,21 +2909,27 @@ class AsciiCanvasRenderer extends EventEmitter {
             position: absolute;
             visibility: hidden;
             font-family: ${computedStyle.fontFamily};
-            font-size: ${computedStyle.fontSize};
-            line-height: ${computedStyle.lineHeight};
+            font-size: 14px;
             white-space: pre;
         `;
         measure.textContent = 'X';
         document.body.appendChild(measure);
         
-        this.charWidth = measure.getBoundingClientRect().width;
-        this.charHeight = measure.getBoundingClientRect().height;
+        // Store base dimensions (at zoom = 1, font-size = 14px)
+        this._baseCharWidth = measure.getBoundingClientRect().width;
+        this._baseCharHeight = 14; // 14px font-size with line-height: 1
+        
+        // Current dimensions (will be updated by _updateTransform)
+        this.charWidth = this._baseCharWidth * this.zoom;
+        this.charHeight = this._baseCharHeight * this.zoom;
         
         document.body.removeChild(measure);
         
         // Fallback if measurement failed
-        if (this.charWidth === 0) this.charWidth = 8.4;
-        if (this.charHeight === 0) this.charHeight = 14; // 14px font with line-height: 1
+        if (this._baseCharWidth === 0) this._baseCharWidth = 8.4;
+        if (this._baseCharHeight === 0) this._baseCharHeight = 14;
+        this.charWidth = this._baseCharWidth * this.zoom;
+        this.charHeight = this._baseCharHeight * this.zoom;
     }
     
     /**
@@ -2936,11 +2948,10 @@ class AsciiCanvasRenderer extends EventEmitter {
         const viewportX = event.clientX - viewportRect.left;
         const viewportY = event.clientY - viewportRect.top;
         
-        // Convert viewport coords to wrapper coords (undo translate then scale)
-        // Transform is: translate(panX, panY) scale(zoom)
-        // Inverse: (point - pan) / zoom
-        const wrapperX = (viewportX - this.panX) / this.zoom;
-        const wrapperY = (viewportY - this.panY) / this.zoom;
+        // Since we use font-size scaling (no transform scale), we only need to undo translation
+        // Transform is: translate(panX, panY) - no scale
+        const wrapperX = viewportX - this.panX;
+        const wrapperY = viewportY - this.panY;
         
         // Get canvas element offset within wrapper (border)
         const computedStyle = getComputedStyle(this.element);
@@ -2954,7 +2965,7 @@ class AsciiCanvasRenderer extends EventEmitter {
         const contentX = wrapperX - borderLeft - paddingLeft;
         const contentY = wrapperY - borderTop - paddingTop;
         
-        // Convert to character coordinates
+        // Convert to character coordinates using current (zoomed) char dimensions
         const x = Math.floor(contentX / this.charWidth);
         const y = Math.floor(contentY / this.charHeight);
         
@@ -2970,7 +2981,7 @@ class AsciiCanvasRenderer extends EventEmitter {
     }
     
     /**
-     * Get canvas size in pixels (without zoom applied)
+     * Get canvas size in pixels at zoom=1 (base size)
      */
     getBaseCanvasSize() {
         // Default values
@@ -2987,20 +2998,38 @@ class AsciiCanvasRenderer extends EventEmitter {
             borderV = parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
         }
         
+        // Use base char dimensions (at zoom=1)
+        const baseCharW = this._baseCharWidth || 8.4;
+        const baseCharH = this._baseCharHeight || 14;
+        
         return {
-            width: AppState.canvasWidth * this.charWidth + paddingH + borderH,
-            height: AppState.canvasHeight * this.charHeight + paddingV + borderV
+            width: AppState.canvasWidth * baseCharW + paddingH + borderH,
+            height: AppState.canvasHeight * baseCharH + paddingV + borderV
         };
     }
     
     /**
-     * Get canvas size in pixels (with zoom applied)
+     * Get canvas size in pixels (with zoom applied - actual current size)
      */
     getCanvasSize() {
-        const base = this.getBaseCanvasSize();
+        // Default values
+        let paddingH = 32;
+        let paddingV = 32;
+        let borderH = 2;
+        let borderV = 2;
+        
+        if (this.element) {
+            const cs = getComputedStyle(this.element);
+            paddingH = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+            paddingV = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+            borderH = parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
+            borderV = parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+        }
+        
+        // Since we use font-size scaling, charWidth/charHeight already include zoom
         return {
-            width: base.width * this.zoom,
-            height: base.height * this.zoom
+            width: AppState.canvasWidth * this.charWidth + paddingH + borderH,
+            height: AppState.canvasHeight * this.charHeight + paddingV + borderV
         };
     }
     
@@ -3010,8 +3039,22 @@ class AsciiCanvasRenderer extends EventEmitter {
     _updateTransform() {
         if (!this.wrapper) return;
         
-        // Apply transform
-        this.wrapper.style.transform = `translate(${this.panX}px, ${this.panY}px) scale(${this.zoom})`;
+        // Use font-size scaling for crisp text instead of transform scale
+        const baseFontSize = 14; // Base font size in px
+        const scaledFontSize = baseFontSize * this.zoom;
+        
+        // Apply font-size to canvas element for crisp text
+        this.element.style.fontSize = `${scaledFontSize}px`;
+        
+        // Apply only translation transform (no scale)
+        this.wrapper.style.transform = `translate(${this.panX}px, ${this.panY}px)`;
+        
+        // Update character dimensions based on new font size
+        this.charWidth = this._baseCharWidth * this.zoom;
+        this.charHeight = scaledFontSize; // Matches line-height: 1
+        
+        // Update grid overlay for new zoom level
+        this._updateGridOverlay();
         
         // Update scrollbars
         this._updateScrollbars();
@@ -3608,44 +3651,15 @@ class AsciiCanvasRenderer extends EventEmitter {
     _doRender() {
         const width = this.buffer.width;
         const height = this.buffer.height;
-        const showGrid = AppState.showGrid;
-        const gridMod = AppState.gridSize * 5;
         
-        // Cache buffer arrays for direct access (2D arrays: [y][x])
+        // Cache buffer arrays
         const mainChars = this.buffer.chars;
         const mainColors = this.buffer.colors;
         const previewChars = this.previewBuffer.chars;
         const previewColors = this.previewBuffer.colors;
         
-        // Pre-allocate array with estimated size
-        const estimatedParts = height * 2 + width * height / 10;
-        const parts = new Array(Math.ceil(estimatedParts));
-        let partIndex = 0;
-        
-        // Batch consecutive characters with same properties
-        let currentColor = null;
-        let batchStart = 0;
-        let batchChars = '';
-        
-        // Escape lookup table for common chars
-        const escapeChar = (c) => {
-            switch(c) {
-                case '&': return '&amp;';
-                case '<': return '&lt;';
-                case '>': return '&gt;';
-                default: return c;
-            }
-        };
-        
-        const flushBatch = () => {
-            if (batchChars.length === 0) return;
-            if (currentColor) {
-                parts[partIndex++] = `<span style="color:${currentColor}">${batchChars}</span>`;
-            } else {
-                parts[partIndex++] = batchChars;
-            }
-            batchChars = '';
-        };
+        // Build rows
+        const rows = [];
         
         for (let y = 0; y < height; y++) {
             const mainRow = mainChars[y];
@@ -3653,44 +3667,84 @@ class AsciiCanvasRenderer extends EventEmitter {
             const previewRow = previewChars[y];
             const previewColorRow = previewColors[y];
             
+            const parts = [];
+            let color = null;
+            let batch = '';
+            
             for (let x = 0; x < width; x++) {
-                // Get character - preview takes priority (2D access)
-                const previewChar = previewRow[x];
-                const mainChar = mainRow[x];
-                const isPreview = previewChar !== ' ';
-                const char = isPreview ? previewChar : mainChar;
-                const color = isPreview ? previewColorRow[x] : mainColorRow[x];
+                const pc = previewRow[x];
+                const hasP = pc !== ' ';
+                const ch = hasP ? pc : mainRow[x];
+                const col = hasP ? previewColorRow[x] : mainColorRow[x];
                 
-                // Grid dots on empty cells
-                if (showGrid && char === ' ' && x % gridMod === 0 && y % gridMod === 0) {
-                    flushBatch();
-                    parts[partIndex++] = '<span class="grid-dot">·</span>';
-                    currentColor = null;
-                    continue;
+                // Color change - flush batch
+                if (col !== color) {
+                    if (batch) {
+                        parts.push(color ? `<span style="color:${color}">${batch}</span>` : batch);
+                        batch = '';
+                    }
+                    color = col;
                 }
                 
-                // Batch same-colored chars together
-                if (color !== currentColor) {
-                    flushBatch();
-                    currentColor = color;
-                }
-                batchChars += escapeChar(char);
+                // Escape and append
+                batch += ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : ch;
             }
-            flushBatch();
-            parts[partIndex++] = '\n';
-            currentColor = null;
+            
+            // Flush remaining
+            if (batch) {
+                parts.push(color ? `<span style="color:${color}">${batch}</span>` : batch);
+            }
+            
+            rows.push(parts.join(''));
         }
         
-        // Join only the used portion of the array
-        const html = parts.slice(0, partIndex).join('');
+        const result = rows.join('\n');
         
-        // Only update DOM if content changed
-        if (html !== this._lastRenderedHTML) {
-            this.element.innerHTML = html;
-            this._lastRenderedHTML = html;
+        if (result !== this._lastRenderedHTML) {
+            this.element.innerHTML = result;
+            this._lastRenderedHTML = result;
         }
+        
+        // Update CSS grid overlay
+        this._updateGridOverlay();
     }
     
+    _updateGridOverlay() {
+        if (!this.gridOverlay) return;
+        
+        if (AppState.showGrid) {
+            const spacing = AppState.gridSize || 5;
+            const charW = this.charWidth;
+            const charH = this.charHeight;
+            const dotSize = Math.max(1, Math.min(charW, charH) * 0.12);
+            
+            // Position grid over content area (inside padding/border)
+            const cs = this.element ? getComputedStyle(this.element) : null;
+            const padL = cs ? parseFloat(cs.paddingLeft) || 0 : 16;
+            const padT = cs ? parseFloat(cs.paddingTop) || 0 : 16;
+            const borderL = cs ? parseFloat(cs.borderLeftWidth) || 0 : 1;
+            const borderT = cs ? parseFloat(cs.borderTopWidth) || 0 : 1;
+            
+            // Create SVG pattern for grid dots
+            const cellW = spacing * charW;
+            const cellH = spacing * charH;
+            
+            // Content dimensions
+            const contentW = AppState.canvasWidth * charW;
+            const contentH = AppState.canvasHeight * charH;
+            
+            this.gridOverlay.style.left = `${borderL + padL}px`;
+            this.gridOverlay.style.top = `${borderT + padT}px`;
+            this.gridOverlay.style.width = `${contentW}px`;
+            this.gridOverlay.style.height = `${contentH}px`;
+            this.gridOverlay.style.backgroundImage = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${cellW}' height='${cellH}'%3E%3Ccircle cx='${charW/2}' cy='${charH/2}' r='${dotSize}' fill='%23888'/%3E%3C/svg%3E")`;
+            this.gridOverlay.style.backgroundSize = `${cellW}px ${cellH}px`;
+            this.gridOverlay.style.display = 'block';
+        } else {
+            this.gridOverlay.style.display = 'none';
+        }
+    }
+
     /**
      * Resize the canvas
      * @param {number} width 
@@ -3703,7 +3757,7 @@ class AsciiCanvasRenderer extends EventEmitter {
         AppState.canvasHeight = height;
         this.render();
     }
-    
+
     /**
      * Get buffer as string
      * @returns {string}
@@ -6984,12 +7038,17 @@ class Asciistrator extends EventEmitter {
     
     _setupCharacterPalette() {
         // Setup character grids in the Chars panel
+        // Full printable ASCII (32-126)
+        const asciiPrintable = ' !"#$%&\'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~';
+        
         const charGrids = {
-            'chars-box': '─│┌┐└┘├┤┬┴┼═║╔╗╚╝╠╣╦╩╬╭╮╰╯━┃┏┓┗┛┣┫┳┻╋',
-            'chars-blocks': '█▓▒░▀▄▌▐▖▗▘▝■□▪▫◼◻',
-            'chars-arrows': '←↑→↓↔↕↖↗↘↙⇐⇑⇒⇓⇔⇕◀▲▶▼◁△▷▽',
-            'chars-shapes': '●○◐◑◒◓◔◕◖◗◆◇◈❖★☆✦✧✩✪✫✬',
-            'chars-math': '±×÷≠≤≥≈∞∑∏√∫∂∆∇∈∉∪∩⊂⊃'
+            'chars-ascii': asciiPrintable,
+            'chars-box': '─│┌┐└┘├┤┬┴┼═║╔╗╚╝╠╣╦╩╬╭╮╰╯━┃┏┓┗┛┣┫┳┻╋┄┆┈┊',
+            'chars-blocks': '█▓▒░▀▄▌▐▖▗▘▝▙▛▜▟■□▪▫◼◻⬛⬜',
+            'chars-arrows': '←↑→↓↔↕↖↗↘↙⇐⇑⇒⇓⇔⇕◀▲▶▼◁△▷▽◂▴▸▾‹›«»',
+            'chars-shapes': '●○◐◑◒◓◔◕◖◗◆◇◈❖★☆✦✧✩✪✫✬♠♣♥♦♡',
+            'chars-math': '±−×÷≠≤≥≈≡∞∑∏√∫∂∆∇∀∃∈∉∪∩⊂⊃∧∨¬πθφωαβγσμλ',
+            'chars-misc': '·•°†‡§¶©®™¢£¥€¤¦¨ª¬¯²³µ¹º¼½¾¿÷'
         };
         
         Object.entries(charGrids).forEach(([id, chars]) => {
@@ -6999,7 +7058,7 @@ class Asciistrator extends EventEmitter {
                 chars.split('').forEach(char => {
                     const btn = createElement('button', {
                         class: 'char-btn',
-                        title: `Character: ${char}`,
+                        title: `Character: ${char} (U+${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')})`,
                         onClick: () => {
                             AppState.strokeChar = char;
                             $$('.char-btn.active').forEach(b => b.classList.remove('active'));
