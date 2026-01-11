@@ -28,6 +28,7 @@ import { ditherToAscii, bayerDither, floydSteinbergDither } from './core/ascii/d
 import { EventEmitter, globalEventBus } from './utils/events.js';
 import { $, $$, createElement, domReady, getMousePos, debounce, throttle } from './utils/dom.js';
 import { clamp, uniqueId, uuid, deepClone, hexToRgb, rgbToHex } from './utils/helpers.js';
+import { componentLibraryManager, Component, ComponentLibrary } from './components/ComponentLibrary.js';
 
 // ==========================================
 // SPATIAL INDEXING - QUADTREE
@@ -6185,6 +6186,8 @@ class Asciistrator extends EventEmitter {
             { type: 'separator' },
             { label: 'Group', action: () => this.groupSelected(), shortcut: 'Ctrl+G' },
             { label: 'Ungroup', action: () => this.ungroupSelected(), shortcut: 'Ctrl+Shift+G' },
+            { type: 'separator' },
+            { label: 'Create Component...', action: () => this._showCreateComponentDialog() },
         ];
         
         // Handle right-click on canvas
@@ -6765,6 +6768,8 @@ class Asciistrator extends EventEmitter {
                 { type: 'separator' },
                 { label: 'Bring to Front', action: 'bring-front' },
                 { label: 'Send to Back', action: 'send-back' },
+                { type: 'separator' },
+                { label: 'Create Component...', action: 'create-component' },
             ],
             charts: [
                 { label: 'Insert Bar Chart', action: 'chart-bar' },
@@ -6782,6 +6787,7 @@ class Asciistrator extends EventEmitter {
             window: [
                 { label: 'Layers Panel', action: 'panel-layers' },
                 { label: 'Properties Panel', action: 'panel-properties' },
+                { label: 'Components Panel', action: 'panel-components' },
                 { label: 'Characters Panel', action: 'panel-chars' },
             ],
             help: [
@@ -6950,6 +6956,9 @@ class Asciistrator extends EventEmitter {
             case 'send-back':
                 this.sendToBack();
                 break;
+            case 'create-component':
+                this._showCreateComponentDialog();
+                break;
             // Charts
             case 'chart-bar':
                 this.insertChart('bar');
@@ -6983,6 +6992,9 @@ class Asciistrator extends EventEmitter {
             case 'panel-properties':
                 this.togglePanel('properties');
                 break;
+            case 'panel-components':
+                this.togglePanel('components');
+                break;
             case 'panel-chars':
                 this.togglePanel('chars');
                 break;
@@ -7011,6 +7023,9 @@ class Asciistrator extends EventEmitter {
         
         // Layers panel
         this._setupLayersPanel();
+        
+        // Components panel
+        this._setupComponentsPanel();
     }
     
     _setupPanelTabs() {
@@ -8014,6 +8029,672 @@ class Asciistrator extends EventEmitter {
         });
     }
     
+    // ==========================================
+    // COMPONENTS PANEL
+    // ==========================================
+    
+    _setupComponentsPanel() {
+        const self = this;
+        
+        // Initialize component library manager
+        componentLibraryManager.init();
+        
+        // Render initial library list
+        this._renderComponentLibraries();
+        
+        // Setup search
+        const searchInput = $('#component-search');
+        if (searchInput) {
+            searchInput.addEventListener('input', debounce((e) => {
+                const query = e.target.value.trim();
+                if (query) {
+                    this._renderComponentSearchResults(query);
+                } else {
+                    this._renderComponentLibraries();
+                }
+            }, 200));
+        }
+        
+        // Create component button
+        const createBtn = $('#btn-create-component');
+        if (createBtn) {
+            createBtn.addEventListener('click', () => {
+                this._showCreateComponentDialog();
+            });
+        }
+        
+        // Import library button
+        const importBtn = $('#btn-import-library');
+        if (importBtn) {
+            importBtn.addEventListener('click', () => {
+                this._importComponentLibrary();
+            });
+        }
+        
+        // New library button
+        const newLibBtn = $('#btn-new-library');
+        if (newLibBtn) {
+            newLibBtn.addEventListener('click', () => {
+                this._showCreateLibraryDialog();
+            });
+        }
+        
+        // Setup drag and drop on viewport
+        this._setupComponentDragDrop();
+        
+        // Listen for library manager events
+        componentLibraryManager.on('libraryAdded', () => this._renderComponentLibraries());
+        componentLibraryManager.on('libraryRemoved', () => this._renderComponentLibraries());
+        componentLibraryManager.on('componentAdded', () => this._renderComponentLibraries());
+        componentLibraryManager.on('librariesImported', () => this._renderComponentLibraries());
+    }
+    
+    _renderComponentLibraries() {
+        const container = $('#component-libraries');
+        if (!container) return;
+        
+        container.innerHTML = '';
+        
+        const libraries = componentLibraryManager.getAllLibraries();
+        
+        for (const library of libraries) {
+            const libEl = this._createLibraryElement(library);
+            container.appendChild(libEl);
+        }
+    }
+    
+    _createLibraryElement(library) {
+        const libDiv = createElement('div', {
+            class: `component-library${library.isExpanded ? ' expanded' : ''}`,
+            'data-library-id': library.id
+        });
+        
+        // Header
+        const header = createElement('div', { class: 'component-library-header' });
+        header.innerHTML = `
+            <span class="component-library-expand">▶</span>
+            <span class="component-library-icon">${library.icon}</span>
+            <span class="component-library-name">${library.name}</span>
+            <span class="component-library-count">${library.components.size}</span>
+            <div class="component-library-actions">
+                ${!library.isBuiltIn ? `
+                    <button class="icon-btn small" title="Export Library">📤</button>
+                    <button class="icon-btn small" title="Delete Library">🗑</button>
+                ` : ''}
+            </div>
+        `;
+        
+        // Toggle expand
+        header.addEventListener('click', (e) => {
+            if (e.target.closest('.component-library-actions')) return;
+            library.isExpanded = !library.isExpanded;
+            libDiv.classList.toggle('expanded');
+        });
+        
+        // Export button
+        const exportBtn = header.querySelector('[title="Export Library"]');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._exportLibrary(library);
+            });
+        }
+        
+        // Delete button
+        const deleteBtn = header.querySelector('[title="Delete Library"]');
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (confirm(`Delete library "${library.name}"?`)) {
+                    componentLibraryManager.removeLibrary(library.id);
+                }
+            });
+        }
+        
+        libDiv.appendChild(header);
+        
+        // Content
+        const content = createElement('div', { class: 'component-library-content' });
+        
+        // Group components by category
+        const categories = library.getCategories();
+        for (const category of categories) {
+            const components = library.getComponentsByCategory(category);
+            if (components.length === 0) continue;
+            
+            const categoryDiv = createElement('div', { class: 'component-category' });
+            categoryDiv.innerHTML = `<div class="component-category-header">${category}</div>`;
+            
+            const grid = createElement('div', { class: 'component-grid' });
+            
+            for (const component of components) {
+                const compEl = this._createComponentElement(component, library);
+                grid.appendChild(compEl);
+            }
+            
+            categoryDiv.appendChild(grid);
+            content.appendChild(categoryDiv);
+        }
+        
+        libDiv.appendChild(content);
+        
+        return libDiv;
+    }
+    
+    _createComponentElement(component, library) {
+        const compDiv = createElement('div', {
+            class: 'component-item',
+            'data-component-id': component.id,
+            'data-library-id': library.id,
+            draggable: 'true',
+            title: component.description || component.name
+        });
+        
+        // Use preview if available, otherwise icon
+        if (component.preview) {
+            compDiv.innerHTML = `
+                <div class="component-preview">${this._escapeHtml(component.preview)}</div>
+                <span class="component-name">${component.name}</span>
+            `;
+        } else {
+            compDiv.innerHTML = `
+                <span class="component-icon">${component.icon}</span>
+                <span class="component-name">${component.name}</span>
+            `;
+        }
+        
+        // Drag start
+        compDiv.addEventListener('dragstart', (e) => {
+            e.dataTransfer.setData('application/x-asciistrator-component', JSON.stringify({
+                componentId: component.id,
+                libraryId: library.id
+            }));
+            e.dataTransfer.effectAllowed = 'copy';
+            compDiv.classList.add('dragging');
+            
+            // Create custom drag image
+            const ghost = createElement('div', { class: 'component-drag-ghost' });
+            ghost.textContent = component.preview || component.name;
+            document.body.appendChild(ghost);
+            e.dataTransfer.setDragImage(ghost, 0, 0);
+            
+            // Clean up ghost after drag
+            setTimeout(() => ghost.remove(), 0);
+        });
+        
+        compDiv.addEventListener('dragend', () => {
+            compDiv.classList.remove('dragging');
+        });
+        
+        // Double-click to insert at center
+        compDiv.addEventListener('dblclick', () => {
+            this._insertComponentAtCenter(component);
+        });
+        
+        return compDiv;
+    }
+    
+    _setupComponentDragDrop() {
+        const viewport = $('#viewport');
+        if (!viewport) return;
+        
+        viewport.addEventListener('dragover', (e) => {
+            if (e.dataTransfer.types.includes('application/x-asciistrator-component')) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'copy';
+            }
+        });
+        
+        viewport.addEventListener('drop', (e) => {
+            const data = e.dataTransfer.getData('application/x-asciistrator-component');
+            if (!data) return;
+            
+            e.preventDefault();
+            
+            try {
+                const { componentId, libraryId } = JSON.parse(data);
+                const library = componentLibraryManager.getLibrary(libraryId);
+                if (!library) return;
+                
+                const component = library.getComponent(componentId);
+                if (!component) return;
+                
+                // Convert drop position to canvas coordinates
+                const pos = this.renderer.pointerToCanvas(e);
+                
+                // Insert component at drop position
+                this._insertComponent(component, pos.x, pos.y);
+                
+            } catch (error) {
+                console.error('Failed to drop component:', error);
+            }
+        });
+    }
+    
+    _insertComponent(component, x, y) {
+        this.saveStateForUndo();
+        
+        // Instantiate component objects at position
+        const objectDefs = component.instantiate(x, y);
+        
+        for (const objDef of objectDefs) {
+            const obj = this._createObjectFromDefinition(objDef);
+            if (obj) {
+                this.addObject(obj);
+            }
+        }
+        
+        this._updateStatus(`Inserted: ${component.name}`);
+    }
+    
+    _insertComponentAtCenter(component) {
+        // Calculate center of visible viewport
+        const viewportWidth = AppState.canvasWidth;
+        const viewportHeight = AppState.canvasHeight;
+        
+        const x = Math.floor(viewportWidth / 2 - component.width / 2);
+        const y = Math.floor(viewportHeight / 2 - component.height / 2);
+        
+        this._insertComponent(component, x, y);
+    }
+    
+    _createObjectFromDefinition(def) {
+        // Create scene object from definition
+        switch (def.type) {
+            case 'rectangle':
+                const rect = new RectangleObject(def.x, def.y, def.width, def.height);
+                rect.lineStyle = def.borderStyle || def.lineStyle || 'single';
+                rect.fillChar = def.fillChar;
+                if (def.name) rect.name = def.name;
+                return rect;
+                
+            case 'ellipse':
+                const ellipse = new EllipseObject(def.x, def.y, def.radiusX, def.radiusY);
+                if (def.name) ellipse.name = def.name;
+                return ellipse;
+                
+            case 'line':
+                const line = new LineObject(def.x1, def.y1, def.x2, def.y2);
+                line.lineStyle = def.lineStyle || 'single';
+                if (def.name) line.name = def.name;
+                return line;
+                
+            case 'text':
+                const text = new TextObject(def.x, def.y, def.text);
+                if (def.name) text.name = def.name;
+                return text;
+                
+            case 'ascii-text':
+                const asciiText = new AsciiTextObject(def.x, def.y, def.text);
+                if (def.name) asciiText.name = def.name;
+                return asciiText;
+                
+            case 'polygon':
+                const polygon = new PolygonObject(def.cx, def.cy, def.radius, def.sides);
+                if (def.name) polygon.name = def.name;
+                return polygon;
+                
+            case 'star':
+                const star = new StarObject(def.cx, def.cy, def.outerRadius, def.points);
+                if (def.name) star.name = def.name;
+                return star;
+                
+            case 'table':
+                const table = new TableObject(def.x, def.y, def.width, def.height, def.cols, def.rows);
+                if (def.name) table.name = def.name;
+                return table;
+                
+            case 'chart':
+                const chart = new ChartObject(def.x, def.y, def.width, def.height);
+                chart.chartType = def.chartType || 'bar';
+                if (def.data) chart.data = def.data;
+                if (def.name) chart.name = def.name;
+                return chart;
+                
+            // Flowchart shapes
+            case 'terminal-shape':
+                const terminal = new TerminalShape(def.x, def.y, def.width, def.height);
+                terminal.label = def.label || '';
+                if (def.name) terminal.name = def.name;
+                return terminal;
+                
+            case 'process-shape':
+                const process = new ProcessShape(def.x, def.y, def.width, def.height);
+                process.label = def.label || '';
+                if (def.name) process.name = def.name;
+                return process;
+                
+            case 'decision-shape':
+                const decision = new DecisionShape(def.x, def.y, def.width, def.height);
+                decision.label = def.label || '';
+                if (def.name) decision.name = def.name;
+                return decision;
+                
+            case 'io-shape':
+                const io = new IOShape(def.x, def.y, def.width, def.height);
+                io.label = def.label || '';
+                if (def.name) io.name = def.name;
+                return io;
+                
+            case 'document-shape':
+                const doc = new DocumentShape(def.x, def.y, def.width, def.height);
+                doc.label = def.label || '';
+                if (def.name) doc.name = def.name;
+                return doc;
+                
+            case 'database-shape':
+                const db = new DatabaseShape(def.x, def.y, def.width, def.height);
+                db.label = def.label || '';
+                if (def.name) db.name = def.name;
+                return db;
+                
+            case 'subprocess-shape':
+                const subprocess = new SubprocessShape(def.x, def.y, def.width, def.height);
+                subprocess.label = def.label || '';
+                if (def.name) subprocess.name = def.name;
+                return subprocess;
+                
+            case 'connector-circle':
+                const connector = new ConnectorCircleShape(def.x, def.y);
+                connector.label = def.label || '';
+                if (def.name) connector.name = def.name;
+                return connector;
+                
+            default:
+                // Try to create a text object for unknown types
+                if (def.text) {
+                    return new TextObject(def.x || 0, def.y || 0, def.text);
+                }
+                console.warn('Unknown object type:', def.type);
+                return null;
+        }
+    }
+    
+    _renderComponentSearchResults(query) {
+        const container = $('#component-libraries');
+        if (!container) return;
+        
+        const results = componentLibraryManager.searchComponents(query);
+        
+        container.innerHTML = '';
+        
+        if (results.length === 0) {
+            container.innerHTML = '<div class="no-results">No components found</div>';
+            return;
+        }
+        
+        const resultsDiv = createElement('div', { class: 'component-search-results' });
+        resultsDiv.innerHTML = `<div class="component-category-header">Search Results (${results.length})</div>`;
+        
+        const grid = createElement('div', { class: 'component-grid' });
+        
+        for (const { component, library } of results) {
+            const compEl = this._createComponentElement(component, library);
+            grid.appendChild(compEl);
+        }
+        
+        resultsDiv.appendChild(grid);
+        container.appendChild(resultsDiv);
+    }
+    
+    _showCreateComponentDialog() {
+        if (AppState.selectedObjects.length === 0) {
+            this._updateStatus('Select objects to create a component');
+            return;
+        }
+        
+        const userLibraries = componentLibraryManager.getAllLibraries().filter(l => !l.isBuiltIn);
+        
+        // If no user libraries exist, create one first
+        if (userLibraries.length === 0) {
+            const newLib = componentLibraryManager.createLibrary('My Components', {
+                icon: '📁',
+                description: 'Custom components'
+            });
+            userLibraries.push(newLib);
+        }
+        
+        const dialogHtml = `
+            <div class="create-component-form">
+                <div class="form-group">
+                    <label>Name</label>
+                    <input type="text" id="comp-name" placeholder="Component name" required>
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="comp-description" placeholder="Optional description"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Category</label>
+                    <input type="text" id="comp-category" placeholder="General" value="General">
+                </div>
+                <div class="form-group">
+                    <label>Icon</label>
+                    <input type="text" id="comp-icon" placeholder="📦" value="📦" maxlength="2">
+                </div>
+                <div class="form-group">
+                    <label>Tags (comma-separated)</label>
+                    <input type="text" id="comp-tags" placeholder="tag1, tag2">
+                </div>
+                <div class="form-group">
+                    <label>Library</label>
+                    <div class="library-select-wrapper">
+                        <select id="comp-library">
+                            ${userLibraries.map(l => `<option value="${l.id}">${l.name}</option>`).join('')}
+                        </select>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        this._showDialog('Create Component', dialogHtml, [
+            {
+                label: 'Cancel',
+                action: () => {}
+            },
+            {
+                label: 'Create',
+                primary: true,
+                action: () => {
+                    const name = $('#comp-name').value.trim();
+                    if (!name) {
+                        this._updateStatus('Component name is required');
+                        return false;
+                    }
+                    
+                    const description = $('#comp-description').value.trim();
+                    const category = $('#comp-category').value.trim() || 'General';
+                    const icon = $('#comp-icon').value.trim() || '📦';
+                    const tags = $('#comp-tags').value.split(',').map(t => t.trim()).filter(Boolean);
+                    const libraryId = $('#comp-library').value;
+                    
+                    // Create component from selected objects
+                    const component = componentLibraryManager.createComponentFromObjects(
+                        AppState.selectedObjects,
+                        { name, description, category, icon, tags }
+                    );
+                    
+                    // Add to library
+                    componentLibraryManager.addComponentToLibrary(component, libraryId);
+                    
+                    this._updateStatus(`Created component: ${name}`);
+                    this._renderComponentLibraries();
+                    
+                    return true;
+                }
+            }
+        ]);
+        
+        // Focus name input
+        setTimeout(() => $('#comp-name')?.focus(), 100);
+    }
+    
+    _showCreateLibraryDialog() {
+        const dialogHtml = `
+            <div class="create-component-form">
+                <div class="form-group">
+                    <label>Library Name</label>
+                    <input type="text" id="lib-name" placeholder="My Library" required>
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="lib-description" placeholder="Optional description"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Icon</label>
+                    <input type="text" id="lib-icon" placeholder="📁" value="📁" maxlength="2">
+                </div>
+            </div>
+        `;
+        
+        this._showDialog('Create Library', dialogHtml, [
+            {
+                label: 'Cancel',
+                action: () => {}
+            },
+            {
+                label: 'Create',
+                primary: true,
+                action: () => {
+                    const name = $('#lib-name').value.trim();
+                    if (!name) {
+                        this._updateStatus('Library name is required');
+                        return false;
+                    }
+                    
+                    const description = $('#lib-description').value.trim();
+                    const icon = $('#lib-icon').value.trim() || '📁';
+                    
+                    componentLibraryManager.createLibrary(name, { description, icon });
+                    
+                    this._updateStatus(`Created library: ${name}`);
+                    this._renderComponentLibraries();
+                    
+                    return true;
+                }
+            }
+        ]);
+        
+        setTimeout(() => $('#lib-name')?.focus(), 100);
+    }
+    
+    _importComponentLibrary() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        
+        input.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            try {
+                const text = await file.text();
+                const imported = componentLibraryManager.importLibraries(text);
+                this._updateStatus(`Imported ${imported.length} library(s)`);
+            } catch (error) {
+                this._updateStatus(`Import failed: ${error.message}`);
+            }
+        });
+        
+        input.click();
+    }
+    
+    _exportLibrary(library) {
+        const json = componentLibraryManager.exportLibraries([library.id]);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${library.name.toLowerCase().replace(/\s+/g, '-')}-library.json`;
+        a.click();
+        
+        URL.revokeObjectURL(url);
+        this._updateStatus(`Exported: ${library.name}`);
+    }
+    
+    _escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    /**
+     * Show a dialog with custom content and buttons
+     * @param {string} title - Dialog title
+     * @param {string} contentHtml - HTML content for dialog body
+     * @param {Array} buttons - Array of button objects: { label, action, primary }
+     */
+    _showDialog(title, contentHtml, buttons = []) {
+        const container = $('#dialogs');
+        if (!container) return;
+        
+        // Create backdrop
+        const backdrop = createElement('div', { class: 'dialog-backdrop' });
+        
+        // Create dialog
+        const dialog = createElement('div', { class: 'dialog' });
+        
+        // Header
+        const header = createElement('div', { class: 'dialog-header' });
+        header.innerHTML = `
+            <span class="dialog-title">${title}</span>
+            <button class="dialog-close" title="Close">✕</button>
+        `;
+        
+        // Content
+        const content = createElement('div', { class: 'dialog-content' });
+        content.innerHTML = contentHtml;
+        
+        // Footer with buttons
+        const footer = createElement('div', { class: 'dialog-footer' });
+        const btnGroup = createElement('div', { class: 'btn-group' });
+        
+        for (const btn of buttons) {
+            const button = createElement('button', {
+                class: `btn ${btn.primary ? 'btn-primary' : 'btn-secondary'}`
+            }, btn.label);
+            
+            button.addEventListener('click', () => {
+                const result = btn.action();
+                if (result !== false) {
+                    backdrop.remove();
+                }
+            });
+            
+            btnGroup.appendChild(button);
+        }
+        
+        footer.appendChild(btnGroup);
+        
+        // Assemble dialog
+        dialog.appendChild(header);
+        dialog.appendChild(content);
+        dialog.appendChild(footer);
+        backdrop.appendChild(dialog);
+        
+        // Close handlers
+        const closeBtn = header.querySelector('.dialog-close');
+        closeBtn.addEventListener('click', () => backdrop.remove());
+        
+        backdrop.addEventListener('click', (e) => {
+            if (e.target === backdrop) backdrop.remove();
+        });
+        
+        // Escape key to close
+        const escHandler = (e) => {
+            if (e.key === 'Escape') {
+                backdrop.remove();
+                document.removeEventListener('keydown', escHandler);
+            }
+        };
+        document.addEventListener('keydown', escHandler);
+        
+        container.appendChild(backdrop);
+        
+        return backdrop;
+    }
+    
     _drawDemoContent() {
         // Create demo SceneObjects to show the capabilities
         
@@ -8023,6 +8704,7 @@ class Asciistrator extends EventEmitter {
         title1.text = '╔══════════════════════════════════════════════════════════════════════╗';
         title1.name = 'Title Top';
         this.addObject(title1);
+        
         
         const title2 = new TextObject();
         title2.x = 5; title2.y = 2;
@@ -9135,6 +9817,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         const panelMap = {
             'layers': 'panel-layers',
             'properties': 'panel-properties',
+            'components': 'panel-components',
             'chars': 'panel-chars'
         };
         
