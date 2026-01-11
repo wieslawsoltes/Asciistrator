@@ -1287,6 +1287,7 @@ class PathObject extends SceneObject {
     constructor() {
         super('path');
         this.points = []; // Array of {x, y}
+        this.brushSize = 0; // 0 = thin line, >0 = brush with radius
     }
     
     addPoint(x, y) {
@@ -1304,11 +1305,14 @@ class PathObject extends SceneObject {
         let minX = Infinity, minY = Infinity;
         let maxX = -Infinity, maxY = -Infinity;
         
+        // Account for brush size in bounds calculation
+        const padding = this.brushSize || 0;
+        
         for (const p of this.points) {
-            minX = Math.min(minX, p.x);
-            minY = Math.min(minY, p.y);
-            maxX = Math.max(maxX, p.x);
-            maxY = Math.max(maxY, p.y);
+            minX = Math.min(minX, p.x - padding);
+            minY = Math.min(minY, p.y - padding);
+            maxX = Math.max(maxX, p.x + padding);
+            maxY = Math.max(maxY, p.y + padding);
         }
         
         this.x = minX;
@@ -1331,10 +1335,12 @@ class PathObject extends SceneObject {
         // Check if point is near any segment of the path
         if (this.points.length === 0) return false;
         
+        const hitRadius = Math.max(1.5, this.brushSize || 0);
+        
         // Single point
         if (this.points.length === 1) {
             const p = this.points[0];
-            return Math.abs(px - p.x) <= 1 && Math.abs(py - p.y) <= 1;
+            return Math.abs(px - p.x) <= hitRadius && Math.abs(py - p.y) <= hitRadius;
         }
         
         // Check distance to each line segment
@@ -1342,7 +1348,7 @@ class PathObject extends SceneObject {
             const p1 = this.points[i - 1];
             const p2 = this.points[i];
             const dist = this._pointToSegmentDistance(px, py, p1.x, p1.y, p2.x, p2.y);
-            if (dist <= 1.5) return true;
+            if (dist <= hitRadius) return true;
         }
         return false;
     }
@@ -1375,23 +1381,72 @@ class PathObject extends SceneObject {
     render(buffer) {
         if (!this.visible || this.points.length === 0) return;
         
-        for (let i = 0; i < this.points.length; i++) {
-            const p = this.points[i];
-            if (i > 0) {
-                const prev = this.points[i - 1];
-                drawLine(buffer, prev.x, prev.y, p.x, p.y, {
-                    char: this.strokeChar,
-                    color: this.strokeColor
-                });
+        const brushSize = this.brushSize || 0;
+        
+        if (brushSize > 0) {
+            // Brush mode: draw filled circles along the path
+            for (let i = 0; i < this.points.length; i++) {
+                const p = this.points[i];
+                
+                // Draw filled circle at each point
+                this._drawBrushPoint(buffer, p.x, p.y, brushSize);
+                
+                // Fill in between consecutive points for smooth stroke
+                if (i > 0) {
+                    const prev = this.points[i - 1];
+                    this._drawBrushLine(buffer, prev.x, prev.y, p.x, p.y, brushSize);
+                }
             }
-            buffer.setChar(p.x, p.y, this.strokeChar, this.strokeColor);
+        } else {
+            // Thin line mode: draw simple lines
+            for (let i = 0; i < this.points.length; i++) {
+                const p = this.points[i];
+                if (i > 0) {
+                    const prev = this.points[i - 1];
+                    drawLine(buffer, prev.x, prev.y, p.x, p.y, {
+                        char: this.strokeChar,
+                        color: this.strokeColor
+                    });
+                }
+                buffer.setChar(p.x, p.y, this.strokeChar, this.strokeColor);
+            }
+        }
+    }
+    
+    _drawBrushPoint(buffer, x, y, size) {
+        // Draw a filled circle at the position
+        for (let dy = -size; dy <= size; dy++) {
+            for (let dx = -size; dx <= size; dx++) {
+                if (dx * dx + dy * dy <= size * size) {
+                    buffer.setChar(x + dx, y + dy, this.strokeChar, this.strokeColor);
+                }
+            }
+        }
+    }
+    
+    _drawBrushLine(buffer, x1, y1, x2, y2, size) {
+        // Draw brush points along the line for smooth coverage
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        if (dist < 1) return;
+        
+        // Step along the line, drawing brush points
+        const steps = Math.ceil(dist);
+        for (let i = 1; i < steps; i++) {
+            const t = i / steps;
+            const x = Math.round(x1 + dx * t);
+            const y = Math.round(y1 + dy * t);
+            this._drawBrushPoint(buffer, x, y, size);
         }
     }
     
     toJSON() {
         return {
             ...super.toJSON(),
-            points: this.points
+            points: this.points,
+            brushSize: this.brushSize
         };
     }
 }
@@ -3267,7 +3322,8 @@ class AsciiCanvasRenderer extends EventEmitter {
         // Track pointer
         this.activePointers.set(event.pointerId, {
             x: event.clientX,
-            y: event.clientY
+            y: event.clientY,
+            pointerType: event.pointerType
         });
         
         // Capture pointer for reliable tracking
@@ -3276,18 +3332,22 @@ class AsciiCanvasRenderer extends EventEmitter {
         // Check for pan mode (middle mouse button, space+click, or two-finger touch)
         const isPanButton = event.button === 1; // Middle mouse
         const isSpacePan = event.button === 0 && this._spacePressed;
+        const isTwoFingerTouch = this.activePointers.size === 2;
         
-        if (isPanButton || isSpacePan || this.activePointers.size === 2) {
+        if (isPanButton || isSpacePan || isTwoFingerTouch) {
             this.isPanning = true;
             this.panStartX = event.clientX;
             this.panStartY = event.clientY;
             this.panStartPanX = this.panX;
             this.panStartPanY = this.panY;
             
-            if (this.activePointers.size === 2) {
+            if (isTwoFingerTouch) {
                 // Setup for pinch-to-zoom
                 const pointers = Array.from(this.activePointers.values());
                 this.lastPinchDistance = this._getDistance(pointers[0], pointers[1]);
+                // Calculate initial center for panning
+                this.panStartX = (pointers[0].x + pointers[1].x) / 2;
+                this.panStartY = (pointers[0].y + pointers[1].y) / 2;
             }
             
             this.viewport.classList.add('panning');
@@ -3295,10 +3355,17 @@ class AsciiCanvasRenderer extends EventEmitter {
             return;
         }
         
-        // Regular drawing interaction
-        if (event.button === 0 || event.button === 2) {
+        // Regular drawing/selection interaction (single touch or mouse click)
+        // Touch events have button=0, pointerType='touch'
+        const isLeftClick = event.button === 0;
+        const isRightClick = event.button === 2;
+        const isTouch = event.pointerType === 'touch';
+        
+        if (isLeftClick || isRightClick || isTouch) {
             const pos = this.pointerToCanvas(event);
-            this.emit('mousedown', { ...pos, button: event.button, event });
+            // For touch, treat as left click (button 0)
+            const button = isTouch ? 0 : event.button;
+            this.emit('mousedown', { ...pos, button, event, isTouch });
         }
     }
     
@@ -3308,9 +3375,11 @@ class AsciiCanvasRenderer extends EventEmitter {
     _onPointerMove(event) {
         // Update tracked pointer position
         if (this.activePointers.has(event.pointerId)) {
+            const existing = this.activePointers.get(event.pointerId);
             this.activePointers.set(event.pointerId, {
                 x: event.clientX,
-                y: event.clientY
+                y: event.clientY,
+                pointerType: existing?.pointerType || event.pointerType
             });
         }
         
@@ -3351,7 +3420,7 @@ class AsciiCanvasRenderer extends EventEmitter {
                 this.panStartPanX = this.panX;
                 this.panStartPanY = this.panY;
             } else {
-                // Single pointer pan
+                // Single pointer pan (only for space+drag or middle mouse, not touch)
                 const deltaX = event.clientX - this.panStartX;
                 const deltaY = event.clientY - this.panStartY;
                 
@@ -3363,11 +3432,12 @@ class AsciiCanvasRenderer extends EventEmitter {
             return;
         }
         
-        // Regular drawing interaction
+        // Regular drawing/selection interaction
         const pos = this.pointerToCanvas(event);
         this.cursorX = pos.x;
         this.cursorY = pos.y;
-        this.emit('mousemove', { ...pos, event });
+        const isTouch = event.pointerType === 'touch';
+        this.emit('mousemove', { ...pos, event, isTouch });
         this._updateStatusBar();
     }
     
@@ -3382,6 +3452,10 @@ class AsciiCanvasRenderer extends EventEmitter {
             // Ignore errors if pointer was never captured
         }
         
+        // Get pointer info before removing
+        const pointerInfo = this.activePointers.get(event.pointerId);
+        const isTouch = pointerInfo?.pointerType === 'touch' || event.pointerType === 'touch';
+        
         // Remove from tracked pointers
         this.activePointers.delete(event.pointerId);
         
@@ -3389,14 +3463,19 @@ class AsciiCanvasRenderer extends EventEmitter {
             if (this.activePointers.size === 0) {
                 this.isPanning = false;
                 this.viewport.classList.remove('panning');
+            } else if (this.activePointers.size === 1) {
+                // Went from 2 fingers to 1, stop panning but don't start drawing
+                this.isPanning = false;
+                this.viewport.classList.remove('panning');
             }
             this.lastPinchDistance = 0;
             return;
         }
         
-        // Regular drawing interaction
+        // Regular drawing/selection interaction
         const pos = this.pointerToCanvas(event);
-        this.emit('mouseup', { ...pos, button: event.button, event });
+        const button = isTouch ? 0 : event.button;
+        this.emit('mouseup', { ...pos, button, event, isTouch });
     }
     
     /**
@@ -6159,6 +6238,9 @@ class Asciistrator extends EventEmitter {
         // Setup rulers
         this._setupRulers();
         
+        // Setup mobile UI
+        this._setupMobileUI();
+        
         this.initialized = true;
         console.log('✅ Asciistrator initialized');
         
@@ -6194,12 +6276,58 @@ class Asciistrator extends EventEmitter {
                 e.preventDefault();
                 this._showContextMenu(e.clientX, e.clientY, menuItems);
             });
+            
+            // Long press for touch devices (context menu alternative)
+            let longPressTimer = null;
+            let longPressTriggered = false;
+            const LONG_PRESS_DURATION = 500; // ms
+            
+            viewport.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) {
+                    longPressTriggered = false;
+                    const touch = e.touches[0];
+                    longPressTimer = setTimeout(() => {
+                        longPressTriggered = true;
+                        this._showContextMenu(touch.clientX, touch.clientY, menuItems);
+                        // Vibrate if supported
+                        if (navigator.vibrate) {
+                            navigator.vibrate(50);
+                        }
+                    }, LONG_PRESS_DURATION);
+                }
+            }, { passive: true });
+            
+            viewport.addEventListener('touchmove', () => {
+                if (longPressTimer) {
+                    clearTimeout(longPressTimer);
+                    longPressTimer = null;
+                }
+            }, { passive: true });
+            
+            viewport.addEventListener('touchend', (e) => {
+                if (longPressTimer) {
+                    clearTimeout(longPressTimer);
+                    longPressTimer = null;
+                }
+                // Prevent click if long press was triggered
+                if (longPressTriggered) {
+                    e.preventDefault();
+                    longPressTriggered = false;
+                }
+            });
         }
         
         // Close context menu on click anywhere
         document.addEventListener('click', () => {
             contextMenu.classList.add('hidden');
         });
+        
+        // Close on touch outside
+        document.addEventListener('touchstart', (e) => {
+            if (!contextMenu.contains(e.target) && !contextMenu.classList.contains('hidden')) {
+                contextMenu.classList.add('hidden');
+            }
+        }, { passive: true });
         
         // Close on escape
         document.addEventListener('keydown', (e) => {
@@ -6381,6 +6509,163 @@ class Asciistrator extends EventEmitter {
         element.innerHTML = html;
     }
     
+    /**
+     * Setup mobile UI toggles and event handlers
+     */
+    _setupMobileUI() {
+        // Mobile menu toggle
+        const mobileMenuToggle = $('#mobile-menu-toggle');
+        const menuItems = document.querySelector('.menu-items');
+        
+        if (mobileMenuToggle && menuItems) {
+            mobileMenuToggle.addEventListener('click', (e) => {
+                e.stopPropagation();
+                menuItems.classList.toggle('open');
+                mobileMenuToggle.classList.toggle('active');
+            });
+            
+            // Close menu when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!menuItems.contains(e.target) && !mobileMenuToggle.contains(e.target)) {
+                    menuItems.classList.remove('open');
+                    mobileMenuToggle.classList.remove('active');
+                }
+            });
+            
+            // Close menu when menu item is clicked
+            menuItems.querySelectorAll('.menu-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    // Delay closing to allow menu action to process
+                    setTimeout(() => {
+                        menuItems.classList.remove('open');
+                        mobileMenuToggle.classList.remove('active');
+                    }, 100);
+                });
+            });
+        }
+        
+        // Mobile toolbar toggle
+        const mobileToolbarToggle = $('#mobile-toolbar-toggle');
+        const toolbar = $('#toolbar');
+        
+        if (mobileToolbarToggle && toolbar) {
+            mobileToolbarToggle.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toolbar.classList.toggle('open');
+                mobileToolbarToggle.classList.toggle('active');
+                
+                // Close panel if toolbar is opened
+                const panel = $('#panel-right');
+                const panelToggle = $('#mobile-panel-toggle');
+                if (toolbar.classList.contains('open') && panel?.classList.contains('open')) {
+                    panel.classList.remove('open');
+                    panelToggle?.classList.remove('active');
+                }
+            });
+            
+            // Close toolbar when tool is selected
+            toolbar.querySelectorAll('.tool-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    if (window.innerWidth <= 768) {
+                        setTimeout(() => {
+                            toolbar.classList.remove('open');
+                            mobileToolbarToggle.classList.remove('active');
+                        }, 150);
+                    }
+                });
+            });
+        }
+        
+        // Mobile panel toggle
+        const mobilePanelToggle = $('#mobile-panel-toggle');
+        const panelRight = $('#panel-right');
+        
+        if (mobilePanelToggle && panelRight) {
+            mobilePanelToggle.addEventListener('click', (e) => {
+                e.stopPropagation();
+                panelRight.classList.toggle('open');
+                mobilePanelToggle.classList.toggle('active');
+                
+                // Close toolbar if panel is opened
+                if (panelRight.classList.contains('open') && toolbar?.classList.contains('open')) {
+                    toolbar.classList.remove('open');
+                    mobileToolbarToggle?.classList.remove('active');
+                }
+            });
+            
+            // Close panel when clicking outside on mobile
+            document.addEventListener('click', (e) => {
+                if (window.innerWidth <= 768) {
+                    if (!panelRight.contains(e.target) && 
+                        !mobilePanelToggle.contains(e.target) &&
+                        panelRight.classList.contains('open')) {
+                        panelRight.classList.remove('open');
+                        mobilePanelToggle.classList.remove('active');
+                    }
+                }
+            });
+        }
+        
+        // Handle orientation change
+        window.addEventListener('orientationchange', () => {
+            // Close all mobile panels on orientation change
+            setTimeout(() => {
+                toolbar?.classList.remove('open');
+                panelRight?.classList.remove('open');
+                menuItems?.classList.remove('open');
+                mobileToolbarToggle?.classList.remove('active');
+                mobilePanelToggle?.classList.remove('active');
+                mobileMenuToggle?.classList.remove('active');
+            }, 100);
+        });
+        
+        // Handle resize to reset mobile states
+        window.addEventListener('resize', () => {
+            if (window.innerWidth > 768) {
+                toolbar?.classList.remove('open');
+                panelRight?.classList.remove('open');
+                menuItems?.classList.remove('open');
+                mobileToolbarToggle?.classList.remove('active');
+                mobilePanelToggle?.classList.remove('active');
+                mobileMenuToggle?.classList.remove('active');
+            }
+        });
+        
+        // Prevent double-tap zoom on buttons
+        document.querySelectorAll('button, .tool-btn, .menu-item, .panel-tab').forEach(el => {
+            el.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                el.click();
+            });
+        });
+        
+        // Add touch feedback class
+        this._setupTouchFeedback();
+    }
+    
+    /**
+     * Setup touch feedback for better UX
+     */
+    _setupTouchFeedback() {
+        const interactiveElements = document.querySelectorAll(
+            'button, .tool-btn, .menu-item, .panel-tab, .layer-item, .icon-btn, .context-menu-item'
+        );
+        
+        interactiveElements.forEach(el => {
+            el.addEventListener('touchstart', () => {
+                el.classList.add('touch-active');
+            }, { passive: true });
+            
+            el.addEventListener('touchend', () => {
+                el.classList.remove('touch-active');
+            }, { passive: true });
+            
+            el.addEventListener('touchcancel', () => {
+                el.classList.remove('touch-active');
+            }, { passive: true });
+        });
+    }
+
     _setupKeyboardShortcuts() {
         // Track space key for pan mode
         document.addEventListener('keydown', (e) => {
@@ -8068,6 +8353,14 @@ class Asciistrator extends EventEmitter {
             });
         }
         
+        // Export library button
+        const exportBtn = $('#btn-export-library');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', () => {
+                this._showExportLibraryDialog();
+            });
+        }
+        
         // New library button
         const newLibBtn = $('#btn-new-library');
         if (newLibBtn) {
@@ -8200,7 +8493,7 @@ class Asciistrator extends EventEmitter {
             `;
         }
         
-        // Drag start
+        // Drag start (mouse)
         compDiv.addEventListener('dragstart', (e) => {
             e.dataTransfer.setData('application/x-asciistrator-component', JSON.stringify({
                 componentId: component.id,
@@ -8208,6 +8501,16 @@ class Asciistrator extends EventEmitter {
             }));
             e.dataTransfer.effectAllowed = 'copy';
             compDiv.classList.add('dragging');
+            
+            // Auto-hide panel on mobile when drag starts
+            if (window.innerWidth <= 768) {
+                const panelRight = document.getElementById('panel-right');
+                const panelToggle = document.getElementById('mobile-panel-toggle');
+                if (panelRight?.classList.contains('open')) {
+                    panelRight.classList.remove('open');
+                    panelToggle?.classList.remove('active');
+                }
+            }
             
             // Create custom drag image
             const ghost = createElement('div', { class: 'component-drag-ghost' });
@@ -8223,7 +8526,86 @@ class Asciistrator extends EventEmitter {
             compDiv.classList.remove('dragging');
         });
         
-        // Double-click to insert at center
+        // Touch drag support for mobile
+        let touchDragGhost = null;
+        let touchStartTime = 0;
+        const TOUCH_HOLD_THRESHOLD = 150; // ms to distinguish tap from drag
+        
+        compDiv.addEventListener('touchstart', (e) => {
+            touchStartTime = Date.now();
+        }, { passive: true });
+        
+        compDiv.addEventListener('touchmove', (e) => {
+            // Only start drag if held for a moment (not a tap)
+            if (Date.now() - touchStartTime < TOUCH_HOLD_THRESHOLD) return;
+            
+            e.preventDefault();
+            const touch = e.touches[0];
+            
+            // Create ghost if not exists
+            if (!touchDragGhost) {
+                touchDragGhost = createElement('div', { class: 'component-drag-ghost touch-drag' });
+                touchDragGhost.textContent = component.preview || component.name;
+                document.body.appendChild(touchDragGhost);
+                compDiv.classList.add('dragging');
+                
+                // Store component data for drop
+                touchDragGhost.dataset.componentId = component.id;
+                touchDragGhost.dataset.libraryId = library.id;
+                
+                // Auto-hide panel on mobile when drag starts
+                if (window.innerWidth <= 768) {
+                    const panelRight = document.getElementById('panel-right');
+                    const panelToggle = document.getElementById('mobile-panel-toggle');
+                    if (panelRight?.classList.contains('open')) {
+                        panelRight.classList.remove('open');
+                        panelToggle?.classList.remove('active');
+                    }
+                }
+            }
+            
+            // Update ghost position
+            touchDragGhost.style.left = `${touch.clientX - 20}px`;
+            touchDragGhost.style.top = `${touch.clientY - 20}px`;
+        });
+        
+        compDiv.addEventListener('touchend', (e) => {
+            if (touchDragGhost) {
+                const touch = e.changedTouches[0];
+                
+                // Check if dropped on viewport
+                const viewport = document.getElementById('viewport');
+                if (viewport) {
+                    const rect = viewport.getBoundingClientRect();
+                    if (touch.clientX >= rect.left && touch.clientX <= rect.right &&
+                        touch.clientY >= rect.top && touch.clientY <= rect.bottom) {
+                        // Convert to canvas coordinates and insert
+                        const pos = this.renderer.pointerToCanvas({
+                            clientX: touch.clientX,
+                            clientY: touch.clientY
+                        });
+                        this._insertComponent(component, pos.x, pos.y);
+                    }
+                }
+                
+                // Cleanup
+                touchDragGhost.remove();
+                touchDragGhost = null;
+                compDiv.classList.remove('dragging');
+            } else if (Date.now() - touchStartTime < TOUCH_HOLD_THRESHOLD) {
+                // Short tap - treat as tap (could show preview or insert at center)
+            }
+        });
+        
+        compDiv.addEventListener('touchcancel', () => {
+            if (touchDragGhost) {
+                touchDragGhost.remove();
+                touchDragGhost = null;
+                compDiv.classList.remove('dragging');
+            }
+        });
+        
+        // Double-click/tap to insert at center
         compDiv.addEventListener('dblclick', () => {
             this._insertComponentAtCenter(component);
         });
@@ -8594,6 +8976,66 @@ class Asciistrator extends EventEmitter {
         });
         
         input.click();
+    }
+    
+    _showExportLibraryDialog() {
+        const libraries = componentLibraryManager.getAllLibraries();
+        
+        if (libraries.length === 0) {
+            this._updateStatus('No libraries to export');
+            return;
+        }
+        
+        const libraryOptions = libraries.map(lib => 
+            `<label class="checkbox-option">
+                <input type="checkbox" name="export-lib" value="${lib.id}" ${!lib.isBuiltIn ? 'checked' : ''}>
+                <span>${this._escapeHtml(lib.name)}${lib.isBuiltIn ? ' (built-in)' : ''}</span>
+            </label>`
+        ).join('');
+        
+        this._showDialog(
+            'Export Libraries',
+            `<div class="export-library-form">
+                <p>Select libraries to export:</p>
+                <div class="library-checkboxes">
+                    ${libraryOptions}
+                </div>
+            </div>`,
+            [
+                { label: 'Cancel', action: () => true },
+                {
+                    label: 'Export',
+                    primary: true,
+                    action: (dialog) => {
+                        const checkboxes = dialog.querySelectorAll('input[name="export-lib"]:checked');
+                        const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+                        
+                        if (selectedIds.length === 0) {
+                            this._updateStatus('No libraries selected');
+                            return true;
+                        }
+                        
+                        const selectedLibs = libraries.filter(lib => selectedIds.includes(lib.id));
+                        const json = componentLibraryManager.exportLibraries(selectedIds);
+                        const blob = new Blob([json], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        
+                        const a = document.createElement('a');
+                        a.href = url;
+                        const filename = selectedLibs.length === 1 
+                            ? `${selectedLibs[0].name.toLowerCase().replace(/\s+/g, '-')}-library.json`
+                            : 'component-libraries.json';
+                        a.download = filename;
+                        a.click();
+                        
+                        URL.revokeObjectURL(url);
+                        this._updateStatus(`Exported ${selectedLibs.length} library(s)`);
+                        
+                        return true;
+                    }
+                }
+            ]
+        );
     }
     
     _exportLibrary(library) {

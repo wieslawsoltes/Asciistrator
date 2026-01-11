@@ -2,16 +2,22 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="description" content="Asciistrator - ASCII Vector Graphics Engine & Editor">
     <meta name="author" content="Asciistrator">
     <meta name="theme-color" content="#1a1a2e">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
     <title>Asciistrator - ASCII Vector Graphics Editor</title>
     <link rel="stylesheet" href="styles/main.css">
     <link rel="stylesheet" href="styles/ui.css">
 </head>
 <body data-theme="dark">
     <div id="app">
+        <!-- Mobile Menu Toggle -->
+        <button id="mobile-menu-toggle" class="mobile-menu-toggle" aria-label="Toggle menu">☰</button>
+        
         <!-- Menu Bar -->
         <header id="menu-bar" class="menu-bar">
             <div class="menu-left">
@@ -30,12 +36,12 @@
             <div class="menu-right">
                 <button class="icon-btn" title="Undo" id="btn-undo">↩</button>
                 <button class="icon-btn" title="Redo" id="btn-redo">↪</button>
-                <span class="separator">|</span>
+                <span class="separator hide-mobile">|</span>
                 <button class="icon-btn" title="Zoom Out" id="btn-zoom-out">−</button>
                 <span id="zoom-level" class="zoom-level">100%</span>
                 <button class="icon-btn" title="Zoom In" id="btn-zoom-in">+</button>
-                <span class="separator">|</span>
-                <select id="theme-select" class="theme-select">
+                <span class="separator hide-mobile">|</span>
+                <select id="theme-select" class="theme-select hide-mobile">
                     <option value="dark">Dark</option>
                     <option value="light">Light</option>
                     <option value="midnight">Midnight</option>
@@ -133,6 +139,9 @@
                     </button>
                 </div>
             </aside>
+            
+            <!-- Mobile Toolbar Toggle -->
+            <button id="mobile-toolbar-toggle" class="mobile-toolbar-toggle" aria-label="Toggle toolbar">🔧</button>
 
             <!-- Canvas Area -->
             <section id="canvas-container" class="canvas-container">
@@ -264,6 +273,7 @@
                         <div class="panel-actions">
                             <button class="icon-btn small" title="Create Component from Selection" id="btn-create-component">+</button>
                             <button class="icon-btn small" title="Import Library" id="btn-import-library">📥</button>
+                            <button class="icon-btn small" title="Export Library" id="btn-export-library">📤</button>
                             <button class="icon-btn small" title="New Library" id="btn-new-library">📁</button>
                         </div>
                     </div>
@@ -318,23 +328,26 @@
         <footer id="status-bar" class="status-bar">
             <div class="status-left">
                 <span id="status-message">Ready</span>
-                <span class="separator">|</span>
+                <span class="separator hide-mobile">|</span>
                 <span id="status-tool">Select</span>
             </div>
             <div class="status-right">
-                <span id="status-objects">Objects: 0</span>
-                <span class="separator">|</span>
-                <span id="status-layers">Layers: 1</span>
-                <span class="separator">|</span>
+                <span id="status-objects" class="hide-mobile-sm">Objects: 0</span>
+                <span class="separator hide-mobile-sm">|</span>
+                <span id="status-layers" class="hide-mobile-sm">Layers: 1</span>
+                <span class="separator hide-mobile-sm">|</span>
                 <span id="status-zoom">Zoom: 100%</span>
-                <span class="separator">|</span>
-                <span id="status-grid">Grid: 1×1</span>
-                <span class="separator">|</span>
+                <span class="separator hide-mobile">|</span>
+                <span id="status-grid" class="hide-mobile">Grid: 1×1</span>
+                <span class="separator hide-mobile">|</span>
                 <span id="status-position">Pos: (0, 0)</span>
-                <span class="separator">|</span>
-                <span id="status-canvas-size">Canvas: 120×40</span>
+                <span class="separator hide-mobile-sm">|</span>
+                <span id="status-canvas-size" class="hide-mobile-sm">Canvas: 120×40</span>
             </div>
         </footer>
+        
+        <!-- Mobile Panel Toggle -->
+        <button id="mobile-panel-toggle" class="mobile-panel-toggle" aria-label="Toggle panel">◧</button>
     </div>
 
     <!-- Dialogs Container -->
