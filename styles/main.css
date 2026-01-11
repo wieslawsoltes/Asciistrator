@@ -677,9 +677,10 @@ body {
 }
 
 .ascii-canvas {
-    font-family: var(--font-family-mono);
+    font-family: 'Courier New', Courier, monospace;
     font-size: 14px;
     line-height: 1;
+    letter-spacing: 0;
     color: var(--color-canvas-text);
     background-color: var(--color-canvas-bg);
     padding: var(--space-lg);
@@ -688,6 +689,37 @@ body {
     user-select: none;
     box-shadow: var(--shadow-xl);
     border: 1px solid var(--color-border);
+    /* Ensure consistent character rendering */
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0, "calt" 0, "kern" 0;
+    text-rendering: geometricPrecision;
+    -webkit-font-smoothing: subpixel-antialiased;
+    -moz-osx-font-smoothing: auto;
+    word-spacing: 0;
+    tab-size: 1;
+}
+
+/* Ensure spans don't break the monospace grid */
+.ascii-canvas span {
+    display: inline;
+    font-family: inherit;
+    font-size: inherit;
+    line-height: 1;
+    letter-spacing: inherit;
+    word-spacing: inherit;
+    vertical-align: top;
+}
+
+/* Grid overlay - CSS-based for performance */
+.grid-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    opacity: 0.2;
+    z-index: 1;
 }
 
 .overlay {
