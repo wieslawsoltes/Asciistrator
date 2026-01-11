@@ -192,23 +192,42 @@ export class AsciiBuffer {
      * @returns {string}
      */
     toHTML() {
-        let html = '';
+        const rows = [];
         for (let y = 0; y < this.height; y++) {
-            for (let x = 0; x < this.width; x++) {
-                const char = this.chars[y][x];
-                const color = this.colors[y][x];
-                const escaped = char.replace(/&/g, '&amp;')
-                                    .replace(/</g, '&lt;')
-                                    .replace(/>/g, '&gt;');
-                if (color) {
-                    html += `<span style="color:${color}">${escaped}</span>`;
+            let rowHtml = '';
+            let currentColor = null;
+            let batch = '';
+            
+            const flushBatch = () => {
+                if (batch.length === 0) return;
+                if (currentColor) {
+                    rowHtml += `<span style="color:${currentColor}">${batch}</span>`;
                 } else {
-                    html += escaped;
+                    rowHtml += batch;
                 }
+                batch = '';
+            };
+            
+            for (let x = 0; x < this.width; x++) {
+                let char = this.chars[y][x];
+                const color = this.colors[y][x];
+                
+                // Escape special HTML characters
+                if (char === '&') char = '&amp;';
+                else if (char === '<') char = '&lt;';
+                else if (char === '>') char = '&gt;';
+                
+                // Batch same-colored chars together
+                if (color !== currentColor) {
+                    flushBatch();
+                    currentColor = color;
+                }
+                batch += char;
             }
-            html += '\n';
+            flushBatch();
+            rows.push(rowHtml);
         }
-        return html;
+        return rows.join('\n');
     }
 
     /**
