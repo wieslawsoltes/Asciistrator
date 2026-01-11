@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Asciistrator - ASCII Vector Graphics Engine & Editor">
+    <meta name="author" content="Asciistrator">
+    <meta name="theme-color" content="#1a1a2e">
+    <title>Asciistrator - ASCII Vector Graphics Editor</title>
+    <link rel="stylesheet" href="styles/main.css">
+    <link rel="stylesheet" href="styles/ui.css">
+</head>
+<body data-theme="dark">
+    <div id="app">
+        <!-- Menu Bar -->
+        <header id="menu-bar" class="menu-bar">
+            <div class="menu-left">
+                <span class="app-logo">◈ Asciistrator</span>
+                <nav class="menu-items">
+                    <button class="menu-item" data-menu="file">File</button>
+                    <button class="menu-item" data-menu="edit">Edit</button>
+                    <button class="menu-item" data-menu="view">View</button>
+                    <button class="menu-item" data-menu="object">Object</button>
+                    <button class="menu-item" data-menu="charts">Charts</button>
+                    <button class="menu-item" data-menu="flow">Flow</button>
+                    <button class="menu-item" data-menu="window">Window</button>
+                    <button class="menu-item" data-menu="help">Help</button>
+                </nav>
+            </div>
+            <div class="menu-right">
+                <button class="icon-btn" title="Undo" id="btn-undo">↩</button>
+                <button class="icon-btn" title="Redo" id="btn-redo">↪</button>
+                <span class="separator">|</span>
+                <button class="icon-btn" title="Zoom Out" id="btn-zoom-out">−</button>
+                <span id="zoom-level" class="zoom-level">100%</span>
+                <button class="icon-btn" title="Zoom In" id="btn-zoom-in">+</button>
+                <span class="separator">|</span>
+                <select id="theme-select" class="theme-select">
+                    <option value="dark">Dark</option>
+                    <option value="light">Light</option>
+                    <option value="midnight">Midnight</option>
+                </select>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main id="main-content" class="main-content">
+            <!-- Left Toolbar -->
+            <aside id="toolbar" class="toolbar">
+                <div class="tool-group">
+                    <button class="tool-btn active" data-tool="select" title="Select (V)">
+                        <span class="tool-icon">⊹</span>
+                    </button>
+                    <button class="tool-btn" data-tool="direct-select" title="Direct Select (A)">
+                        <span class="tool-icon">⊸</span>
+                    </button>
+                </div>
+                <div class="tool-group">
+                    <button class="tool-btn" data-tool="pen" title="Pen Tool (P)">
+                        <span class="tool-icon">✎</span>
+                    </button>
+                    <button class="tool-btn" data-tool="pencil" title="Pencil (N)">
+                        <span class="tool-icon">✏</span>
+                    </button>
+                    <button class="tool-btn" data-tool="brush" title="Brush (B)">
+                        <span class="tool-icon">⚟</span>
+                    </button>
+                </div>
+                <div class="tool-group">
+                    <button class="tool-btn" data-tool="rectangle" title="Rectangle (R)">
+                        <span class="tool-icon">▢</span>
+                    </button>
+                    <button class="tool-btn" data-tool="ellipse" title="Ellipse (O)">
+                        <span class="tool-icon">○</span>
+                    </button>
+                    <button class="tool-btn" data-tool="polygon" title="Polygon">
+                        <span class="tool-icon">⬡</span>
+                    </button>
+                    <button class="tool-btn" data-tool="star" title="Star">
+                        <span class="tool-icon">☆</span>
+                    </button>
+                    <button class="tool-btn" data-tool="line" title="Line (\\)">
+                        <span class="tool-icon">╱</span>
+                    </button>
+                </div>
+                <div class="tool-group">
+                    <button class="tool-btn" data-tool="text" title="Text (T)">
+                        <span class="tool-icon">T</span>
+                    </button>
+                    <button class="tool-btn" data-tool="ascii-text" title="ASCII Text">
+                        <span class="tool-icon">Ⓐ</span>
+                    </button>
+                </div>
+                <div class="tool-group">
+                    <button class="tool-btn" data-tool="box-draw" title="Box Draw">
+                        <span class="tool-icon">┌┐</span>
+                    </button>
+                    <button class="tool-btn" data-tool="table" title="Table">
+                        <span class="tool-icon">▦</span>
+                    </button>
+                    <button class="tool-btn" data-tool="tree" title="Tree">
+                        <span class="tool-icon">├</span>
+                    </button>
+                </div>
+                <div class="tool-group">
+                    <button class="tool-btn" data-tool="flowchart" title="Flowchart">
+                        <span class="tool-icon">◇</span>
+                    </button>
+                    <button class="tool-btn" data-tool="connector" title="Connector">
+                        <span class="tool-icon">→</span>
+                    </button>
+                </div>
+                <div class="tool-group">
+                    <button class="tool-btn" data-tool="chart" title="Chart">
+                        <span class="tool-icon">▊</span>
+                    </button>
+                </div>
+                <div class="tool-group">
+                    <button class="tool-btn" data-tool="eraser" title="Eraser (E)">
+                        <span class="tool-icon">◫</span>
+                    </button>
+                    <button class="tool-btn" data-tool="fill" title="Fill">
+                        <span class="tool-icon">▧</span>
+                    </button>
+                </div>
+                <div class="tool-group tool-colors">
+                    <div class="color-preview">
+                        <div class="stroke-color" id="stroke-color" title="Stroke Color"></div>
+                        <div class="fill-color" id="fill-color" title="Fill Color"></div>
+                    </div>
+                    <button class="tool-btn small" id="swap-colors" title="Swap Colors (X)">
+                        <span class="tool-icon">⇄</span>
+                    </button>
+                </div>
+            </aside>
+
+            <!-- Canvas Area -->
+            <section id="canvas-container" class="canvas-container">
+                <!-- Rulers -->
+                <div id="ruler-corner" class="ruler-corner"></div>
+                <div id="ruler-horizontal" class="ruler ruler-horizontal"></div>
+                <div id="ruler-vertical" class="ruler ruler-vertical"></div>
+                
+                <!-- Canvas Viewport -->
+                <div id="viewport" class="viewport">
+                    <div id="canvas-wrapper" class="canvas-wrapper">
+                        <pre id="ascii-canvas" class="ascii-canvas"></pre>
+                        <!-- Selection overlay -->
+                        <svg id="overlay" class="overlay"></svg>
+                    </div>
+                </div>
+
+                <!-- Scrollbars -->
+                <div id="scrollbar-horizontal" class="scrollbar scrollbar-horizontal">
+                    <div class="scrollbar-thumb"></div>
+                </div>
+                <div id="scrollbar-vertical" class="scrollbar scrollbar-vertical">
+                    <div class="scrollbar-thumb"></div>
+                </div>
+            </section>
+
+            <!-- Right Panel -->
+            <aside id="panel-right" class="panel panel-right">
+                <!-- Panel Tabs -->
+                <div class="panel-tabs">
+                    <button class="panel-tab active" data-panel="layers">Layers</button>
+                    <button class="panel-tab" data-panel="properties">Props</button>
+                    <button class="panel-tab" data-panel="chars">Chars</button>
+                </div>
+
+                <!-- Layers Panel -->
+                <div id="panel-layers" class="panel-content active">
+                    <div class="panel-header">
+                        <span>Layers</span>
+                        <div class="panel-actions">
+                            <button class="icon-btn small" title="New Layer" id="btn-new-layer">+</button>
+                            <button class="icon-btn small" title="Delete Layer" id="btn-delete-layer">−</button>
+                        </div>
+                    </div>
+                    <div id="layer-list" class="layer-list">
+                        <div class="layer-item active" data-layer="0">
+                            <button class="layer-visibility" title="Toggle Visibility">👁</button>
+                            <button class="layer-lock" title="Toggle Lock">🔓</button>
+                            <span class="layer-name">Layer 1</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Properties Panel -->
+                <div id="panel-properties" class="panel-content">
+                    <div class="panel-header">
+                        <span>Properties</span>
+                    </div>
+                    <div class="properties-content">
+                        <div class="property-group" id="prop-text-group" style="display:none;">
+                            <label>Text</label>
+                            <div class="property-row">
+                                <input type="text" id="prop-text" placeholder="Enter text...">
+                            </div>
+                        </div>
+                        <div class="property-group">
+                            <label>Position</label>
+                            <div class="property-row">
+                                <label>X:</label>
+                                <input type="number" id="prop-x" value="0">
+                                <label>Y:</label>
+                                <input type="number" id="prop-y" value="0">
+                            </div>
+                        </div>
+                        <div class="property-group">
+                            <label>Size</label>
+                            <div class="property-row">
+                                <label>W:</label>
+                                <input type="number" id="prop-width" value="0">
+                                <label>H:</label>
+                                <input type="number" id="prop-height" value="0">
+                            </div>
+                        </div>
+                        <div class="property-group">
+                            <label>Colors</label>
+                            <div class="property-row">
+                                <label>Stroke:</label>
+                                <input type="color" id="prop-stroke-color" value="#ffffff">
+                            </div>
+                            <div class="property-row">
+                                <label>Fill:</label>
+                                <input type="color" id="prop-fill-color" value="#ffffff">
+                            </div>
+                        </div>
+                        <div class="property-group">
+                            <label>Style</label>
+                            <div class="property-row">
+                                <label>Border:</label>
+                                <select id="prop-border-style">
+                                    <option value="single">Single ─</option>
+                                    <option value="double">Double ═</option>
+                                    <option value="rounded">Rounded ╭</option>
+                                    <option value="heavy">Heavy ━</option>
+                                    <option value="dashed">Dashed ┄</option>
+                                    <option value="ascii">ASCII +-|</option>
+                                </select>
+                            </div>
+                            <div class="property-row">
+                                <label>Fill:</label>
+                                <select id="prop-fill-char">
+                                    <option value="">None</option>
+                                    <option value=" ">Space</option>
+                                    <option value=".">Dot .</option>
+                                    <option value="░">Light ░</option>
+                                    <option value="▒">Medium ▒</option>
+                                    <option value="▓">Dark ▓</option>
+                                    <option value="█">Full █</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Characters Panel -->
+                <div id="panel-chars" class="panel-content">
+                    <div class="panel-header">
+                        <span>Characters</span>
+                    </div>
+                    <div class="chars-content">
+                        <div class="char-category">
+                            <label>Box Drawing</label>
+                            <div class="char-grid" id="chars-box">
+                                ─│┌┐└┘├┤┬┴┼═║╔╗╚╝╠╣╦╩╬╭╮╰╯━┃┏┓┗┛┣┫┳┻╋
+                            </div>
+                        </div>
+                        <div class="char-category">
+                            <label>Blocks</label>
+                            <div class="char-grid" id="chars-blocks">
+                                █▓▒░▀▄▌▐▖▗▘▝■□▪▫◼◻
+                            </div>
+                        </div>
+                        <div class="char-category">
+                            <label>Arrows</label>
+                            <div class="char-grid" id="chars-arrows">
+                                ←↑→↓↔↕↖↗↘↙⇐⇑⇒⇓⇔⇕◀▲▶▼◁△▷▽
+                            </div>
+                        </div>
+                        <div class="char-category">
+                            <label>Shapes</label>
+                            <div class="char-grid" id="chars-shapes">
+                                ●○◐◑◒◓◔◕◖◗◆◇◈❖★☆✦✧✩✪✫✬
+                            </div>
+                        </div>
+                        <div class="char-category">
+                            <label>Math</label>
+                            <div class="char-grid" id="chars-math">
+                                ±×÷≠≤≥≈∞∑∏√∫∂∆∇∈∉∪∩⊂⊃
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </main>
+
+        <!-- Status Bar -->
+        <footer id="status-bar" class="status-bar">
+            <div class="status-left">
+                <span id="status-message">Ready</span>
+                <span class="separator">|</span>
+                <span id="status-tool">Select</span>
+            </div>
+            <div class="status-right">
+                <span id="status-objects">Objects: 0</span>
+                <span class="separator">|</span>
+                <span id="status-layers">Layers: 1</span>
+                <span class="separator">|</span>
+                <span id="status-zoom">Zoom: 100%</span>
+                <span class="separator">|</span>
+                <span id="status-grid">Grid: 1×1</span>
+                <span class="separator">|</span>
+                <span id="status-position">Pos: (0, 0)</span>
+                <span class="separator">|</span>
+                <span id="status-canvas-size">Canvas: 120×40</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Dialogs Container -->
+    <div id="dialogs" class="dialogs-container"></div>
+
+    <!-- Context Menu Container -->
+    <div id="context-menu" class="context-menu hidden"></div>
+
+    <!-- Scripts -->
+    <script type="module" src="scripts/app.js"></script>
+</body>
+</html>

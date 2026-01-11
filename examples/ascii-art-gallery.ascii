@@ -1,0 +1,186 @@
+{
+  "version": "1.0.0",
+  "document": {
+    "name": "ASCII Art Gallery",
+    "width": 80,
+    "height": 100,
+    "charSet": "unicode",
+    "backgroundColor": "#1e1e1e"
+  },
+  "layers": [
+    {
+      "id": "layer-1",
+      "name": "Art",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "objects": [
+        {
+          "type": "text",
+          "id": "title",
+          "x": 25,
+          "y": 1,
+          "content": "ASCII Art Gallery",
+          "style": { "fontSize": 2, "bold": true }
+        },
+        {
+          "type": "text",
+          "id": "house-label",
+          "x": 5,
+          "y": 5,
+          "content": "House:",
+          "style": { "bold": true }
+        },
+        {
+          "type": "asciiArt",
+          "id": "house",
+          "x": 5,
+          "y": 7,
+          "content": "        ╱╲\n       ╱  ╲\n      ╱    ╲\n     ╱──────╲\n    ╱        ╲\n   ╱──────────╲\n  ┌────────────┐\n  │  ┌──┐  ──  │\n  │  │  │ │  │ │\n  │  │  │ │  │ │\n  └──┴──┴─┴──┴─┘"
+        },
+        {
+          "type": "text",
+          "id": "tree-label",
+          "x": 40,
+          "y": 5,
+          "content": "Tree:",
+          "style": { "bold": true }
+        },
+        {
+          "type": "asciiArt",
+          "id": "tree",
+          "x": 40,
+          "y": 7,
+          "content": "       ★\n      ╱█╲\n     ╱███╲\n    ╱█████╲\n   ╱███████╲\n  ╱█████████╲\n ╱███████████╲\n      ║║\n      ║║\n    ══╩╩══"
+        },
+        {
+          "type": "text",
+          "id": "cat-label",
+          "x": 5,
+          "y": 22,
+          "content": "Cat:",
+          "style": { "bold": true }
+        },
+        {
+          "type": "asciiArt",
+          "id": "cat",
+          "x": 5,
+          "y": 24,
+          "content": "  ╱╲___╱╲\n ( o   o )\n (   ∧   )\n  │  ω  │\n  ╰─────╯\n   ││ ││"
+        },
+        {
+          "type": "text",
+          "id": "rocket-label",
+          "x": 40,
+          "y": 22,
+          "content": "Rocket:",
+          "style": { "bold": true }
+        },
+        {
+          "type": "asciiArt",
+          "id": "rocket",
+          "x": 40,
+          "y": 24,
+          "content": "      ╱╲\n     ╱  ╲\n    │    │\n    │ ◯  │\n    │    │\n    │ ◯  │\n   ╱│    │╲\n  ╱ │    │ ╲\n ╱  └────┘  ╲\n     ╲▓▓╱\n      ╲╱"
+        },
+        {
+          "type": "text",
+          "id": "coffee-label",
+          "x": 5,
+          "y": 38,
+          "content": "Coffee:",
+          "style": { "bold": true }
+        },
+        {
+          "type": "asciiArt",
+          "id": "coffee",
+          "x": 5,
+          "y": 40,
+          "content": "     )  )\n    (  (\n  ┌───────┐\n  │       │───╮\n  │ COFFEE│   │\n  │       │───╯\n  └───────┘\n   ╲_____╱"
+        },
+        {
+          "type": "text",
+          "id": "heart-label",
+          "x": 40,
+          "y": 38,
+          "content": "Heart:",
+          "style": { "bold": true }
+        },
+        {
+          "type": "asciiArt",
+          "id": "heart",
+          "x": 40,
+          "y": 40,
+          "content": "   ╭─────╮ ╭─────╮\n  ╱       ╳       ╲\n │         ♥       │\n  ╲               ╱\n   ╲             ╱\n    ╲           ╱\n     ╲         ╱\n      ╲       ╱\n       ╲     ╱\n        ╲   ╱\n         ╲ ╱\n          ▼"
+        },
+        {
+          "type": "text",
+          "id": "computer-label",
+          "x": 5,
+          "y": 55,
+          "content": "Computer:",
+          "style": { "bold": true }
+        },
+        {
+          "type": "asciiArt",
+          "id": "computer",
+          "x": 5,
+          "y": 57,
+          "content": "  ╔═══════════════════╗\n  ║  ┌─────────────┐  ║\n  ║  │ > Hello     │  ║\n  ║  │ > World     │  ║\n  ║  │ > _         │  ║\n  ║  └─────────────┘  ║\n  ╚═════════════════════╝\n        ╱─────╲\n      ╱─────────╲\n     └───────────┘"
+        },
+        {
+          "type": "text",
+          "id": "music-label",
+          "x": 40,
+          "y": 55,
+          "content": "Music:",
+          "style": { "bold": true }
+        },
+        {
+          "type": "asciiArt",
+          "id": "music",
+          "x": 40,
+          "y": 57,
+          "content": "     ♪ ♫ ♪\n    ╭──────╮\n   ╱        ╲\n  │    ◯    │\n  │  ──●──  │\n  │    │    │\n   ╲        ╱\n    ╰──────╯\n  ♩ Music ♬"
+        },
+        {
+          "type": "rectangle",
+          "id": "border",
+          "x": 0,
+          "y": 72,
+          "width": 80,
+          "height": 20,
+          "style": { "borderStyle": "double" }
+        },
+        {
+          "type": "text",
+          "id": "figlet-label",
+          "x": 2,
+          "y": 73,
+          "content": "FIGlet Fonts:",
+          "style": { "bold": true }
+        },
+        {
+          "type": "asciiArt",
+          "id": "figlet-standard",
+          "x": 2,
+          "y": 76,
+          "content": " _   _      _ _       \n| | | | ___| | | ___  \n| |_| |/ _ \\ | |/ _ \\ \n|  _  |  __/ | | (_) |\n|_| |_|\\___|_|_|\\___/"
+        },
+        {
+          "type": "asciiArt",
+          "id": "figlet-block",
+          "x": 2,
+          "y": 84,
+          "content": "█   █ █▀▀▀ █    █    █▀▀█\n█▀▀▀█ █▀▀  █    █    █  █\n█   █ █▄▄▄ █▄▄▄ █▄▄▄ █▄▄█"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "created": "2024-01-15T10:00:00Z",
+    "modified": "2024-01-15T10:00:00Z",
+    "author": "Asciistrator",
+    "description": "Gallery of ASCII art examples"
+  }
+}

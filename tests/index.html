@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Asciistrator - Test Runner</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            line-height: 1.6;
+        }
+
+        .header {
+            background: #252526;
+            padding: 20px;
+            border-bottom: 1px solid #3c3c3c;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 1.5em;
+            color: #fff;
+        }
+
+        .header .controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+
+        .btn-primary {
+            background: #0e639c;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #1177bb;
+        }
+
+        .btn-secondary {
+            background: #3c3c3c;
+            color: #d4d4d4;
+        }
+
+        .btn-secondary:hover {
+            background: #4c4c4c;
+        }
+
+        .summary {
+            padding: 20px;
+            background: #252526;
+            border-bottom: 1px solid #3c3c3c;
+            display: flex;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+
+        .stat {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+        }
+
+        .stat-label {
+            font-size: 0.85em;
+            color: #808080;
+            text-transform: uppercase;
+        }
+
+        .stat-passed .stat-value { color: #4ec9b0; }
+        .stat-failed .stat-value { color: #f14c4c; }
+        .stat-skipped .stat-value { color: #cca700; }
+        .stat-total .stat-value { color: #569cd6; }
+
+        .progress-bar {
+            height: 4px;
+            background: #3c3c3c;
+            position: relative;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #4ec9b0;
+            transition: width 0.3s;
+        }
+
+        .progress-fill.failed {
+            background: #f14c4c;
+        }
+
+        .test-suites {
+            padding: 20px;
+        }
+
+        .suite {
+            margin-bottom: 15px;
+            background: #252526;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .suite-header {
+            padding: 12px 16px;
+            background: #2d2d2d;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .suite-header:hover {
+            background: #333;
+        }
+
+        .suite-name {
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .suite-stats {
+            display: flex;
+            gap: 15px;
+            font-size: 0.85em;
+        }
+
+        .suite-content {
+            padding: 10px 16px;
+            display: none;
+        }
+
+        .suite.expanded .suite-content {
+            display: block;
+        }
+
+        .test {
+            padding: 8px 0;
+            border-bottom: 1px solid #3c3c3c;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .test:last-child {
+            border-bottom: none;
+        }
+
+        .test-name {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .test-time {
+            font-size: 0.85em;
+            color: #808080;
+        }
+
+        .icon {
+            font-size: 1.1em;
+        }
+
+        .icon-pass { color: #4ec9b0; }
+        .icon-fail { color: #f14c4c; }
+        .icon-skip { color: #cca700; }
+        .icon-error { color: #f14c4c; }
+
+        .error-details {
+            background: #1e1e1e;
+            padding: 10px;
+            margin-top: 8px;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9em;
+            color: #f14c4c;
+        }
+
+        .filter-bar {
+            padding: 15px 20px;
+            background: #252526;
+            display: flex;
+            gap: 10px;
+            border-bottom: 1px solid #3c3c3c;
+        }
+
+        .filter-btn {
+            padding: 6px 12px;
+            border: 1px solid #3c3c3c;
+            background: transparent;
+            color: #d4d4d4;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .filter-btn.active {
+            background: #0e639c;
+            border-color: #0e639c;
+        }
+
+        .filter-btn:hover:not(.active) {
+            background: #3c3c3c;
+        }
+
+        .loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px;
+            gap: 20px;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #3c3c3c;
+            border-top-color: #0e639c;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .console-output {
+            padding: 20px;
+            background: #1e1e1e;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            max-height: 300px;
+            overflow: auto;
+            display: none;
+        }
+
+        .console-output.visible {
+            display: block;
+        }
+
+        .console-line {
+            padding: 2px 0;
+            white-space: pre-wrap;
+        }
+
+        .duration {
+            margin-top: 20px;
+            text-align: center;
+            color: #808080;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🧪 Asciistrator Test Runner</h1>
+        <div class="controls">
+            <button class="btn btn-secondary" id="toggleConsole">Show Console</button>
+            <button class="btn btn-primary" id="runTests">Run All Tests</button>
+        </div>
+    </div>
+
+    <div class="progress-bar">
+        <div class="progress-fill" id="progress" style="width: 0%"></div>
+    </div>
+
+    <div class="summary" id="summary">
+        <div class="stat stat-total">
+            <span class="stat-value" id="totalCount">-</span>
+            <span class="stat-label">Total</span>
+        </div>
+        <div class="stat stat-passed">
+            <span class="stat-value" id="passedCount">-</span>
+            <span class="stat-label">Passed</span>
+        </div>
+        <div class="stat stat-failed">
+            <span class="stat-value" id="failedCount">-</span>
+            <span class="stat-label">Failed</span>
+        </div>
+        <div class="stat stat-skipped">
+            <span class="stat-value" id="skippedCount">-</span>
+            <span class="stat-label">Skipped</span>
+        </div>
+    </div>
+
+    <div class="filter-bar">
+        <button class="filter-btn active" data-filter="all">All</button>
+        <button class="filter-btn" data-filter="pass">Passed</button>
+        <button class="filter-btn" data-filter="fail">Failed</button>
+        <button class="filter-btn" data-filter="skip">Skipped</button>
+    </div>
+
+    <div class="console-output" id="console"></div>
+
+    <div class="test-suites" id="results">
+        <div class="loading">
+            <div class="spinner"></div>
+            <div>Loading tests...</div>
+        </div>
+    </div>
+
+    <div class="duration" id="duration"></div>
+
+    <script type="module">
+        import { runner, runTests, HTMLReporter } from './framework.js';
+
+        // Test modules to load
+        const testModules = [
+            './unit/math.test.js',
+            './unit/objects.test.js',
+            './unit/rendering.test.js',
+            './integration/workflow.test.js',
+            './benchmarks/performance.test.js',
+            './compatibility/browser.test.js'
+        ];
+
+        let results = null;
+        let currentFilter = 'all';
+
+        // DOM Elements
+        const resultsContainer = document.getElementById('results');
+        const progressBar = document.getElementById('progress');
+        const totalCount = document.getElementById('totalCount');
+        const passedCount = document.getElementById('passedCount');
+        const failedCount = document.getElementById('failedCount');
+        const skippedCount = document.getElementById('skippedCount');
+        const durationEl = document.getElementById('duration');
+        const consoleEl = document.getElementById('console');
+        const runBtn = document.getElementById('runTests');
+        const toggleConsoleBtn = document.getElementById('toggleConsole');
+
+        // Console capture
+        const originalConsoleLog = console.log;
+        const consoleLogs = [];
+
+        console.log = function(...args) {
+            originalConsoleLog.apply(console, args);
+            consoleLogs.push(args.map(a => 
+                typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)
+            ).join(' '));
+            updateConsole();
+        };
+
+        function updateConsole() {
+            consoleEl.innerHTML = consoleLogs.map(log => 
+                `<div class="console-line">${escapeHtml(log)}</div>`
+            ).join('');
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Load test modules
+        async function loadTests() {
+            for (const module of testModules) {
+                try {
+                    await import(module);
+                    console.log(`Loaded: ${module}`);
+                } catch (error) {
+                    console.error(`Failed to load ${module}:`, error);
+                }
+            }
+        }
+
+        // Run tests
+        async function executeTests() {
+            runBtn.disabled = true;
+            runBtn.textContent = 'Running...';
+            resultsContainer.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <div>Running tests...</div>
+                </div>
+            `;
+            
+            consoleLogs.length = 0;
+            updateConsole();
+
+            const start = performance.now();
+            
+            try {
+                results = await runner.run();
+                const duration = performance.now() - start;
+                
+                displayResults(results);
+                durationEl.textContent = `Total duration: ${duration.toFixed(2)}ms`;
+            } catch (error) {
+                console.error('Test execution error:', error);
+                resultsContainer.innerHTML = `
+                    <div class="error-details">
+                        Test execution failed: ${error.message}
+                    </div>
+                `;
+            }
+
+            runBtn.disabled = false;
+            runBtn.textContent = 'Run All Tests';
+        }
+
+        // Display results
+        function displayResults(results) {
+            let total = 0, passed = 0, failed = 0, skipped = 0;
+
+            results.forEach(suite => {
+                total += suite.tests.length;
+                passed += suite.passed;
+                failed += suite.failed;
+                skipped += suite.skipped;
+            });
+
+            // Update stats
+            totalCount.textContent = total;
+            passedCount.textContent = passed;
+            failedCount.textContent = failed;
+            skippedCount.textContent = skipped;
+
+            // Update progress bar
+            const percent = (passed / total) * 100;
+            progressBar.style.width = `${percent}%`;
+            progressBar.className = `progress-fill ${failed > 0 ? 'failed' : ''}`;
+
+            // Render suites
+            renderSuites(results);
+        }
+
+        function renderSuites(results) {
+            resultsContainer.innerHTML = results.map(suite => {
+                const filteredTests = filterTests(suite.tests);
+                if (filteredTests.length === 0 && currentFilter !== 'all') {
+                    return '';
+                }
+
+                return `
+                    <div class="suite expanded">
+                        <div class="suite-header" onclick="this.parentElement.classList.toggle('expanded')">
+                            <div class="suite-name">
+                                <span class="icon ${getSuiteIcon(suite)}">
+                                    ${getSuiteIconChar(suite)}
+                                </span>
+                                ${escapeHtml(suite.name)}
+                            </div>
+                            <div class="suite-stats">
+                                <span class="icon-pass">✓ ${suite.passed}</span>
+                                <span class="icon-fail">✗ ${suite.failed}</span>
+                                <span class="icon-skip">⊘ ${suite.skipped}</span>
+                                <span>${suite.duration.toFixed(2)}ms</span>
+                            </div>
+                        </div>
+                        <div class="suite-content">
+                            ${filteredTests.map(test => renderTest(test)).join('')}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function filterTests(tests) {
+            if (currentFilter === 'all') return tests;
+            return tests.filter(t => t.status === currentFilter);
+        }
+
+        function renderTest(test) {
+            const icons = {
+                pass: '✓',
+                fail: '✗',
+                skip: '⊘',
+                error: '!'
+            };
+
+            const errorHtml = test.error ? `
+                <div class="error-details">
+                    ${escapeHtml(test.error.message)}
+                    ${test.error.expected !== undefined ? 
+                        `<br>Expected: ${escapeHtml(JSON.stringify(test.error.expected))}` : ''}
+                    ${test.error.actual !== undefined ? 
+                        `<br>Actual: ${escapeHtml(JSON.stringify(test.error.actual))}` : ''}
+                </div>
+            ` : '';
+
+            return `
+                <div class="test">
+                    <div class="test-name">
+                        <span class="icon icon-${test.status}">${icons[test.status]}</span>
+                        ${escapeHtml(test.name)}
+                    </div>
+                    <span class="test-time">${test.duration.toFixed(2)}ms</span>
+                </div>
+                ${errorHtml}
+            `;
+        }
+
+        function getSuiteIcon(suite) {
+            if (suite.failed > 0) return 'icon-fail';
+            if (suite.errors > 0) return 'icon-error';
+            return 'icon-pass';
+        }
+
+        function getSuiteIconChar(suite) {
+            if (suite.failed > 0 || suite.errors > 0) return '✗';
+            return '✓';
+        }
+
+        // Filter buttons
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentFilter = btn.dataset.filter;
+                if (results) {
+                    renderSuites(results);
+                }
+            });
+        });
+
+        // Toggle console
+        toggleConsoleBtn.addEventListener('click', () => {
+            consoleEl.classList.toggle('visible');
+            toggleConsoleBtn.textContent = consoleEl.classList.contains('visible') ? 
+                'Hide Console' : 'Show Console';
+        });
+
+        // Run button
+        runBtn.addEventListener('click', () => {
+            runner.reset();
+            loadTests().then(executeTests);
+        });
+
+        // Initial load
+        loadTests().then(() => {
+            resultsContainer.innerHTML = `
+                <div style="text-align: center; padding: 40px; color: #808080;">
+                    Click "Run All Tests" to execute the test suite
+                </div>
+            `;
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,169 @@
+{
+  "version": "1.0.0",
+  "document": {
+    "name": "Chart Dashboard",
+    "width": 100,
+    "height": 60,
+    "charSet": "unicode",
+    "backgroundColor": "#1e1e1e"
+  },
+  "layers": [
+    {
+      "id": "layer-1",
+      "name": "Charts",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "objects": [
+        {
+          "type": "text",
+          "id": "title",
+          "x": 30,
+          "y": 1,
+          "content": "Sales Dashboard 2024",
+          "style": { "fontSize": 1, "bold": true }
+        },
+        {
+          "type": "chart",
+          "id": "bar-chart",
+          "chartType": "bar",
+          "x": 2,
+          "y": 4,
+          "width": 45,
+          "height": 20,
+          "data": {
+            "labels": ["Q1", "Q2", "Q3", "Q4"],
+            "datasets": [{
+              "label": "Revenue",
+              "data": [85, 62, 95, 78]
+            }]
+          },
+          "options": {
+            "title": { "text": "Quarterly Revenue", "position": "top" },
+            "axes": {
+              "x": { "label": "Quarter" },
+              "y": { "label": "%" }
+            }
+          }
+        },
+        {
+          "type": "chart",
+          "id": "line-chart",
+          "chartType": "line",
+          "x": 52,
+          "y": 4,
+          "width": 45,
+          "height": 20,
+          "data": {
+            "labels": ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
+            "datasets": [{
+              "label": "Users",
+              "data": [1200, 1900, 2400, 2800, 3500, 4200]
+            }]
+          },
+          "options": {
+            "title": { "text": "Monthly Active Users", "position": "top" },
+            "showPoints": true
+          }
+        },
+        {
+          "type": "chart",
+          "id": "pie-chart",
+          "chartType": "pie",
+          "x": 2,
+          "y": 28,
+          "width": 30,
+          "height": 15,
+          "data": {
+            "labels": ["Chrome", "Firefox", "Safari", "Edge", "Other"],
+            "datasets": [{
+              "data": [45, 25, 15, 10, 5]
+            }]
+          },
+          "options": {
+            "title": { "text": "Browser Share", "position": "top" },
+            "showLabels": true,
+            "showPercentages": true
+          }
+        },
+        {
+          "type": "chart",
+          "id": "scatter-chart",
+          "chartType": "scatter",
+          "x": 37,
+          "y": 28,
+          "width": 30,
+          "height": 15,
+          "data": {
+            "datasets": [{
+              "label": "Sales vs Marketing",
+              "data": [
+                {"x": 10, "y": 20},
+                {"x": 15, "y": 35},
+                {"x": 20, "y": 45},
+                {"x": 25, "y": 55},
+                {"x": 30, "y": 60},
+                {"x": 35, "y": 75},
+                {"x": 40, "y": 80}
+              ]
+            }]
+          },
+          "options": {
+            "title": { "text": "Correlation", "position": "top" }
+          }
+        },
+        {
+          "type": "rectangle",
+          "id": "stats-box",
+          "x": 72,
+          "y": 28,
+          "width": 25,
+          "height": 15,
+          "style": { "borderStyle": "double", "fill": false }
+        },
+        {
+          "type": "text",
+          "id": "stats-title",
+          "x": 76,
+          "y": 29,
+          "content": "Key Metrics",
+          "style": { "bold": true }
+        },
+        {
+          "type": "text",
+          "id": "stat-1",
+          "x": 74,
+          "y": 32,
+          "content": "Total Revenue: $1.2M"
+        },
+        {
+          "type": "text",
+          "id": "stat-2",
+          "x": 74,
+          "y": 34,
+          "content": "Active Users: 4,200"
+        },
+        {
+          "type": "text",
+          "id": "stat-3",
+          "x": 74,
+          "y": 36,
+          "content": "Conversion: 3.5%"
+        },
+        {
+          "type": "text",
+          "id": "stat-4",
+          "x": 74,
+          "y": 38,
+          "content": "Growth: +25% YoY"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "created": "2024-01-15T10:00:00Z",
+    "modified": "2024-01-15T10:00:00Z",
+    "author": "Asciistrator",
+    "description": "Example dashboard with multiple charts"
+  }
+}

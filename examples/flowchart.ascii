@@ -1,0 +1,156 @@
+{
+  "version": "1.0.0",
+  "document": {
+    "name": "Flowchart Example",
+    "width": 80,
+    "height": 50,
+    "charSet": "unicode",
+    "backgroundColor": "#1e1e1e"
+  },
+  "layers": [
+    {
+      "id": "layer-1",
+      "name": "Flowchart",
+      "visible": true,
+      "locked": false,
+      "opacity": 1.0,
+      "objects": [
+        {
+          "type": "flowchart-terminal",
+          "id": "start",
+          "x": 30,
+          "y": 2,
+          "width": 12,
+          "height": 3,
+          "label": "Start",
+          "style": { "borderStyle": "rounded" }
+        },
+        {
+          "type": "flowchart-process",
+          "id": "input",
+          "x": 27,
+          "y": 8,
+          "width": 18,
+          "height": 3,
+          "label": "Enter Username",
+          "style": { "borderStyle": "single" }
+        },
+        {
+          "type": "flowchart-process",
+          "id": "password",
+          "x": 27,
+          "y": 14,
+          "width": 18,
+          "height": 3,
+          "label": "Enter Password",
+          "style": { "borderStyle": "single" }
+        },
+        {
+          "type": "flowchart-decision",
+          "id": "validate",
+          "x": 30,
+          "y": 20,
+          "width": 12,
+          "height": 5,
+          "label": "Valid?",
+          "style": { "borderStyle": "single" }
+        },
+        {
+          "type": "flowchart-process",
+          "id": "dashboard",
+          "x": 50,
+          "y": 26,
+          "width": 18,
+          "height": 3,
+          "label": "Show Dashboard",
+          "style": { "borderStyle": "single" }
+        },
+        {
+          "type": "flowchart-process",
+          "id": "error",
+          "x": 5,
+          "y": 26,
+          "width": 18,
+          "height": 3,
+          "label": "Show Error",
+          "style": { "borderStyle": "single" }
+        },
+        {
+          "type": "flowchart-terminal",
+          "id": "end",
+          "x": 30,
+          "y": 40,
+          "width": 12,
+          "height": 3,
+          "label": "End",
+          "style": { "borderStyle": "rounded" }
+        },
+        {
+          "type": "connector",
+          "id": "conn-1",
+          "from": { "shape": "start", "port": "bottom" },
+          "to": { "shape": "input", "port": "top" },
+          "style": "orthogonal",
+          "arrow": "end"
+        },
+        {
+          "type": "connector",
+          "id": "conn-2",
+          "from": { "shape": "input", "port": "bottom" },
+          "to": { "shape": "password", "port": "top" },
+          "style": "orthogonal",
+          "arrow": "end"
+        },
+        {
+          "type": "connector",
+          "id": "conn-3",
+          "from": { "shape": "password", "port": "bottom" },
+          "to": { "shape": "validate", "port": "top" },
+          "style": "orthogonal",
+          "arrow": "end"
+        },
+        {
+          "type": "connector",
+          "id": "conn-4",
+          "from": { "shape": "validate", "port": "right" },
+          "to": { "shape": "dashboard", "port": "top" },
+          "style": "orthogonal",
+          "arrow": "end",
+          "label": "Yes"
+        },
+        {
+          "type": "connector",
+          "id": "conn-5",
+          "from": { "shape": "validate", "port": "left" },
+          "to": { "shape": "error", "port": "top" },
+          "style": "orthogonal",
+          "arrow": "end",
+          "label": "No"
+        },
+        {
+          "type": "connector",
+          "id": "conn-6",
+          "from": { "shape": "dashboard", "port": "bottom" },
+          "to": { "shape": "end", "port": "right" },
+          "style": "orthogonal",
+          "arrow": "end"
+        },
+        {
+          "type": "connector",
+          "id": "conn-7",
+          "from": { "shape": "error", "port": "bottom" },
+          "to": { "shape": "input", "port": "left" },
+          "style": "orthogonal",
+          "arrow": "end",
+          "label": "Retry"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "created": "2024-01-15T10:00:00Z",
+    "modified": "2024-01-15T10:00:00Z",
+    "author": "Asciistrator",
+    "description": "Example login flowchart"
+  }
+}
