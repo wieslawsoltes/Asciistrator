@@ -3517,6 +3517,9 @@ class AsciiCanvasRenderer extends EventEmitter {
     _onHScrollbarDown(event) {
         if (!this.hScrollThumb) return;
         
+        event.preventDefault();
+        event.stopPropagation();
+        
         const thumbRect = this.hScrollThumb.getBoundingClientRect();
         const clickedOnThumb = event.clientX >= thumbRect.left && event.clientX <= thumbRect.right;
         
@@ -3528,7 +3531,11 @@ class AsciiCanvasRenderer extends EventEmitter {
             this.hScrollThumb.classList.add('active');
             this.hScrollbar.classList.add('dragging');
             
+            // Capture pointer for reliable tracking on touch
+            this.hScrollbar.setPointerCapture(event.pointerId);
+            
             const onMove = (e) => {
+                e.preventDefault();
                 const viewportRect = this.viewport.getBoundingClientRect();
                 const canvasSize = this.getCanvasSize();
                 const maxScroll = canvasSize.width - viewportRect.width;
@@ -3541,16 +3548,19 @@ class AsciiCanvasRenderer extends EventEmitter {
                 this._updateTransform();
             };
             
-            const onUp = () => {
+            const onUp = (e) => {
                 this.isDraggingScrollbar = false;
                 this.hScrollThumb.classList.remove('active');
                 this.hScrollbar.classList.remove('dragging');
-                document.removeEventListener('pointermove', onMove);
-                document.removeEventListener('pointerup', onUp);
+                this.hScrollbar.releasePointerCapture(e.pointerId);
+                this.hScrollbar.removeEventListener('pointermove', onMove);
+                this.hScrollbar.removeEventListener('pointerup', onUp);
+                this.hScrollbar.removeEventListener('pointercancel', onUp);
             };
             
-            document.addEventListener('pointermove', onMove);
-            document.addEventListener('pointerup', onUp);
+            this.hScrollbar.addEventListener('pointermove', onMove);
+            this.hScrollbar.addEventListener('pointerup', onUp);
+            this.hScrollbar.addEventListener('pointercancel', onUp);
         } else {
             // Click on track - jump to position
             const trackRect = this.hScrollbar.getBoundingClientRect();
@@ -3562,8 +3572,6 @@ class AsciiCanvasRenderer extends EventEmitter {
             this._constrainPan();
             this._updateTransform();
         }
-        
-        event.preventDefault();
     }
     
     /**
@@ -3571,6 +3579,9 @@ class AsciiCanvasRenderer extends EventEmitter {
      */
     _onVScrollbarDown(event) {
         if (!this.vScrollThumb) return;
+        
+        event.preventDefault();
+        event.stopPropagation();
         
         const thumbRect = this.vScrollThumb.getBoundingClientRect();
         const clickedOnThumb = event.clientY >= thumbRect.top && event.clientY <= thumbRect.bottom;
@@ -3583,7 +3594,11 @@ class AsciiCanvasRenderer extends EventEmitter {
             this.vScrollThumb.classList.add('active');
             this.vScrollbar.classList.add('dragging');
             
+            // Capture pointer for reliable tracking on touch
+            this.vScrollbar.setPointerCapture(event.pointerId);
+            
             const onMove = (e) => {
+                e.preventDefault();
                 const viewportRect = this.viewport.getBoundingClientRect();
                 const canvasSize = this.getCanvasSize();
                 const maxScroll = canvasSize.height - viewportRect.height;
@@ -3596,16 +3611,19 @@ class AsciiCanvasRenderer extends EventEmitter {
                 this._updateTransform();
             };
             
-            const onUp = () => {
+            const onUp = (e) => {
                 this.isDraggingScrollbar = false;
                 this.vScrollThumb.classList.remove('active');
                 this.vScrollbar.classList.remove('dragging');
-                document.removeEventListener('pointermove', onMove);
-                document.removeEventListener('pointerup', onUp);
+                this.vScrollbar.releasePointerCapture(e.pointerId);
+                this.vScrollbar.removeEventListener('pointermove', onMove);
+                this.vScrollbar.removeEventListener('pointerup', onUp);
+                this.vScrollbar.removeEventListener('pointercancel', onUp);
             };
             
-            document.addEventListener('pointermove', onMove);
-            document.addEventListener('pointerup', onUp);
+            this.vScrollbar.addEventListener('pointermove', onMove);
+            this.vScrollbar.addEventListener('pointerup', onUp);
+            this.vScrollbar.addEventListener('pointercancel', onUp);
         } else {
             // Click on track - jump to position
             const trackRect = this.vScrollbar.getBoundingClientRect();
@@ -3617,8 +3635,6 @@ class AsciiCanvasRenderer extends EventEmitter {
             this._constrainPan();
             this._updateTransform();
         }
-        
-        event.preventDefault();
     }
     
     /**
@@ -5139,12 +5155,9 @@ class BrushTool extends Tool {
         if (this.isDragging && this.currentPath) {
             this.currentPath.addPoint(x, y);
             
-            // Draw preview line between last and current position
+            // Draw brush stroke between last and current position
             if (this.lastX !== -1) {
-                drawLine(renderer.previewBuffer, this.lastX, this.lastY, x, y, {
-                    char: AppState.strokeChar,
-                    color: AppState.strokeColor
-                });
+                this._drawBrushLine(this.lastX, this.lastY, x, y, renderer.previewBuffer);
             }
             this._drawBrush(x, y, renderer.previewBuffer);
             this.lastX = x;
@@ -5177,6 +5190,24 @@ class BrushTool extends Tool {
                     buffer.setChar(x + dx, y + dy, AppState.strokeChar, AppState.strokeColor);
                 }
             }
+        }
+    }
+    
+    _drawBrushLine(x1, y1, x2, y2, buffer) {
+        // Draw brush circles along the line for smooth stroke
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        if (dist < 1) return;
+        
+        // Step along the line, drawing brush points
+        const steps = Math.ceil(dist);
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const x = Math.round(x1 + dx * t);
+            const y = Math.round(y1 + dy * t);
+            this._drawBrush(x, y, buffer);
         }
     }
 }
@@ -6518,29 +6549,30 @@ class Asciistrator extends EventEmitter {
         const menuItems = document.querySelector('.menu-items');
         
         if (mobileMenuToggle && menuItems) {
+            // Simple click handler for mobile menu toggle
             mobileMenuToggle.addEventListener('click', (e) => {
                 e.stopPropagation();
+                e.preventDefault();
                 menuItems.classList.toggle('open');
                 mobileMenuToggle.classList.toggle('active');
+                // Close all dropdowns when closing menu
+                if (!menuItems.classList.contains('open')) {
+                    this._closeAllDropdowns();
+                }
             });
             
             // Close menu when clicking outside
             document.addEventListener('click', (e) => {
-                if (!menuItems.contains(e.target) && !mobileMenuToggle.contains(e.target)) {
-                    menuItems.classList.remove('open');
-                    mobileMenuToggle.classList.remove('active');
+                // Don't close if clicking on menu items or their wrappers/dropdowns
+                if (e.target.closest('.menu-item-wrapper') || 
+                    e.target.closest('.menu-dropdown') ||
+                    e.target.closest('.menu-items') ||
+                    mobileMenuToggle.contains(e.target)) {
+                    return;
                 }
-            });
-            
-            // Close menu when menu item is clicked
-            menuItems.querySelectorAll('.menu-item').forEach(item => {
-                item.addEventListener('click', () => {
-                    // Delay closing to allow menu action to process
-                    setTimeout(() => {
-                        menuItems.classList.remove('open');
-                        mobileMenuToggle.classList.remove('active');
-                    }, 100);
-                });
+                menuItems.classList.remove('open');
+                mobileMenuToggle.classList.remove('active');
+                this._closeAllDropdowns();
             });
         }
         
@@ -6823,9 +6855,56 @@ class Asciistrator extends EventEmitter {
     }
     
     _setupToolbar() {
-        // Tool buttons
+        // Tool buttons with touch-scroll awareness
+        // Track touch state to distinguish tap from scroll
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let isScrolling = false;
+        let isTouchInteraction = false;
+        const scrollThreshold = 10; // pixels moved before considered scrolling
+        
         $$('.tool-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
+            // Track touch start
+            btn.addEventListener('touchstart', (e) => {
+                const touch = e.touches[0];
+                touchStartX = touch.clientX;
+                touchStartY = touch.clientY;
+                isScrolling = false;
+                isTouchInteraction = true;
+            }, { passive: true });
+            
+            // Detect if scrolling
+            btn.addEventListener('touchmove', (e) => {
+                const touch = e.touches[0];
+                const deltaX = Math.abs(touch.clientX - touchStartX);
+                const deltaY = Math.abs(touch.clientY - touchStartY);
+                if (deltaX > scrollThreshold || deltaY > scrollThreshold) {
+                    isScrolling = true;
+                }
+            }, { passive: true });
+            
+            // Handle tap (not scroll)
+            btn.addEventListener('touchend', (e) => {
+                if (!isScrolling) {
+                    e.preventDefault(); // Prevent click event from firing
+                    const tool = btn.dataset.tool;
+                    if (tool) {
+                        this.toolManager.setActiveTool(tool);
+                    }
+                }
+                isScrolling = false;
+                // Reset touch flag after a short delay to allow click to be blocked
+                setTimeout(() => { isTouchInteraction = false; }, 300);
+            });
+            
+            // Still support mouse click for desktop
+            btn.addEventListener('click', (e) => {
+                // Ignore if triggered by touch (already handled by touchend)
+                if (isTouchInteraction) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
                 const tool = btn.dataset.tool;
                 if (tool) {
                     this.toolManager.setActiveTool(tool);
@@ -7107,10 +7186,16 @@ class Asciistrator extends EventEmitter {
                         menuItem.appendChild(shortcutSpan);
                     }
                     
+                    // Simple click handler for menu items
                     menuItem.addEventListener('click', (e) => {
                         e.stopPropagation();
                         this._handleMenuAction(item.action);
                         this._closeAllDropdowns();
+                        // Also close mobile menu
+                        const menuItemsEl = document.querySelector('.menu-items');
+                        const mobileMenuToggle = $('#mobile-menu-toggle');
+                        if (menuItemsEl) menuItemsEl.classList.remove('open');
+                        if (mobileMenuToggle) mobileMenuToggle.classList.remove('active');
                     });
                     
                     dropdown.appendChild(menuItem);
@@ -7123,9 +7208,10 @@ class Asciistrator extends EventEmitter {
             wrapper.appendChild(btn);
             wrapper.appendChild(dropdown);
             
-            // Toggle dropdown on click
+            // Simple click handler that works for both mouse and touch
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
+                e.preventDefault();
                 const isOpen = dropdown.classList.contains('show');
                 this._closeAllDropdowns();
                 if (!isOpen) {
@@ -7136,7 +7222,7 @@ class Asciistrator extends EventEmitter {
         
         // Close dropdowns when clicking outside
         document.addEventListener('click', (e) => {
-            if (!e.target.closest('.menu-item-wrapper')) {
+            if (!e.target.closest('.menu-item-wrapper') && !e.target.closest('.menu-items')) {
                 this._closeAllDropdowns();
             }
         });
