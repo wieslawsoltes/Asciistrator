@@ -1006,6 +1006,282 @@ body {
     color: var(--color-text-primary);
 }
 
+/* ============================================
+   COMPONENTS PANEL
+   ============================================ */
+
+.components-toolbar {
+    padding: var(--space-sm) var(--space-md);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.component-search {
+    width: 100%;
+    padding: var(--space-xs) var(--space-sm);
+    background-color: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    color: var(--color-text-primary);
+    font-size: var(--font-size-sm);
+}
+
+.component-search:focus {
+    border-color: var(--color-border-focus);
+    outline: none;
+}
+
+.component-search::placeholder {
+    color: var(--color-text-muted);
+}
+
+.component-libraries {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-xs);
+}
+
+.component-library {
+    margin-bottom: var(--space-xs);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background-color: var(--color-bg-tertiary);
+    overflow: hidden;
+}
+
+.component-library-header {
+    display: flex;
+    align-items: center;
+    padding: var(--space-xs) var(--space-sm);
+    background-color: var(--color-bg-secondary);
+    cursor: pointer;
+    user-select: none;
+    gap: var(--space-xs);
+    transition: background-color var(--transition-fast);
+}
+
+.component-library-header:hover {
+    background-color: var(--color-bg-hover);
+}
+
+.component-library-expand {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    transition: transform var(--transition-fast);
+}
+
+.component-library.expanded .component-library-expand {
+    transform: rotate(90deg);
+}
+
+.component-library-icon {
+    font-size: var(--font-size-md);
+}
+
+.component-library-name {
+    flex: 1;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    color: var(--color-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.component-library-count {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+    background-color: var(--color-bg-tertiary);
+    padding: 2px 6px;
+    border-radius: var(--radius-full);
+}
+
+.component-library-actions {
+    display: flex;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+}
+
+.component-library-header:hover .component-library-actions {
+    opacity: 1;
+}
+
+.component-library-actions .icon-btn {
+    width: 20px;
+    height: 20px;
+    font-size: var(--font-size-xs);
+}
+
+.component-library-content {
+    display: none;
+    padding: var(--space-xs);
+}
+
+.component-library.expanded .component-library-content {
+    display: block;
+}
+
+.component-category {
+    margin-bottom: var(--space-sm);
+}
+
+.component-category-header {
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-medium);
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: var(--space-xs) 0;
+    border-bottom: 1px solid var(--color-border);
+    margin-bottom: var(--space-xs);
+}
+
+.component-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-xs);
+}
+
+.component-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: var(--space-sm);
+    background-color: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    cursor: grab;
+    transition: all var(--transition-fast);
+    user-select: none;
+}
+
+.component-item:hover {
+    background-color: var(--color-bg-hover);
+    border-color: var(--color-border-light);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+}
+
+.component-item:active {
+    cursor: grabbing;
+    transform: translateY(0);
+    box-shadow: none;
+}
+
+.component-item.dragging {
+    opacity: 0.5;
+}
+
+.component-preview {
+    font-family: var(--font-family-mono);
+    font-size: 8px;
+    line-height: 1;
+    color: var(--color-canvas-text);
+    background-color: var(--color-canvas-bg);
+    padding: var(--space-xs);
+    border-radius: var(--radius-sm);
+    white-space: pre;
+    overflow: hidden;
+    max-width: 100%;
+    max-height: 50px;
+    margin-bottom: var(--space-xs);
+}
+
+.component-icon {
+    font-size: var(--font-size-xl);
+    margin-bottom: var(--space-xs);
+}
+
+.component-name {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-primary);
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    width: 100%;
+}
+
+/* Component drag ghost */
+.component-drag-ghost {
+    position: fixed;
+    pointer-events: none;
+    z-index: var(--z-tooltip);
+    font-family: var(--font-family-mono);
+    font-size: 10px;
+    line-height: 1;
+    color: var(--color-canvas-text);
+    background-color: var(--color-canvas-bg);
+    padding: var(--space-sm);
+    border: 2px solid var(--color-accent);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-lg);
+    opacity: 0.9;
+    white-space: pre;
+}
+
+/* Component search results */
+.component-search-results {
+    padding: var(--space-sm);
+}
+
+.component-search-results .component-grid {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+.no-results {
+    text-align: center;
+    padding: var(--space-lg);
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+}
+
+/* Create component dialog */
+.create-component-form .form-group {
+    margin-bottom: var(--space-md);
+}
+
+.create-component-form label {
+    display: block;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
+    margin-bottom: var(--space-xs);
+}
+
+.create-component-form input,
+.create-component-form select,
+.create-component-form textarea {
+    width: 100%;
+    padding: var(--space-sm);
+    background-color: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    color: var(--color-text-primary);
+    font-size: var(--font-size-sm);
+}
+
+.create-component-form textarea {
+    resize: vertical;
+    min-height: 60px;
+    font-family: var(--font-family-ui);
+}
+
+.create-component-form input:focus,
+.create-component-form select:focus,
+.create-component-form textarea:focus {
+    border-color: var(--color-border-focus);
+    outline: none;
+}
+
+.library-select-wrapper {
+    display: flex;
+    gap: var(--space-xs);
+}
+
+.library-select-wrapper select {
+    flex: 1;
+}
+
 /* Characters Panel */
 .chars-content {
     padding: var(--space-md);
