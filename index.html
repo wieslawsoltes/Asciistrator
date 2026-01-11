@@ -165,6 +165,7 @@
                 <div class="panel-tabs">
                     <button class="panel-tab active" data-panel="layers">Layers</button>
                     <button class="panel-tab" data-panel="properties">Props</button>
+                    <button class="panel-tab" data-panel="components">Comps</button>
                     <button class="panel-tab" data-panel="chars">Chars</button>
                 </div>
 
@@ -253,6 +254,24 @@
                                 </select>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Components Panel -->
+                <div id="panel-components" class="panel-content">
+                    <div class="panel-header">
+                        <span>Components</span>
+                        <div class="panel-actions">
+                            <button class="icon-btn small" title="Create Component from Selection" id="btn-create-component">+</button>
+                            <button class="icon-btn small" title="Import Library" id="btn-import-library">📥</button>
+                            <button class="icon-btn small" title="New Library" id="btn-new-library">📁</button>
+                        </div>
+                    </div>
+                    <div class="components-toolbar">
+                        <input type="text" id="component-search" class="component-search" placeholder="Search components...">
+                    </div>
+                    <div id="component-libraries" class="component-libraries">
+                        <!-- Libraries and components will be populated by JavaScript -->
                     </div>
                 </div>
 
