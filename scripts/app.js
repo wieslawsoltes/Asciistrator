@@ -4532,6 +4532,9 @@ class SelectTool extends Tool {
         uiGroup.style.display = 'block';
         if (uiType) uiType.textContent = obj.uiComponentType || obj.avaloniaType;
         
+        // Auto-switch to Properties tab when a UI component is selected
+        this._switchToPropertiesTab();
+        
         // Clear existing properties
         uiPropsContainer.innerHTML = '';
         
@@ -4667,6 +4670,14 @@ class SelectTool extends Tool {
         }
         
         return input;
+    }
+    
+    _switchToPropertiesTab() {
+        // Find and click the Properties tab to show UI component properties
+        const propsTab = document.querySelector('.panel-tab[data-panel="properties"]');
+        if (propsTab && !propsTab.classList.contains('active')) {
+            propsTab.click();
+        }
     }
     
     _rerenderUIComponent(obj) {
