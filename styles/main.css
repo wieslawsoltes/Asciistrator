@@ -664,8 +664,6 @@ body {
 .ruler-vertical {
     grid-row: 2;
     border-right: 1px solid var(--color-border);
-    writing-mode: vertical-rl;
-    text-orientation: mixed;
 }
 
 .viewport {
@@ -1764,40 +1762,231 @@ body {
     background-color: var(--color-text-muted);
 }
 
+/* Horizontal ruler ticks */
 .ruler-horizontal .ruler-tick {
     width: 1px;
-    height: 5px;
+    height: 4px;
     bottom: 0;
+}
+
+.ruler-horizontal .ruler-tick.minor {
+    height: 3px;
+    opacity: 0.5;
+}
+
+.ruler-horizontal .ruler-tick.medium {
+    height: 6px;
 }
 
 .ruler-horizontal .ruler-tick.major {
     height: 10px;
+    background-color: var(--color-text-secondary);
 }
 
+/* Vertical ruler ticks */
 .ruler-vertical .ruler-tick {
-    width: 5px;
+    width: 4px;
     height: 1px;
     right: 0;
 }
 
-.ruler-vertical .ruler-tick.major {
-    width: 10px;
+.ruler-vertical .ruler-tick.minor {
+    width: 3px;
+    opacity: 0.5;
 }
 
+.ruler-vertical .ruler-tick.medium {
+    width: 6px;
+}
+
+.ruler-vertical .ruler-tick.major {
+    width: 10px;
+    background-color: var(--color-text-secondary);
+}
+
+/* Ruler labels */
 .ruler-label {
     position: absolute;
-    font-size: 8px;
-    color: var(--color-text-muted);
+    font-size: 9px;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+    pointer-events: none;
 }
 
 .ruler-horizontal .ruler-label {
-    bottom: 12px;
+    bottom: 11px;
     left: 2px;
+    transform: translateX(-50%);
 }
 
 .ruler-vertical .ruler-label {
-    right: 12px;
+    right: 11px;
     top: 2px;
+    transform: translateY(-50%);
+    writing-mode: horizontal-tb;
+}
+
+/* Ruler position indicator (follows mouse) */
+.ruler-position-indicator {
+    position: absolute;
+    background-color: var(--color-accent);
+    pointer-events: none;
+    z-index: 10;
+    display: none;
+}
+
+.ruler-horizontal .ruler-position-indicator {
+    width: 1px;
+    height: 100%;
+    top: 0;
+}
+
+.ruler-vertical .ruler-position-indicator {
+    width: 100%;
+    height: 1px;
+    left: 0;
+}
+
+/* Show position value on hover */
+.ruler-position-indicator::after {
+    content: attr(data-value);
+    position: absolute;
+    background-color: var(--color-accent);
+    color: white;
+    font-size: 9px;
+    padding: 1px 4px;
+    border-radius: 2px;
+    white-space: nowrap;
+}
+
+.ruler-horizontal .ruler-position-indicator::after {
+    top: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.ruler-vertical .ruler-position-indicator::after {
+    left: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+/* Selection range indicator on rulers */
+.ruler-selection-range {
+    position: absolute;
+    background-color: var(--color-accent);
+    opacity: 0.3;
+    pointer-events: none;
+    z-index: 5;
+    display: none;
+}
+
+.ruler-horizontal .ruler-selection-range {
+    height: 100%;
+    top: 0;
+}
+
+.ruler-vertical .ruler-selection-range {
+    width: 100%;
+    left: 0;
+}
+
+/* Canvas bounds indicator on rulers */
+.ruler-canvas-bounds {
+    position: absolute;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.ruler-horizontal .ruler-canvas-bounds {
+    height: 3px;
+    bottom: 0;
+    background: linear-gradient(to right, var(--color-accent), var(--color-accent));
+    opacity: 0.6;
+}
+
+.ruler-vertical .ruler-canvas-bounds {
+    width: 3px;
+    right: 0;
+    background: linear-gradient(to bottom, var(--color-accent), var(--color-accent));
+    opacity: 0.6;
+}
+
+/* Guide lines created from rulers */
+.guide-line {
+    background-color: var(--color-accent);
+    opacity: 0.8;
+}
+
+.guide-line.guide-horizontal {
+    height: 1px;
+    background: repeating-linear-gradient(
+        to right,
+        var(--color-accent),
+        var(--color-accent) 4px,
+        transparent 4px,
+        transparent 8px
+    );
+}
+
+.guide-line.guide-vertical {
+    width: 1px;
+    background: repeating-linear-gradient(
+        to bottom,
+        var(--color-accent),
+        var(--color-accent) 4px,
+        transparent 4px,
+        transparent 8px
+    );
+}
+
+/* Rulers hidden state */
+.canvas-container.rulers-hidden .ruler,
+.canvas-container.rulers-hidden .ruler-corner {
+    display: none;
+}
+
+.canvas-container.rulers-hidden {
+    grid-template-columns: 0 1fr auto;
+    grid-template-rows: 0 1fr auto;
+}
+
+.canvas-container.rulers-hidden .viewport {
+    grid-column: 1 / -1;
+    grid-row: 1 / -1;
+}
+
+/* Ruler hover states */
+.ruler:hover {
+    background-color: var(--color-bg-tertiary);
+}
+
+.ruler-horizontal {
+    cursor: col-resize;
+}
+
+.ruler-vertical {
+    cursor: row-resize;
+}
+
+/* Ruler corner styling */
+.ruler-corner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    color: var(--color-text-muted);
+    transition: background-color var(--transition-fast);
+}
+
+.ruler-corner:hover {
+    background-color: var(--color-bg-hover);
+    color: var(--color-text);
+}
+
+.ruler-corner::after {
+    content: '⊞';
 }
 
 /* ============================================
