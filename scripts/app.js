@@ -7392,22 +7392,36 @@ class Asciistrator extends EventEmitter {
         const panX = this.renderer.panX;
         const panY = this.renderer.panY;
         
-        // Update horizontal ruler selection
+        // Update horizontal ruler selection indicator
         if (this.rulerHSelection) {
             const startPx = minX * charWidth + panX;
             const endPx = maxX * charWidth + panX;
-            this.rulerHSelection.style.left = `${startPx}px`;
-            this.rulerHSelection.style.width = `${endPx - startPx}px`;
-            this.rulerHSelection.style.display = 'block';
+            const width = Math.max(0, endPx - startPx);
+            
+            // Only show if selection has positive width and is at least partially visible
+            if (width > 0) {
+                this.rulerHSelection.style.left = `${startPx}px`;
+                this.rulerHSelection.style.width = `${width}px`;
+                this.rulerHSelection.style.display = 'block';
+            } else {
+                this.rulerHSelection.style.display = 'none';
+            }
         }
         
-        // Update vertical ruler selection
+        // Update vertical ruler selection indicator
         if (this.rulerVSelection) {
             const startPx = minY * charHeight + panY;
             const endPx = maxY * charHeight + panY;
-            this.rulerVSelection.style.top = `${startPx}px`;
-            this.rulerVSelection.style.height = `${endPx - startPx}px`;
-            this.rulerVSelection.style.display = 'block';
+            const height = Math.max(0, endPx - startPx);
+            
+            // Only show if selection has positive height and is at least partially visible
+            if (height > 0) {
+                this.rulerVSelection.style.top = `${startPx}px`;
+                this.rulerVSelection.style.height = `${height}px`;
+                this.rulerVSelection.style.display = 'block';
+            } else {
+                this.rulerVSelection.style.display = 'none';
+            }
         }
     }
     

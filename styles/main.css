@@ -649,6 +649,7 @@ body {
 }
 
 .ruler {
+    position: relative;
     background-color: var(--color-bg-secondary);
     font-family: var(--font-family-mono);
     font-size: var(--font-size-xs);
