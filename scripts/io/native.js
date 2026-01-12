@@ -33,6 +33,7 @@ export class NativeDocument {
         this.objects = [];
         this.symbols = [];
         this.styles = {};
+        this.componentLibraries = [];
     }
 
     /**
@@ -179,8 +180,20 @@ export class NativeDocument {
      * @param {boolean} pretty - Pretty print
      * @returns {string}
      */
-    toJSON(pretty = true) {
-        return JSON.stringify(this, null, pretty ? 2 : 0);
+    toJSONString(pretty = true) {
+        // Build a plain object to avoid infinite recursion
+        // (toJSON is a special method called by JSON.stringify)
+        const data = {
+            version: this.version,
+            metadata: this.metadata,
+            document: this.document,
+            layers: this.layers,
+            objects: this.objects,
+            symbols: this.symbols,
+            styles: this.styles,
+            componentLibraries: this.componentLibraries
+        };
+        return JSON.stringify(data, null, pretty ? 2 : 0);
     }
 
     /**
@@ -236,10 +249,17 @@ export class NativeDocument {
  * @param {object} appState - Application state
  * @param {object[]} layers - Layers with objects
  * @param {string} filename - Filename
+ * @param {object[]} componentLibraries - Optional component libraries data
  */
-export function saveNativeDocument(appState, layers, filename = 'document.ascii') {
+export function saveNativeDocument(appState, layers, filename = 'document.ascii', componentLibraries = null) {
     const doc = NativeDocument.fromAppState(appState, layers);
-    const json = doc.toJSON();
+    
+    // Include component libraries if provided
+    if (componentLibraries) {
+        doc.componentLibraries = componentLibraries;
+    }
+    
+    const json = doc.toJSONString();
     
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
