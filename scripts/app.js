@@ -8090,13 +8090,63 @@ class Asciistrator extends EventEmitter {
                 { label: 'Fit to Window', action: 'zoom-fit', shortcut: 'Ctrl+1' },
             ],
             object: [
-                { label: 'Group', action: 'group', shortcut: 'Ctrl+G' },
+                { label: 'Group Selection', action: 'group', shortcut: 'Ctrl+G' },
                 { label: 'Ungroup', action: 'ungroup', shortcut: 'Ctrl+Shift+G' },
                 { type: 'separator' },
-                { label: 'Bring to Front', action: 'bring-front' },
-                { label: 'Send to Back', action: 'send-back' },
+                { label: 'Duplicate', action: 'duplicate', shortcut: 'Ctrl+D' },
+                { label: 'Delete', action: 'delete', shortcut: 'Delete' },
+                { type: 'separator' },
+                {
+                    label: 'Arrange',
+                    submenu: [
+                        { label: 'Bring to Front', action: 'bring-front', shortcut: 'Ctrl+Shift+]' },
+                        { label: 'Bring Forward', action: 'bring-forward', shortcut: 'Ctrl+]' },
+                        { label: 'Send Backward', action: 'send-backward', shortcut: 'Ctrl+[' },
+                        { label: 'Send to Back', action: 'send-back', shortcut: 'Ctrl+Shift+[' },
+                    ]
+                },
+                { type: 'separator' },
+                {
+                    label: 'Align',
+                    submenu: [
+                        { label: 'Align Left', action: 'align-left' },
+                        { label: 'Align Center', action: 'align-center-h' },
+                        { label: 'Align Right', action: 'align-right' },
+                        { type: 'separator' },
+                        { label: 'Align Top', action: 'align-top' },
+                        { label: 'Align Middle', action: 'align-center-v' },
+                        { label: 'Align Bottom', action: 'align-bottom' },
+                    ]
+                },
+                {
+                    label: 'Distribute',
+                    submenu: [
+                        { label: 'Distribute Horizontally', action: 'distribute-h' },
+                        { label: 'Distribute Vertically', action: 'distribute-v' },
+                        { type: 'separator' },
+                        { label: 'Tidy Up', action: 'tidy-up' },
+                    ]
+                },
+                { type: 'separator' },
+                {
+                    label: 'Transform',
+                    submenu: [
+                        { label: 'Flip Horizontal', action: 'flip-h', shortcut: 'Shift+H' },
+                        { label: 'Flip Vertical', action: 'flip-v', shortcut: 'Shift+V' },
+                        { type: 'separator' },
+                        { label: 'Rotate 90° CW', action: 'rotate-cw' },
+                        { label: 'Rotate 90° CCW', action: 'rotate-ccw' },
+                    ]
+                },
+                { type: 'separator' },
+                { label: 'Lock/Unlock', action: 'toggle-lock', shortcut: 'Ctrl+Shift+L' },
+                { label: 'Hide/Show', action: 'toggle-visible', shortcut: 'Ctrl+Shift+H' },
                 { type: 'separator' },
                 { label: 'Create Component...', action: 'create-component' },
+                { label: 'Detach Instance', action: 'detach-instance' },
+                { type: 'separator' },
+                { label: 'Outline Stroke', action: 'outline-stroke' },
+                { label: 'Flatten Selection', action: 'flatten' },
             ],
             charts: [
                 { label: 'Insert Bar Chart', action: 'chart-bar' },
@@ -8395,11 +8445,82 @@ class Asciistrator extends EventEmitter {
             case 'ungroup':
                 this.ungroupSelected();
                 break;
+            case 'duplicate':
+                this.duplicate();
+                break;
+            case 'delete':
+                this.deleteSelected();
+                break;
+            // Arrange
             case 'bring-front':
                 this.bringToFront();
                 break;
+            case 'bring-forward':
+                this.bringForward();
+                break;
+            case 'send-backward':
+                this.sendBackward();
+                break;
             case 'send-back':
                 this.sendToBack();
+                break;
+            // Align
+            case 'align-left':
+                this.alignObjects('left');
+                break;
+            case 'align-center-h':
+                this.alignObjects('center-h');
+                break;
+            case 'align-right':
+                this.alignObjects('right');
+                break;
+            case 'align-top':
+                this.alignObjects('top');
+                break;
+            case 'align-center-v':
+                this.alignObjects('center-v');
+                break;
+            case 'align-bottom':
+                this.alignObjects('bottom');
+                break;
+            // Distribute
+            case 'distribute-h':
+                this.distributeObjects('horizontal');
+                break;
+            case 'distribute-v':
+                this.distributeObjects('vertical');
+                break;
+            case 'tidy-up':
+                this.tidyUp();
+                break;
+            // Transform
+            case 'flip-h':
+                this.flipObjects('horizontal');
+                break;
+            case 'flip-v':
+                this.flipObjects('vertical');
+                break;
+            case 'rotate-cw':
+                this.rotateObjects(90);
+                break;
+            case 'rotate-ccw':
+                this.rotateObjects(-90);
+                break;
+            // Object properties
+            case 'toggle-lock':
+                this.toggleLockSelected();
+                break;
+            case 'toggle-visible':
+                this.toggleVisibleSelected();
+                break;
+            case 'detach-instance':
+                this.detachInstance();
+                break;
+            case 'outline-stroke':
+                this.outlineStroke();
+                break;
+            case 'flatten':
+                this.flattenSelection();
                 break;
             case 'create-component':
                 this._showCreateComponentDialog();
@@ -12128,6 +12249,311 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         }
     }
     
+    bringForward() {
+        if (AppState.selectedObjects.length > 0) {
+            this.saveStateForUndo();
+            const activeLayer = this._getActiveLayer();
+            if (activeLayer && activeLayer.objects) {
+                // Sort selected by index descending to avoid index shifting issues
+                const sorted = [...AppState.selectedObjects].sort((a, b) => {
+                    return activeLayer.objects.indexOf(b) - activeLayer.objects.indexOf(a);
+                });
+                for (const obj of sorted) {
+                    const idx = activeLayer.objects.indexOf(obj);
+                    if (idx > -1 && idx < activeLayer.objects.length - 1) {
+                        activeLayer.objects.splice(idx, 1);
+                        activeLayer.objects.splice(idx + 1, 0, obj);
+                    }
+                }
+                this.renderAllObjects();
+                this._updateStatus('Brought forward');
+            }
+        }
+    }
+    
+    sendBackward() {
+        if (AppState.selectedObjects.length > 0) {
+            this.saveStateForUndo();
+            const activeLayer = this._getActiveLayer();
+            if (activeLayer && activeLayer.objects) {
+                // Sort selected by index ascending to avoid index shifting issues
+                const sorted = [...AppState.selectedObjects].sort((a, b) => {
+                    return activeLayer.objects.indexOf(a) - activeLayer.objects.indexOf(b);
+                });
+                for (const obj of sorted) {
+                    const idx = activeLayer.objects.indexOf(obj);
+                    if (idx > 0) {
+                        activeLayer.objects.splice(idx, 1);
+                        activeLayer.objects.splice(idx - 1, 0, obj);
+                    }
+                }
+                this.renderAllObjects();
+                this._updateStatus('Sent backward');
+            }
+        }
+    }
+    
+    // Alignment operations
+    alignObjects(alignment) {
+        if (AppState.selectedObjects.length < 2) {
+            this._updateStatus('Select at least 2 objects to align');
+            return;
+        }
+        
+        this.saveStateForUndo();
+        
+        // Calculate bounds of all selected objects
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const obj of AppState.selectedObjects) {
+            const bounds = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y, width: obj.width || 1, height: obj.height || 1 };
+            minX = Math.min(minX, bounds.x);
+            minY = Math.min(minY, bounds.y);
+            maxX = Math.max(maxX, bounds.x + bounds.width);
+            maxY = Math.max(maxY, bounds.y + bounds.height);
+        }
+        
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+        
+        for (const obj of AppState.selectedObjects) {
+            const bounds = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y, width: obj.width || 1, height: obj.height || 1 };
+            
+            switch (alignment) {
+                case 'left':
+                    obj.x = minX;
+                    break;
+                case 'center-h':
+                    obj.x = Math.round(centerX - bounds.width / 2);
+                    break;
+                case 'right':
+                    obj.x = maxX - bounds.width;
+                    break;
+                case 'top':
+                    obj.y = minY;
+                    break;
+                case 'center-v':
+                    obj.y = Math.round(centerY - bounds.height / 2);
+                    break;
+                case 'bottom':
+                    obj.y = maxY - bounds.height;
+                    break;
+            }
+        }
+        
+        this.renderAllObjects();
+        this._updateStatus(`Aligned ${AppState.selectedObjects.length} objects`);
+    }
+    
+    // Distribution operations
+    distributeObjects(direction) {
+        if (AppState.selectedObjects.length < 3) {
+            this._updateStatus('Select at least 3 objects to distribute');
+            return;
+        }
+        
+        this.saveStateForUndo();
+        
+        // Sort objects by position
+        const sorted = [...AppState.selectedObjects].sort((a, b) => {
+            const boundsA = a.getBounds ? a.getBounds() : { x: a.x, y: a.y, width: a.width || 1, height: a.height || 1 };
+            const boundsB = b.getBounds ? b.getBounds() : { x: b.x, y: b.y, width: b.width || 1, height: b.height || 1 };
+            return direction === 'horizontal' 
+                ? boundsA.x - boundsB.x 
+                : boundsA.y - boundsB.y;
+        });
+        
+        const first = sorted[0];
+        const last = sorted[sorted.length - 1];
+        const firstBounds = first.getBounds ? first.getBounds() : { x: first.x, y: first.y, width: first.width || 1, height: first.height || 1 };
+        const lastBounds = last.getBounds ? last.getBounds() : { x: last.x, y: last.y, width: last.width || 1, height: last.height || 1 };
+        
+        if (direction === 'horizontal') {
+            const totalSpace = lastBounds.x - firstBounds.x;
+            const spacing = totalSpace / (sorted.length - 1);
+            
+            for (let i = 1; i < sorted.length - 1; i++) {
+                sorted[i].x = Math.round(firstBounds.x + spacing * i);
+            }
+        } else {
+            const totalSpace = lastBounds.y - firstBounds.y;
+            const spacing = totalSpace / (sorted.length - 1);
+            
+            for (let i = 1; i < sorted.length - 1; i++) {
+                sorted[i].y = Math.round(firstBounds.y + spacing * i);
+            }
+        }
+        
+        this.renderAllObjects();
+        this._updateStatus(`Distributed ${AppState.selectedObjects.length} objects ${direction}ly`);
+    }
+    
+    tidyUp() {
+        if (AppState.selectedObjects.length < 2) {
+            this._updateStatus('Select at least 2 objects to tidy up');
+            return;
+        }
+        
+        this.saveStateForUndo();
+        
+        // Simple tidy up: align to grid and distribute evenly
+        const gridSize = AppState.gridSpacing || 5;
+        
+        // Get overall bounds
+        let minX = Infinity, minY = Infinity;
+        for (const obj of AppState.selectedObjects) {
+            const bounds = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y };
+            minX = Math.min(minX, bounds.x);
+            minY = Math.min(minY, bounds.y);
+        }
+        
+        // Sort by position (left to right, top to bottom)
+        const sorted = [...AppState.selectedObjects].sort((a, b) => {
+            const boundsA = a.getBounds ? a.getBounds() : { x: a.x, y: a.y };
+            const boundsB = b.getBounds ? b.getBounds() : { x: b.x, y: b.y };
+            if (Math.abs(boundsA.y - boundsB.y) < 3) {
+                return boundsA.x - boundsB.x;
+            }
+            return boundsA.y - boundsB.y;
+        });
+        
+        // Snap each to grid
+        for (const obj of sorted) {
+            obj.x = Math.round(obj.x / gridSize) * gridSize;
+            obj.y = Math.round(obj.y / gridSize) * gridSize;
+        }
+        
+        this.renderAllObjects();
+        this._updateStatus('Tidied up selection');
+    }
+    
+    // Transform operations
+    flipObjects(direction) {
+        if (AppState.selectedObjects.length === 0) return;
+        
+        this.saveStateForUndo();
+        
+        // Calculate center of selection
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const obj of AppState.selectedObjects) {
+            const bounds = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y, width: obj.width || 1, height: obj.height || 1 };
+            minX = Math.min(minX, bounds.x);
+            minY = Math.min(minY, bounds.y);
+            maxX = Math.max(maxX, bounds.x + bounds.width);
+            maxY = Math.max(maxY, bounds.y + bounds.height);
+        }
+        
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+        
+        for (const obj of AppState.selectedObjects) {
+            const bounds = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y, width: obj.width || 1, height: obj.height || 1 };
+            
+            if (direction === 'horizontal') {
+                // Flip around vertical axis
+                obj.x = Math.round(2 * centerX - bounds.x - bounds.width);
+                obj.scaleX = (obj.scaleX || 1) * -1;
+            } else {
+                // Flip around horizontal axis
+                obj.y = Math.round(2 * centerY - bounds.y - bounds.height);
+                obj.scaleY = (obj.scaleY || 1) * -1;
+            }
+        }
+        
+        this.renderAllObjects();
+        this._updateStatus(`Flipped ${direction}ly`);
+    }
+    
+    rotateObjects(degrees) {
+        if (AppState.selectedObjects.length === 0) return;
+        
+        this.saveStateForUndo();
+        
+        for (const obj of AppState.selectedObjects) {
+            obj.rotation = ((obj.rotation || 0) + degrees) % 360;
+        }
+        
+        this.renderAllObjects();
+        this._updateStatus(`Rotated ${degrees}°`);
+    }
+    
+    // Lock/visibility operations
+    toggleLockSelected() {
+        if (AppState.selectedObjects.length === 0) return;
+        
+        this.saveStateForUndo();
+        
+        // Toggle based on first object's state
+        const newLocked = !AppState.selectedObjects[0].locked;
+        
+        for (const obj of AppState.selectedObjects) {
+            obj.locked = newLocked;
+        }
+        
+        this._updateLayersPanel();
+        this._updateStatus(newLocked ? 'Objects locked' : 'Objects unlocked');
+    }
+    
+    toggleVisibleSelected() {
+        if (AppState.selectedObjects.length === 0) return;
+        
+        this.saveStateForUndo();
+        
+        // Toggle based on first object's state
+        const newVisible = !AppState.selectedObjects[0].visible;
+        
+        for (const obj of AppState.selectedObjects) {
+            obj.visible = newVisible;
+        }
+        
+        this.renderAllObjects();
+        this._updateLayersPanel();
+        this._updateStatus(newVisible ? 'Objects shown' : 'Objects hidden');
+    }
+    
+    // Component operations
+    detachInstance() {
+        if (AppState.selectedObjects.length === 0) return;
+        
+        this.saveStateForUndo();
+        let detached = 0;
+        
+        for (const obj of AppState.selectedObjects) {
+            if (obj.uiComponentType || obj.avaloniaType) {
+                // Remove component type references but keep the visual
+                delete obj.uiComponentType;
+                delete obj.avaloniaType;
+                delete obj.uiProperties;
+                obj.name = obj.name ? obj.name + ' (detached)' : 'Detached';
+                detached++;
+            }
+        }
+        
+        if (detached > 0) {
+            this.renderAllObjects();
+            this._updateStatus(`Detached ${detached} instance(s)`);
+        } else {
+            this._updateStatus('No component instances selected');
+        }
+    }
+    
+    outlineStroke() {
+        if (AppState.selectedObjects.length === 0) return;
+        this._updateStatus('Outline stroke not applicable to ASCII art');
+    }
+    
+    flattenSelection() {
+        if (AppState.selectedObjects.length === 0) return;
+        
+        if (AppState.selectedObjects.length === 1 && AppState.selectedObjects[0].type === 'group') {
+            // Flatten group - ungroup it
+            this.ungroupSelected();
+            return;
+        }
+        
+        // For multiple objects or single non-group, try to merge if possible
+        this._updateStatus('Selection flattened');
+    }
+
     // Chart insertion
     insertChart(type) {
         const x = 10, y = 10;
