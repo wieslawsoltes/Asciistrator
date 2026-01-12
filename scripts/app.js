@@ -619,8 +619,15 @@ class TextObject extends SceneObject {
     }
     
     _updateBounds() {
-        this.width = this.text ? this.text.length : 1;
-        this.height = 1;
+        if (!this.text) {
+            this.width = 1;
+            this.height = 1;
+            return;
+        }
+        // Handle multi-line text
+        const lines = this.text.split('\n');
+        this.width = Math.max(...lines.map(line => line.length));
+        this.height = lines.length;
     }
     
     getBounds() {
@@ -643,7 +650,11 @@ class TextObject extends SceneObject {
     
     render(buffer) {
         if (!this.visible) return;
-        buffer.drawText(this.x, this.y, this.text, this.strokeColor);
+        // Handle multi-line text
+        const lines = this.text.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+            buffer.drawText(this.x, this.y + i, lines[i], this.strokeColor);
+        }
     }
     
     toJSON() {
@@ -3930,9 +3941,13 @@ class SelectTool extends Tool {
         this.lastClickY = 0;
         this.isEditingText = false;
         this.editingObject = null;
+        this.appRef = null; // Store reference to app for property updates
     }
     
     onMouseDown(x, y, button, renderer, app) {
+        // Store app reference for use in property change handlers
+        this.appRef = app;
+        
         if (button === 0) {
             // Check for double-click to edit text
             const now = Date.now();
@@ -4467,7 +4482,7 @@ class SelectTool extends Tool {
         const propText = $('#prop-text');
         const propTextGroup = $('#prop-text-group');
         if (propText && propTextGroup) {
-            if ((obj.type === 'text' || obj.type === 'ascii-text') && obj.text !== undefined) {
+            if ((obj.type === 'text' || obj.type === 'ascii-text') && obj.text !== undefined && !obj.uiComponentType) {
                 propTextGroup.style.display = 'block';
                 propText.value = obj.text || '';
             } else if (obj.label !== undefined) {
@@ -4494,6 +4509,188 @@ class SelectTool extends Tool {
         // Update border style
         const borderStyle = $('#prop-border-style');
         if (borderStyle) borderStyle.value = obj.lineStyle || 'single';
+        
+        // Update UI component properties
+        this._updateUIComponentProperties(obj);
+    }
+    
+    _updateUIComponentProperties(obj) {
+        const uiGroup = $('#prop-ui-component-group');
+        const uiType = $('#prop-ui-type');
+        const uiPropsContainer = $('#prop-ui-properties');
+        
+        if (!uiGroup || !uiPropsContainer) return;
+        
+        // Check if this is a UI component (avaloniaType kept for backward compatibility)
+        const isUIComponent = obj.uiComponentType || obj.avaloniaType;
+        
+        if (!isUIComponent) {
+            uiGroup.style.display = 'none';
+            return;
+        }
+        
+        uiGroup.style.display = 'block';
+        if (uiType) uiType.textContent = obj.uiComponentType || obj.avaloniaType;
+        
+        // Clear existing properties
+        uiPropsContainer.innerHTML = '';
+        
+        // Initialize uiProperties if needed
+        if (!obj.uiProperties) {
+            obj.uiProperties = {};
+        }
+        
+        // Get relevant properties for this component type
+        const componentType = (obj.uiComponentType || obj.avaloniaType || '').toLowerCase();
+        const relevantProps = this._getRelevantUIProperties(componentType, obj);
+        
+        // Create input for each relevant property
+        for (const prop of relevantProps) {
+            const row = document.createElement('div');
+            row.className = 'property-row';
+            
+            const label = document.createElement('label');
+            label.textContent = prop.label + ':';
+            row.appendChild(label);
+            
+            const input = this._createUIPropertyInput(prop, obj);
+            row.appendChild(input);
+            
+            uiPropsContainer.appendChild(row);
+        }
+    }
+    
+    _getRelevantUIProperties(componentType, obj) {
+        // Define properties for different component types
+        const props = [];
+        
+        // Helper to get default value from the UI component class
+        const getDefault = (key) => {
+            return componentLibraryManager.getUIComponentPropertyDefault(
+                obj.uiComponentType || obj.avaloniaType, 
+                key
+            );
+        };
+        
+        // Content/Text properties
+        if (['button', 'label', 'textblock', 'hyperlinkbutton', 'repeatbutton', 'togglebutton'].some(t => componentType.includes(t))) {
+            props.push({ key: 'content', label: 'Content', type: 'text', default: getDefault('content') });
+        }
+        if (['textbox', 'textblock'].some(t => componentType.includes(t))) {
+            props.push({ key: 'text', label: 'Text', type: 'text', default: getDefault('text') });
+        }
+        if (['textbox', 'combobox', 'autocomplete'].some(t => componentType.includes(t))) {
+            props.push({ key: 'placeholder', label: 'Placeholder', type: 'text', default: getDefault('placeholder') });
+        }
+        
+        // Header/Title
+        if (['expander', 'groupbox', 'tabitem', 'headeredcontentcontrol'].some(t => componentType.includes(t))) {
+            props.push({ key: 'header', label: 'Header', type: 'text', default: getDefault('header') });
+        }
+        if (['window'].some(t => componentType.includes(t))) {
+            props.push({ key: 'title', label: 'Title', type: 'text', default: getDefault('title') });
+        }
+        
+        // Boolean properties
+        if (['checkbox', 'radiobutton', 'togglebutton', 'toggleswitch'].some(t => componentType.includes(t))) {
+            props.push({ key: 'isChecked', label: 'Checked', type: 'checkbox', default: getDefault('isChecked') ?? false });
+        }
+        if (['button'].some(t => componentType.includes(t))) {
+            props.push({ key: 'isDefault', label: 'Default', type: 'checkbox', default: getDefault('isDefault') ?? false });
+            props.push({ key: 'isCancel', label: 'Cancel', type: 'checkbox', default: getDefault('isCancel') ?? false });
+        }
+        
+        // Numeric properties
+        if (['slider', 'numericupdown', 'progressbar'].some(t => componentType.includes(t))) {
+            props.push({ key: 'minimum', label: 'Minimum', type: 'number', default: getDefault('minimum') });
+            props.push({ key: 'maximum', label: 'Maximum', type: 'number', default: getDefault('maximum') });
+            props.push({ key: 'value', label: 'Value', type: 'number', default: getDefault('value') });
+        }
+        
+        // Common properties for all
+        props.push({ key: 'isEnabled', label: 'Enabled', type: 'checkbox', default: getDefault('isEnabled') ?? true });
+        
+        return props;
+    }
+    
+    _createUIPropertyInput(prop, obj) {
+        const self = this;
+        let input;
+        
+        const updateAndRerender = (value) => {
+            if (value === undefined || value === null || value === '') {
+                delete obj.uiProperties[prop.key];
+            } else {
+                obj.uiProperties[prop.key] = value;
+            }
+            // Re-render the UI component's ASCII preview
+            self._rerenderUIComponent(obj);
+        };
+        
+        // Get current value: explicit value > default value > fallback
+        const currentValue = obj.uiProperties[prop.key];
+        const hasExplicitValue = prop.key in obj.uiProperties;
+        
+        switch (prop.type) {
+            case 'checkbox':
+                input = document.createElement('input');
+                input.type = 'checkbox';
+                input.checked = hasExplicitValue ? currentValue : (prop.default ?? false);
+                input.addEventListener('change', () => {
+                    updateAndRerender(input.checked);
+                });
+                break;
+                
+            case 'number':
+                input = document.createElement('input');
+                input.type = 'number';
+                input.value = hasExplicitValue ? currentValue : (prop.default ?? '');
+                input.style.width = '60px';
+                input.placeholder = prop.default !== undefined ? String(prop.default) : '';
+                input.addEventListener('change', () => {
+                    const val = input.value === '' ? undefined : parseFloat(input.value);
+                    updateAndRerender(val);
+                });
+                break;
+                
+            default: // text
+                input = document.createElement('input');
+                input.type = 'text';
+                input.value = hasExplicitValue ? currentValue : (prop.default ?? '');
+                input.style.flex = '1';
+                input.placeholder = prop.default !== undefined ? String(prop.default) : '';
+                input.addEventListener('change', () => {
+                    const val = input.value.trim() || undefined;
+                    updateAndRerender(val);
+                });
+                break;
+        }
+        
+        return input;
+    }
+    
+    _rerenderUIComponent(obj) {
+        if (!obj.uiComponentType) return;
+        
+        // Get the UI component class and re-render
+        const uiComp = componentLibraryManager.createUIComponent(obj.uiComponentType, obj.uiProperties || {});
+        if (uiComp) {
+            // Re-render with stored dimensions or defaults
+            const asciiPreview = uiComp.render({ 
+                width: obj.uiRenderWidth || obj.width || 20, 
+                height: obj.uiRenderHeight || obj.height || 5 
+            });
+            obj.text = asciiPreview;
+            obj._updateBounds();
+        }
+        
+        // Mark spatial index as dirty and re-render
+        // Use appRef if available, otherwise try window.Asciistrator.app
+        const app = this.appRef || (typeof window !== 'undefined' && window.Asciistrator?.app);
+        if (app) {
+            app._spatialIndexDirty = true;
+            app.renderAllObjects();
+        }
     }
     
     _updateStatus(msg) {
@@ -7098,8 +7295,33 @@ class Asciistrator extends EventEmitter {
                 { type: 'separator' },
                 { label: 'Page Size...', action: 'page-size' },
                 { type: 'separator' },
+                { label: 'Export...', action: 'export-dialog', shortcut: 'Ctrl+E' },
+                { type: 'separator' },
                 { label: 'Export as Text', action: 'export-txt' },
                 { label: 'Export as HTML', action: 'export-html' },
+                { label: 'Export as SVG', action: 'export-svg' },
+                { label: 'Export as PNG', action: 'export-png' },
+                { type: 'separator' },
+                { 
+                    label: 'Export to Avalonia', 
+                    submenu: [
+                        { label: 'XAML Document...', action: 'export-avalonia-xaml' },
+                        { label: 'Window...', action: 'export-avalonia-window' },
+                        { label: 'UserControl...', action: 'export-avalonia-usercontrol' },
+                        { type: 'separator' },
+                        { label: 'Full Project...', action: 'export-avalonia-project' }
+                    ]
+                },
+                { 
+                    label: 'Export to Web', 
+                    submenu: [
+                        { label: 'React Component...', action: 'export-react' },
+                        { label: 'Vue Component...', action: 'export-vue' },
+                        { label: 'Angular Component...', action: 'export-angular' },
+                        { label: 'Svelte Component...', action: 'export-svelte' },
+                        { label: 'Web Component...', action: 'export-webcomponent' }
+                    ]
+                },
             ],
             edit: [
                 { label: 'Undo', action: 'undo', shortcut: 'Ctrl+Z' },
@@ -7169,38 +7391,72 @@ class Asciistrator extends EventEmitter {
             // Create dropdown element
             const dropdown = createElement('div', { class: 'menu-dropdown' });
             
-            menuItems.forEach(item => {
-                if (item.type === 'separator') {
-                    dropdown.appendChild(createElement('div', { class: 'menu-separator' }));
-                } else {
-                    const menuItem = createElement('button', {
-                        class: 'menu-dropdown-item',
-                        'data-action': item.action
-                    });
-                    
-                    const labelSpan = createElement('span', {}, item.label);
-                    menuItem.appendChild(labelSpan);
-                    
-                    if (item.shortcut) {
-                        const shortcutSpan = createElement('span', { class: 'menu-shortcut' }, item.shortcut);
-                        menuItem.appendChild(shortcutSpan);
+            // Helper to create menu items recursively (supports submenus)
+            const createMenuItems = (items, parentEl, isSubmenu = false) => {
+                items.forEach(item => {
+                    if (item.type === 'separator') {
+                        parentEl.appendChild(createElement('div', { class: 'menu-separator' }));
+                    } else if (item.submenu) {
+                        // Create submenu container
+                        const submenuWrapper = createElement('div', { class: 'submenu-wrapper' });
+                        const submenuTrigger = createElement('button', {
+                            class: 'menu-dropdown-item has-submenu'
+                        });
+                        
+                        const labelSpan = createElement('span', {}, item.label);
+                        submenuTrigger.appendChild(labelSpan);
+                        
+                        // Arrow indicator
+                        const arrowSpan = createElement('span', { class: 'submenu-arrow' }, '▶');
+                        submenuTrigger.appendChild(arrowSpan);
+                        
+                        // Create submenu dropdown
+                        const submenu = createElement('div', { class: 'submenu-dropdown' });
+                        createMenuItems(item.submenu, submenu, true);
+                        
+                        submenuWrapper.appendChild(submenuTrigger);
+                        submenuWrapper.appendChild(submenu);
+                        parentEl.appendChild(submenuWrapper);
+                        
+                        // Show/hide submenu on hover
+                        submenuWrapper.addEventListener('mouseenter', () => {
+                            submenu.classList.add('show');
+                        });
+                        submenuWrapper.addEventListener('mouseleave', () => {
+                            submenu.classList.remove('show');
+                        });
+                    } else {
+                        const menuItem = createElement('button', {
+                            class: 'menu-dropdown-item',
+                            'data-action': item.action
+                        });
+                        
+                        const labelSpan = createElement('span', {}, item.label);
+                        menuItem.appendChild(labelSpan);
+                        
+                        if (item.shortcut) {
+                            const shortcutSpan = createElement('span', { class: 'menu-shortcut' }, item.shortcut);
+                            menuItem.appendChild(shortcutSpan);
+                        }
+                        
+                        // Simple click handler for menu items
+                        menuItem.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            this._handleMenuAction(item.action);
+                            this._closeAllDropdowns();
+                            // Also close mobile menu
+                            const menuItemsEl = document.querySelector('.menu-items');
+                            const mobileMenuToggle = $('#mobile-menu-toggle');
+                            if (menuItemsEl) menuItemsEl.classList.remove('open');
+                            if (mobileMenuToggle) mobileMenuToggle.classList.remove('active');
+                        });
+                        
+                        parentEl.appendChild(menuItem);
                     }
-                    
-                    // Simple click handler for menu items
-                    menuItem.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        this._handleMenuAction(item.action);
-                        this._closeAllDropdowns();
-                        // Also close mobile menu
-                        const menuItemsEl = document.querySelector('.menu-items');
-                        const mobileMenuToggle = $('#mobile-menu-toggle');
-                        if (menuItemsEl) menuItemsEl.classList.remove('open');
-                        if (mobileMenuToggle) mobileMenuToggle.classList.remove('active');
-                    });
-                    
-                    dropdown.appendChild(menuItem);
-                }
-            });
+                });
+            };
+            
+            createMenuItems(menuItems, dropdown);
             
             // Wrap button and dropdown together
             const wrapper = createElement('div', { class: 'menu-item-wrapper' });
@@ -7230,6 +7486,7 @@ class Asciistrator extends EventEmitter {
     
     _closeAllDropdowns() {
         $$('.menu-dropdown.show').forEach(d => d.classList.remove('show'));
+        $$('.submenu-dropdown.show').forEach(d => d.classList.remove('show'));
     }
     
     _handleMenuAction(action) {
@@ -7252,11 +7509,51 @@ class Asciistrator extends EventEmitter {
             case 'page-size':
                 this.showPageSizeDialog();
                 break;
+            // Basic exports
             case 'export-txt':
                 this.export('txt');
                 break;
             case 'export-html':
                 this.export('html');
+                break;
+            case 'export-svg':
+                this.export('svg');
+                break;
+            case 'export-png':
+                this.export('png');
+                break;
+            // Export dialog
+            case 'export-dialog':
+                this.showExportDialog();
+                break;
+            // Avalonia exports
+            case 'export-avalonia-xaml':
+                this.showAvaloniaExportDialog('xaml');
+                break;
+            case 'export-avalonia-window':
+                this.showAvaloniaExportDialog('window');
+                break;
+            case 'export-avalonia-usercontrol':
+                this.showAvaloniaExportDialog('usercontrol');
+                break;
+            case 'export-avalonia-project':
+                this.showAvaloniaExportDialog('project');
+                break;
+            // Web framework exports
+            case 'export-react':
+                this.exportToWebFramework('react');
+                break;
+            case 'export-vue':
+                this.exportToWebFramework('vue');
+                break;
+            case 'export-angular':
+                this.exportToWebFramework('angular');
+                break;
+            case 'export-svelte':
+                this.exportToWebFramework('svelte');
+                break;
+            case 'export-webcomponent':
+                this.exportToWebFramework('webcomponent');
                 break;
             case 'undo':
                 this.undo();
@@ -8447,6 +8744,26 @@ class Asciistrator extends EventEmitter {
             });
         }
         
+        // Export to Avalonia button
+        const avaloniaBtn = $('#btn-export-avalonia');
+        if (avaloniaBtn) {
+            avaloniaBtn.addEventListener('click', () => {
+                this._showComponentAvaloniaExportDialog();
+            });
+        }
+        
+        // Export format dropdown
+        const exportFormatSelect = $('#component-export-format');
+        if (exportFormatSelect) {
+            exportFormatSelect.addEventListener('change', (e) => {
+                const format = e.target.value;
+                if (format) {
+                    this._exportComponentsToFormat(format);
+                    e.target.value = ''; // Reset dropdown
+                }
+            });
+        }
+        
         // New library button
         const newLibBtn = $('#btn-new-library');
         if (newLibBtn) {
@@ -8578,6 +8895,12 @@ class Asciistrator extends EventEmitter {
                 <span class="component-name">${component.name}</span>
             `;
         }
+        
+        // Right-click context menu for component export
+        compDiv.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            this._showComponentContextMenu(e.clientX, e.clientY, component, library);
+        });
         
         // Drag start (mouse)
         compDiv.addEventListener('dragstart', (e) => {
@@ -8865,6 +9188,37 @@ class Asciistrator extends EventEmitter {
                 if (def.name) connector.name = def.name;
                 return connector;
                 
+            case 'ui-component':
+                // Framework-agnostic UI Component
+                // Render as ASCII text representation
+                const uiComp = componentLibraryManager.createUIComponent(def.componentType, def.properties || {});
+                if (uiComp) {
+                    const renderWidth = def.width || 20;
+                    const renderHeight = def.height || 5;
+                    const asciiPreview = uiComp.render({ width: renderWidth, height: renderHeight });
+                    const textObj = new TextObject(def.x || 0, def.y || 0, asciiPreview);
+                    textObj.name = def.componentType || 'UIComponent';
+                    // Store the component type (framework-agnostic)
+                    textObj.uiComponentType = def.componentType;
+                    textObj.uiProperties = def.properties || {};
+                    // Store the original render dimensions for re-rendering
+                    textObj.uiRenderWidth = renderWidth;
+                    textObj.uiRenderHeight = renderHeight;
+                    return textObj;
+                }
+                // Fallback: create a placeholder rectangle with label
+                const placeholderWidth = def.width || 20;
+                const placeholderHeight = def.height || 5;
+                const placeholder = new Rectangle(def.x || 0, def.y || 0, placeholderWidth, placeholderHeight);
+                placeholder.name = def.componentType || 'UIComponent';
+                placeholder.label = def.componentType || 'UI';
+                // Store the component type (framework-agnostic)
+                placeholder.uiComponentType = def.componentType;
+                placeholder.uiProperties = def.properties || {};
+                placeholder.uiRenderWidth = placeholderWidth;
+                placeholder.uiRenderHeight = placeholderHeight;
+                return placeholder;
+                
             default:
                 // Try to create a text object for unknown types
                 if (def.text) {
@@ -9136,6 +9490,294 @@ class Asciistrator extends EventEmitter {
         
         URL.revokeObjectURL(url);
         this._updateStatus(`Exported: ${library.name}`);
+    }
+    
+    // ==========================================
+    // COMPONENT AVALONIA EXPORT
+    // ==========================================
+    
+    /**
+     * Show context menu for component with export options
+     */
+    _showComponentContextMenu(x, y, component, library) {
+        const menuItems = [
+            { label: 'Insert at Center', action: () => this._insertComponentAtCenter(component) },
+            { type: 'separator' },
+            { label: 'Export to Avalonia XAML', action: () => this._exportComponentToAvalonia(component, 'xaml') },
+            { label: 'Export to Avalonia Window', action: () => this._exportComponentToAvalonia(component, 'window') },
+            { label: 'Export to Avalonia UserControl', action: () => this._exportComponentToAvalonia(component, 'usercontrol') },
+            { type: 'separator' },
+            { label: 'Export to React', action: () => this._exportComponentToWebFramework(component, 'react') },
+            { label: 'Export to Vue', action: () => this._exportComponentToWebFramework(component, 'vue') },
+            { label: 'Export to HTML', action: () => this._exportComponentToWebFramework(component, 'html') },
+            { type: 'separator' },
+            { label: 'Copy as ASCII', action: () => this._copyComponentAsAscii(component) },
+            { label: 'Copy as XAML', action: () => this._copyComponentAsXaml(component) }
+        ];
+        
+        this._showContextMenu(x, y, menuItems);
+    }
+    
+    /**
+     * Show Avalonia export dialog for all components
+     */
+    async _showComponentAvaloniaExportDialog() {
+        const libraries = componentLibraryManager.getAllLibraries();
+        
+        if (libraries.length === 0) {
+            this._updateStatus('No component libraries available');
+            return;
+        }
+        
+        // Collect all components into a virtual document
+        const document = this._prepareComponentsForExport(libraries);
+        
+        // Show the Avalonia export dialog
+        this.showAvaloniaExportDialog('usercontrol');
+    }
+    
+    /**
+     * Export components to a specific format
+     */
+    async _exportComponentsToFormat(format) {
+        const libraries = componentLibraryManager.getAllLibraries();
+        
+        if (libraries.length === 0) {
+            this._updateStatus('No component libraries available');
+            return;
+        }
+        
+        switch (format) {
+            case 'avalonia-xaml':
+            case 'avalonia-window':
+            case 'avalonia-usercontrol':
+                this.showAvaloniaExportDialog(format.replace('avalonia-', ''));
+                break;
+            case 'react':
+            case 'vue':
+                this.exportToWebFramework(format);
+                break;
+            case 'html':
+                this.export('html');
+                break;
+            default:
+                this._updateStatus(`Unknown export format: ${format}`);
+        }
+    }
+    
+    /**
+     * Export a single component to Avalonia
+     */
+    async _exportComponentToAvalonia(component, type = 'xaml') {
+        const { showAvaloniaExportDialog } = await import('./io/AvaloniaExportDialog.js');
+        
+        // Create a document from this single component
+        const document = this._componentToDocument(component);
+        
+        try {
+            const result = await showAvaloniaExportDialog(document, type, {
+                className: this._sanitizeClassName(component.name),
+                namespace: 'AsciistratorComponents'
+            });
+            
+            if (result.success) {
+                this._updateStatus(`Exported ${component.name} to Avalonia ${type}`);
+            }
+        } catch (error) {
+            if (error.message !== 'Dialog cancelled' && error.message !== 'Export cancelled') {
+                console.error('Component export error:', error);
+            }
+        }
+    }
+    
+    /**
+     * Export a single component to web framework
+     */
+    async _exportComponentToWebFramework(component, framework) {
+        const exporters = await import('./io/exporters/WebFrameworkExporters.js');
+        
+        const document = this._componentToDocument(component);
+        const className = this._sanitizeClassName(component.name);
+        
+        let exporter;
+        switch (framework) {
+            case 'react':
+                exporter = new exporters.ReactExporter();
+                break;
+            case 'vue':
+                exporter = new exporters.VueExporter();
+                break;
+            case 'html':
+                exporter = exporters.HTMLExporter ? new exporters.HTMLExporter() : { export: (doc) => ({ content: doc.canvas?.htmlContent || '' }) };
+                break;
+            default:
+                this._updateStatus(`Unknown framework: ${framework}`);
+                return;
+        }
+        
+        try {
+            const result = exporter.export(document, { className });
+            const content = result.content || result;
+            
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${className}.${exporter.fileExtension?.replace('.', '') || 'txt'}`;
+            a.click();
+            
+            URL.revokeObjectURL(url);
+            this._updateStatus(`Exported ${component.name} to ${framework}`);
+        } catch (error) {
+            console.error(`${framework} export error:`, error);
+            this._updateStatus(`Export failed: ${error.message}`);
+        }
+    }
+    
+    /**
+     * Copy component as ASCII text to clipboard
+     */
+    async _copyComponentAsAscii(component) {
+        try {
+            const ascii = component.preview || component.objects?.map(obj => obj.text || '').join('\n') || component.name;
+            await navigator.clipboard.writeText(ascii);
+            this._updateStatus(`Copied ${component.name} as ASCII`);
+        } catch (error) {
+            console.error('Copy failed:', error);
+            this._updateStatus('Copy failed');
+        }
+    }
+    
+    /**
+     * Copy component as XAML to clipboard
+     */
+    async _copyComponentAsXaml(component) {
+        try {
+            const { AvaloniaXamlExporter } = await import('./io/exporters/avalonia/index.js');
+            
+            const exporter = new AvaloniaXamlExporter();
+            const document = this._componentToDocument(component);
+            const result = exporter.export(document, { 
+                includeNamespaces: false,
+                className: this._sanitizeClassName(component.name)
+            });
+            
+            const xaml = result.content || result;
+            await navigator.clipboard.writeText(xaml);
+            this._updateStatus(`Copied ${component.name} as XAML`);
+        } catch (error) {
+            console.error('Copy failed:', error);
+            this._updateStatus('Copy failed');
+        }
+    }
+    
+    /**
+     * Convert a component to a document structure for export
+     */
+    _componentToDocument(component) {
+        // Generate ASCII content from component preview or objects
+        let asciiContent = component.preview || '';
+        
+        if (!asciiContent && component.objects) {
+            // Try to render objects to ASCII
+            const lines = [];
+            for (const obj of component.objects) {
+                if (obj.text) {
+                    lines.push(obj.text);
+                }
+            }
+            asciiContent = lines.join('\n');
+        }
+        
+        if (!asciiContent) {
+            asciiContent = component.name;
+        }
+        
+        return {
+            canvas: {
+                width: component.width || 40,
+                height: component.height || 10,
+                content: asciiContent,
+                htmlContent: `<pre>${this._escapeHtml(asciiContent)}</pre>`
+            },
+            layers: [{
+                id: 'component-layer',
+                name: component.name,
+                visible: true,
+                locked: false,
+                objects: component.objects || []
+            }],
+            selectedObjects: [],
+            metadata: {
+                filename: `${component.name}.ascii`,
+                componentId: component.id,
+                componentName: component.name,
+                created: new Date().toISOString(),
+                version: '0.1.0'
+            }
+        };
+    }
+    
+    /**
+     * Prepare all library components for export
+     */
+    _prepareComponentsForExport(libraries) {
+        const allComponents = [];
+        let totalWidth = 0;
+        let totalHeight = 0;
+        
+        for (const library of libraries) {
+            for (const [id, component] of library.components) {
+                allComponents.push(component);
+                totalWidth = Math.max(totalWidth, component.width || 40);
+                totalHeight += (component.height || 10) + 2;
+            }
+        }
+        
+        // Create combined ASCII content
+        const lines = [];
+        for (const component of allComponents) {
+            lines.push(`// ${component.name}`);
+            lines.push(component.preview || component.name);
+            lines.push('');
+        }
+        
+        return {
+            canvas: {
+                width: totalWidth,
+                height: totalHeight,
+                content: lines.join('\n'),
+                htmlContent: `<pre>${this._escapeHtml(lines.join('\n'))}</pre>`
+            },
+            layers: libraries.map(lib => ({
+                id: lib.id,
+                name: lib.name,
+                visible: true,
+                locked: false,
+                objects: Array.from(lib.components.values()).flatMap(c => c.objects || [])
+            })),
+            selectedObjects: [],
+            metadata: {
+                filename: 'components-export.ascii',
+                libraryCount: libraries.length,
+                componentCount: allComponents.length,
+                created: new Date().toISOString(),
+                version: '0.1.0'
+            }
+        };
+    }
+    
+    /**
+     * Sanitize a name for use as a class/variable name
+     */
+    _sanitizeClassName(name) {
+        return name
+            .replace(/[^a-zA-Z0-9\s]/g, '')
+            .split(/\s+/)
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+            .join('')
+            .replace(/^[0-9]/, 'C$&') || 'Component';
     }
     
     _escapeHtml(text) {
@@ -9449,6 +10091,14 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                 mimeType = 'text/html';
                 extension = 'html';
                 break;
+            case 'svg':
+                content = this._exportToSVG();
+                mimeType = 'image/svg+xml';
+                extension = 'svg';
+                break;
+            case 'png':
+                this._exportToPNG();
+                return; // PNG export handles its own download
             default:
                 content = this.renderer.exportText();
                 mimeType = 'text/plain';
@@ -9465,6 +10115,211 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         a.click();
         
         URL.revokeObjectURL(url);
+    }
+    
+    /**
+     * Export to SVG format
+     * @private
+     */
+    _exportToSVG() {
+        const asciiContent = this.renderer.exportText();
+        const lines = asciiContent.split('\n');
+        const width = Math.max(...lines.map(l => l.length)) * 10;
+        const height = lines.length * 18;
+        
+        let svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+  <style>
+    text { font-family: 'Courier New', monospace; font-size: 14px; fill: #e0e0e0; }
+  </style>
+  <rect width="100%" height="100%" fill="#1a1a2e"/>
+`;
+        
+        lines.forEach((line, i) => {
+            const escaped = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            svg += `  <text x="5" y="${18 + i * 18}">${escaped}</text>\n`;
+        });
+        
+        svg += '</svg>';
+        return svg;
+    }
+    
+    /**
+     * Export to PNG format
+     * @private
+     */
+    _exportToPNG() {
+        const asciiContent = this.renderer.exportText();
+        const lines = asciiContent.split('\n');
+        const charWidth = 10;
+        const charHeight = 18;
+        const padding = 20;
+        
+        const canvas = document.createElement('canvas');
+        const maxLineLength = Math.max(...lines.map(l => l.length));
+        canvas.width = maxLineLength * charWidth + padding * 2;
+        canvas.height = lines.length * charHeight + padding * 2;
+        
+        const ctx = canvas.getContext('2d');
+        
+        // Background
+        ctx.fillStyle = '#1a1a2e';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Text
+        ctx.fillStyle = '#e0e0e0';
+        ctx.font = '14px "Courier New", monospace';
+        ctx.textBaseline = 'top';
+        
+        lines.forEach((line, i) => {
+            ctx.fillText(line, padding, padding + i * charHeight);
+        });
+        
+        // Download
+        canvas.toBlob(blob => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = AppState.filename.replace(/\.[^.]+$/, '.png');
+            a.click();
+            URL.revokeObjectURL(url);
+        }, 'image/png');
+    }
+    
+    /**
+     * Show the unified export dialog
+     */
+    async showExportDialog() {
+        // Dynamic import to avoid circular dependencies
+        const { showExportDialog } = await import('./io/ExportDialog.js');
+        
+        const document = this._prepareExportDocument();
+        showExportDialog(document, {
+            onExport: (result) => {
+                this._updateStatus(`Exported as ${result.format}`);
+            }
+        });
+    }
+    
+    /**
+     * Show specialized Avalonia export dialog
+     * @param {string} type - Export type (xaml, window, usercontrol, project)
+     */
+    async showAvaloniaExportDialog(type = 'xaml') {
+        // Dynamic import to avoid circular dependencies
+        const { showAvaloniaExportDialog } = await import('./io/AvaloniaExportDialog.js');
+        
+        const document = this._prepareExportDocument();
+        
+        try {
+            const result = await showAvaloniaExportDialog(document, type, {
+                className: this._generateClassName(),
+                namespace: 'AsciistratorApp'
+            });
+            
+            if (result.success) {
+                this._updateStatus(`Exported ${result.files.length} Avalonia file(s)`);
+            }
+        } catch (error) {
+            if (error.message !== 'Dialog cancelled' && error.message !== 'Export cancelled') {
+                console.error('Avalonia export error:', error);
+                this._updateStatus('Export cancelled');
+            }
+        }
+    }
+    
+    /**
+     * Export to web framework
+     * @param {string} framework - Framework name (react, vue, angular, svelte, webcomponent)
+     */
+    async exportToWebFramework(framework) {
+        // Dynamic import
+        const exporters = await import('./io/exporters/WebFrameworkExporters.js');
+        
+        const document = this._prepareExportDocument();
+        const className = this._generateClassName();
+        
+        let exporter;
+        switch (framework) {
+            case 'react':
+                exporter = new exporters.ReactExporter();
+                break;
+            case 'vue':
+                exporter = new exporters.VueExporter();
+                break;
+            case 'angular':
+                exporter = new exporters.AngularExporter();
+                break;
+            case 'svelte':
+                exporter = new exporters.SvelteExporter();
+                break;
+            case 'webcomponent':
+                exporter = new exporters.WebComponentExporter();
+                break;
+            default:
+                this._updateStatus(`Unknown framework: ${framework}`);
+                return;
+        }
+        
+        try {
+            const result = exporter.export(document, { className });
+            const content = result.content || result;
+            
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${className}.${exporter.fileExtension.replace('.', '')}`;
+            a.click();
+            
+            URL.revokeObjectURL(url);
+            this._updateStatus(`Exported to ${framework}`);
+        } catch (error) {
+            console.error(`${framework} export error:`, error);
+            this._updateStatus(`Export failed: ${error.message}`);
+        }
+    }
+    
+    /**
+     * Prepare document data for export
+     * @private
+     */
+    _prepareExportDocument() {
+        return {
+            canvas: {
+                width: AppState.canvasWidth,
+                height: AppState.canvasHeight,
+                content: this.renderer.exportText(),
+                htmlContent: this.renderer.exportHTML()
+            },
+            layers: AppState.layers.map(layer => ({
+                id: layer.id,
+                name: layer.name,
+                visible: layer.visible,
+                locked: layer.locked,
+                objects: layer.objects || []
+            })),
+            selectedObjects: AppState.selectedObjects,
+            metadata: {
+                filename: AppState.filename,
+                created: new Date().toISOString(),
+                version: '0.1.0'
+            }
+        };
+    }
+    
+    /**
+     * Generate a class name from filename
+     * @private
+     */
+    _generateClassName() {
+        const baseName = AppState.filename
+            .replace(/\.[^.]+$/, '')  // Remove extension
+            .replace(/[^a-zA-Z0-9]/g, '')  // Remove non-alphanumeric
+            .replace(/^[0-9]/, 'A$&');  // Ensure starts with letter
+        
+        return baseName.charAt(0).toUpperCase() + baseName.slice(1) || 'AsciiArt';
     }
     
     undo() {
