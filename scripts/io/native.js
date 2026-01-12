@@ -101,6 +101,19 @@ export class NativeDocument {
             locked: obj.locked,
             opacity: obj.opacity
         };
+        
+        // UI Component properties (framework-agnostic)
+        if (obj.uiComponentType) {
+            data.uiComponentType = obj.uiComponentType;
+            data.uiProperties = obj.uiProperties || {};
+            data.uiRenderWidth = obj.uiRenderWidth;
+            data.uiRenderHeight = obj.uiRenderHeight;
+        }
+        // Legacy Avalonia type support
+        if (obj.avaloniaType && !obj.uiComponentType) {
+            data.avaloniaType = obj.avaloniaType;
+            data.avaloniaProperties = obj.avaloniaProperties || {};
+        }
 
         // Type-specific properties
         switch (obj.type) {
