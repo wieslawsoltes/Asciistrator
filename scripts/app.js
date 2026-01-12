@@ -6802,30 +6802,111 @@ class Asciistrator extends EventEmitter {
         const contextMenu = $('#context-menu');
         if (!contextMenu) return;
         
-        // Define context menu items
-        const menuItems = [
-            { label: 'Cut', action: () => this.cut(), shortcut: 'Ctrl+X' },
-            { label: 'Copy', action: () => this.copy(), shortcut: 'Ctrl+C' },
-            { label: 'Paste', action: () => this.paste(), shortcut: 'Ctrl+V' },
-            { type: 'separator' },
-            { label: 'Duplicate', action: () => this.duplicate(), shortcut: 'Ctrl+D' },
-            { label: 'Delete', action: () => this.deleteSelected(), shortcut: 'Del' },
-            { type: 'separator' },
-            { label: 'Bring to Front', action: () => this.bringToFront() },
-            { label: 'Send to Back', action: () => this.sendToBack() },
-            { type: 'separator' },
-            { label: 'Group', action: () => this.groupSelected(), shortcut: 'Ctrl+G' },
-            { label: 'Ungroup', action: () => this.ungroupSelected(), shortcut: 'Ctrl+Shift+G' },
-            { type: 'separator' },
-            { label: 'Create Component...', action: () => this._showCreateComponentDialog() },
-        ];
+        // Build dynamic context menu based on selection
+        const buildMenuItems = () => {
+            const hasSelection = AppState.selectedObjects.length > 0;
+            const hasMultiSelection = AppState.selectedObjects.length > 1;
+            const selectedObj = AppState.selectedObjects[0];
+            const isGroup = selectedObj?.type === 'group';
+            const isFrame = selectedObj?.isFrame;
+            const isComponent = selectedObj?.uiComponentType || selectedObj?.avaloniaType;
+            
+            const items = [
+                { label: 'Cut', action: () => this.cut(), shortcut: 'Ctrl+X', disabled: !hasSelection },
+                { label: 'Copy', action: () => this.copy(), shortcut: 'Ctrl+C', disabled: !hasSelection },
+                { label: 'Paste', action: () => this.paste(), shortcut: 'Ctrl+V' },
+                { type: 'separator' },
+                { label: 'Duplicate', action: () => this.duplicate(), shortcut: 'Ctrl+D', disabled: !hasSelection },
+                { label: 'Delete', action: () => this.deleteSelected(), shortcut: 'Del', disabled: !hasSelection },
+                { type: 'separator' },
+                { label: 'Rename...', action: () => this.renameSelected(), shortcut: 'Ctrl+R', disabled: !hasSelection },
+                { type: 'separator' },
+            ];
+            
+            // Arrange submenu
+            if (hasSelection) {
+                items.push(
+                    { label: 'Bring to Front', action: () => this.bringToFront() },
+                    { label: 'Bring Forward', action: () => this.bringForward() },
+                    { label: 'Send Backward', action: () => this.sendBackward() },
+                    { label: 'Send to Back', action: () => this.sendToBack() },
+                    { type: 'separator' }
+                );
+            }
+            
+            // Grouping
+            if (hasMultiSelection) {
+                items.push(
+                    { label: 'Group', action: () => this.groupSelected(), shortcut: 'Ctrl+G' },
+                    { label: 'Frame Selection', action: () => this.frameSelection(), shortcut: 'Ctrl+Alt+G' }
+                );
+            }
+            if (isGroup || isFrame) {
+                items.push({ label: 'Ungroup', action: () => this.ungroupSelected(), shortcut: 'Ctrl+Shift+G' });
+            }
+            
+            // Boolean operations (need 2+ shapes)
+            if (hasMultiSelection) {
+                const hasShapes = AppState.selectedObjects.some(o => o.type === 'rectangle' || o.type === 'ellipse');
+                if (hasShapes) {
+                    items.push(
+                        { type: 'separator' },
+                        { label: 'Union', action: () => this.booleanOperation('union') },
+                        { label: 'Subtract', action: () => this.booleanOperation('subtract') },
+                        { label: 'Intersect', action: () => this.booleanOperation('intersect') },
+                        { label: 'Exclude', action: () => this.booleanOperation('exclude') }
+                    );
+                }
+            }
+            
+            // Alignment (need 2+ objects)
+            if (hasMultiSelection) {
+                items.push(
+                    { type: 'separator' },
+                    { label: 'Align Left', action: () => this.alignObjects('left') },
+                    { label: 'Align Center', action: () => this.alignObjects('center-h') },
+                    { label: 'Align Right', action: () => this.alignObjects('right') },
+                    { label: 'Distribute Horizontally', action: () => this.distributeObjects('horizontal') }
+                );
+            }
+            
+            // Lock/visibility
+            if (hasSelection) {
+                const isLocked = selectedObj?.locked;
+                const isHidden = !selectedObj?.visible;
+                items.push(
+                    { type: 'separator' },
+                    { label: isLocked ? 'Unlock' : 'Lock', action: () => this.toggleLockSelected() },
+                    { label: isHidden ? 'Show' : 'Hide', action: () => this.toggleVisibleSelected() }
+                );
+            }
+            
+            // Component actions
+            items.push({ type: 'separator' });
+            if (hasSelection && !isComponent) {
+                items.push({ label: 'Create Component...', action: () => this._showCreateComponentDialog() });
+            }
+            if (isComponent) {
+                items.push({ label: 'Detach Instance', action: () => this.detachInstance() });
+            }
+            
+            // Select similar
+            if (hasSelection && selectedObj) {
+                items.push(
+                    { type: 'separator' },
+                    { label: `Select All ${selectedObj.type}s`, action: () => this.selectByType(selectedObj.type) }
+                );
+            }
+            
+            return items;
+        };
         
         // Handle right-click on canvas
         const viewport = $('#viewport');
         if (viewport) {
             viewport.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
-                this._showContextMenu(e.clientX, e.clientY, menuItems);
+                this._showContextMenu(e.clientX, e.clientY, buildMenuItems());
             });
             
             // Long press for touch devices (context menu alternative)
@@ -6839,7 +6920,7 @@ class Asciistrator extends EventEmitter {
                     const touch = e.touches[0];
                     longPressTimer = setTimeout(() => {
                         longPressTriggered = true;
-                        this._showContextMenu(touch.clientX, touch.clientY, menuItems);
+                        this._showContextMenu(touch.clientX, touch.clientY, buildMenuItems());
                         // Vibrate if supported
                         if (navigator.vibrate) {
                             navigator.vibrate(50);
@@ -7713,6 +7794,25 @@ class Asciistrator extends EventEmitter {
                         e.preventDefault();
                         this.duplicate();
                         break;
+                    case 'k':
+                        // Command palette (Ctrl+K)
+                        e.preventDefault();
+                        this.showCommandPalette();
+                        break;
+                    case 'h':
+                        // Find and replace (Ctrl+H) or toggle visibility (Ctrl+Shift+H)
+                        e.preventDefault();
+                        if (e.shiftKey) {
+                            this.toggleVisibleSelected();
+                        } else {
+                            this.showFindReplace();
+                        }
+                        break;
+                    case 'r':
+                        // Rename (Ctrl+R)
+                        e.preventDefault();
+                        this.renameSelected();
+                        break;
                     case ';':
                         // Toggle snapping (Ctrl+;)
                         e.preventDefault();
@@ -7727,6 +7827,14 @@ class Asciistrator extends EventEmitter {
                     e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
                     e.preventDefault();
                     this.deleteSelected();
+                }
+            }
+            
+            // F2 to rename selected
+            if (e.key === 'F2') {
+                if (AppState.selectedObjects.length > 0) {
+                    e.preventDefault();
+                    this.renameSelected();
                 }
             }
         });
@@ -8058,8 +8166,29 @@ class Asciistrator extends EventEmitter {
                 { label: 'Copy', action: 'copy', shortcut: 'Ctrl+C' },
                 { label: 'Paste', action: 'paste', shortcut: 'Ctrl+V' },
                 { type: 'separator' },
+                { label: 'Find and Replace...', action: 'find-replace', shortcut: 'Ctrl+H' },
+                { type: 'separator' },
+                {
+                    label: 'Select All by Type',
+                    submenu: [
+                        { label: 'All Objects', action: 'select-all', shortcut: 'Ctrl+A' },
+                        { type: 'separator' },
+                        { label: 'All Rectangles', action: 'select-type-rectangle' },
+                        { label: 'All Ellipses', action: 'select-type-ellipse' },
+                        { label: 'All Lines', action: 'select-type-line' },
+                        { label: 'All Text', action: 'select-type-text' },
+                        { label: 'All Paths', action: 'select-type-path' },
+                        { label: 'All Groups', action: 'select-type-group' },
+                        { type: 'separator' },
+                        { label: 'All Flowchart Shapes', action: 'select-type-flowchart' },
+                        { label: 'All Components', action: 'select-type-component' },
+                    ]
+                },
+                { type: 'separator' },
                 { label: 'Copy as Text', action: 'copy-as-text' },
                 { label: 'Copy as HTML', action: 'copy-as-html' },
+                { type: 'separator' },
+                { label: 'Quick Actions...', action: 'command-palette', shortcut: 'Ctrl+K' },
                 { type: 'separator' },
                 { label: 'Clear Canvas', action: 'clear' },
             ],
@@ -8091,11 +8220,22 @@ class Asciistrator extends EventEmitter {
             ],
             object: [
                 { label: 'Group Selection', action: 'group', shortcut: 'Ctrl+G' },
+                { label: 'Frame Selection', action: 'frame-selection', shortcut: 'Ctrl+Alt+G' },
                 { label: 'Ungroup', action: 'ungroup', shortcut: 'Ctrl+Shift+G' },
                 { type: 'separator' },
+                { label: 'Rename...', action: 'rename', shortcut: 'Ctrl+R' },
                 { label: 'Duplicate', action: 'duplicate', shortcut: 'Ctrl+D' },
                 { label: 'Delete', action: 'delete', shortcut: 'Delete' },
                 { type: 'separator' },
+                {
+                    label: 'Boolean Operations',
+                    submenu: [
+                        { label: 'Union', action: 'bool-union', shortcut: 'Ctrl+Alt+U' },
+                        { label: 'Subtract', action: 'bool-subtract', shortcut: 'Ctrl+Alt+S' },
+                        { label: 'Intersect', action: 'bool-intersect', shortcut: 'Ctrl+Alt+I' },
+                        { label: 'Exclude', action: 'bool-exclude', shortcut: 'Ctrl+Alt+X' },
+                    ]
+                },
                 {
                     label: 'Arrange',
                     submenu: [
@@ -8438,6 +8578,41 @@ class Asciistrator extends EventEmitter {
             case 'paste':
                 this.paste();
                 break;
+            case 'find-replace':
+                this.showFindReplace();
+                break;
+            case 'command-palette':
+                this.showCommandPalette();
+                break;
+            case 'select-all':
+                this.selectAll();
+                break;
+            case 'select-type-rectangle':
+                this.selectByType('rectangle');
+                break;
+            case 'select-type-ellipse':
+                this.selectByType('ellipse');
+                break;
+            case 'select-type-line':
+                this.selectByType('line');
+                break;
+            case 'select-type-text':
+                this.selectByType('text');
+                break;
+            case 'select-type-path':
+                this.selectByType('path');
+                break;
+            case 'select-type-group':
+                this.selectByType('group');
+                break;
+            case 'select-type-flowchart':
+                this.selectByType('flowchart');
+                break;
+            case 'select-type-component':
+                this.selectByType('component');
+                break;
+                this.paste();
+                break;
             // Object
             case 'group':
                 this.groupSelected();
@@ -8450,6 +8625,26 @@ class Asciistrator extends EventEmitter {
                 break;
             case 'delete':
                 this.deleteSelected();
+                break;
+            case 'rename':
+                this.renameSelected();
+                break;
+            // Frame
+            case 'frame-selection':
+                this.frameSelection();
+                break;
+            // Boolean operations
+            case 'bool-union':
+                this.booleanOperation('union');
+                break;
+            case 'bool-subtract':
+                this.booleanOperation('subtract');
+                break;
+            case 'bool-intersect':
+                this.booleanOperation('intersect');
+                break;
+            case 'bool-exclude':
+                this.booleanOperation('exclude');
                 break;
             // Arrange
             case 'bring-front':
@@ -12552,6 +12747,603 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         
         // For multiple objects or single non-group, try to merge if possible
         this._updateStatus('Selection flattened');
+    }
+
+    // ==========================================
+    // COMMAND PALETTE (Ctrl+K)
+    // ==========================================
+    
+    showCommandPalette() {
+        // Define all available commands
+        const commands = [
+            // Tools
+            { label: 'Select Tool', action: () => this.toolManager.setActiveTool('select'), category: 'Tools', shortcut: 'V' },
+            { label: 'Direct Select Tool', action: () => this.toolManager.setActiveTool('direct-select'), category: 'Tools', shortcut: 'A' },
+            { label: 'Pen Tool', action: () => this.toolManager.setActiveTool('pen'), category: 'Tools', shortcut: 'P' },
+            { label: 'Pencil Tool', action: () => this.toolManager.setActiveTool('pencil'), category: 'Tools', shortcut: 'N' },
+            { label: 'Rectangle Tool', action: () => this.toolManager.setActiveTool('rectangle'), category: 'Tools', shortcut: 'R' },
+            { label: 'Ellipse Tool', action: () => this.toolManager.setActiveTool('ellipse'), category: 'Tools', shortcut: 'O' },
+            { label: 'Line Tool', action: () => this.toolManager.setActiveTool('line'), category: 'Tools', shortcut: 'L' },
+            { label: 'Text Tool', action: () => this.toolManager.setActiveTool('text'), category: 'Tools', shortcut: 'T' },
+            { label: 'Eraser Tool', action: () => this.toolManager.setActiveTool('eraser'), category: 'Tools', shortcut: 'E' },
+            // File
+            { label: 'New Document', action: () => this.newDocument(), category: 'File', shortcut: 'Ctrl+N' },
+            { label: 'Open File', action: () => this.open(), category: 'File', shortcut: 'Ctrl+O' },
+            { label: 'Save', action: () => this.save(), category: 'File', shortcut: 'Ctrl+S' },
+            { label: 'Export', action: () => this.export(), category: 'File', shortcut: 'Ctrl+E' },
+            // Edit
+            { label: 'Undo', action: () => this.undo(), category: 'Edit', shortcut: 'Ctrl+Z' },
+            { label: 'Redo', action: () => this.redo(), category: 'Edit', shortcut: 'Ctrl+Y' },
+            { label: 'Cut', action: () => this.cut(), category: 'Edit', shortcut: 'Ctrl+X' },
+            { label: 'Copy', action: () => this.copy(), category: 'Edit', shortcut: 'Ctrl+C' },
+            { label: 'Paste', action: () => this.paste(), category: 'Edit', shortcut: 'Ctrl+V' },
+            { label: 'Duplicate', action: () => this.duplicate(), category: 'Edit', shortcut: 'Ctrl+D' },
+            { label: 'Delete', action: () => this.deleteSelected(), category: 'Edit', shortcut: 'Delete' },
+            { label: 'Select All', action: () => this.selectAll(), category: 'Edit', shortcut: 'Ctrl+A' },
+            { label: 'Find and Replace', action: () => this.showFindReplace(), category: 'Edit', shortcut: 'Ctrl+H' },
+            // Object
+            { label: 'Group', action: () => this.groupSelected(), category: 'Object', shortcut: 'Ctrl+G' },
+            { label: 'Ungroup', action: () => this.ungroupSelected(), category: 'Object', shortcut: 'Ctrl+Shift+G' },
+            { label: 'Frame Selection', action: () => this.frameSelection(), category: 'Object', shortcut: 'Ctrl+Alt+G' },
+            { label: 'Rename', action: () => this.renameSelected(), category: 'Object', shortcut: 'Ctrl+R' },
+            { label: 'Bring to Front', action: () => this.bringToFront(), category: 'Object' },
+            { label: 'Send to Back', action: () => this.sendToBack(), category: 'Object' },
+            { label: 'Bring Forward', action: () => this.bringForward(), category: 'Object' },
+            { label: 'Send Backward', action: () => this.sendBackward(), category: 'Object' },
+            // Boolean
+            { label: 'Boolean Union', action: () => this.booleanOperation('union'), category: 'Boolean' },
+            { label: 'Boolean Subtract', action: () => this.booleanOperation('subtract'), category: 'Boolean' },
+            { label: 'Boolean Intersect', action: () => this.booleanOperation('intersect'), category: 'Boolean' },
+            { label: 'Boolean Exclude', action: () => this.booleanOperation('exclude'), category: 'Boolean' },
+            // Align
+            { label: 'Align Left', action: () => this.alignObjects('left'), category: 'Align' },
+            { label: 'Align Center Horizontal', action: () => this.alignObjects('center-h'), category: 'Align' },
+            { label: 'Align Right', action: () => this.alignObjects('right'), category: 'Align' },
+            { label: 'Align Top', action: () => this.alignObjects('top'), category: 'Align' },
+            { label: 'Align Center Vertical', action: () => this.alignObjects('center-v'), category: 'Align' },
+            { label: 'Align Bottom', action: () => this.alignObjects('bottom'), category: 'Align' },
+            { label: 'Distribute Horizontally', action: () => this.distributeObjects('horizontal'), category: 'Align' },
+            { label: 'Distribute Vertically', action: () => this.distributeObjects('vertical'), category: 'Align' },
+            // Select by type
+            { label: 'Select All Rectangles', action: () => this.selectByType('rectangle'), category: 'Select' },
+            { label: 'Select All Ellipses', action: () => this.selectByType('ellipse'), category: 'Select' },
+            { label: 'Select All Lines', action: () => this.selectByType('line'), category: 'Select' },
+            { label: 'Select All Text', action: () => this.selectByType('text'), category: 'Select' },
+            { label: 'Select All Paths', action: () => this.selectByType('path'), category: 'Select' },
+            { label: 'Select All Groups', action: () => this.selectByType('group'), category: 'Select' },
+            { label: 'Select All Components', action: () => this.selectByType('component'), category: 'Select' },
+            // View
+            { label: 'Zoom In', action: () => this.zoomIn(), category: 'View', shortcut: 'Ctrl++' },
+            { label: 'Zoom Out', action: () => this.zoomOut(), category: 'View', shortcut: 'Ctrl+-' },
+            { label: 'Zoom 100%', action: () => this.zoomReset(), category: 'View', shortcut: 'Ctrl+0' },
+            { label: 'Fit to Window', action: () => this.zoomFit(), category: 'View', shortcut: 'Ctrl+1' },
+            { label: 'Toggle Grid', action: () => this.toggleGrid(), category: 'View' },
+            { label: 'Toggle Rulers', action: () => this.toggleRulers(), category: 'View' },
+            { label: 'Toggle Snapping', action: () => this.toggleSnapping(), category: 'View' },
+            // Panels
+            { label: 'Show Layers Panel', action: () => this.togglePanel('layers'), category: 'Panels' },
+            { label: 'Show Properties Panel', action: () => this.togglePanel('properties'), category: 'Panels' },
+            { label: 'Show Components Panel', action: () => this.togglePanel('components'), category: 'Panels' },
+            { label: 'Show Characters Panel', action: () => this.togglePanel('chars'), category: 'Panels' },
+            // Help
+            { label: 'Keyboard Shortcuts', action: () => this.showShortcuts(), category: 'Help' },
+            { label: 'About', action: () => this.showAbout(), category: 'Help' },
+        ];
+        
+        // Create modal
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-overlay command-palette-overlay';
+        dialog.innerHTML = `
+            <div class="command-palette">
+                <div class="command-palette-input-wrapper">
+                    <input type="text" class="command-palette-input" placeholder="Type a command..." autofocus>
+                </div>
+                <div class="command-palette-results"></div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        
+        const input = dialog.querySelector('.command-palette-input');
+        const results = dialog.querySelector('.command-palette-results');
+        let selectedIndex = 0;
+        let filteredCommands = [...commands];
+        
+        const renderResults = () => {
+            results.innerHTML = '';
+            const grouped = {};
+            
+            filteredCommands.slice(0, 15).forEach((cmd, idx) => {
+                if (!grouped[cmd.category]) grouped[cmd.category] = [];
+                grouped[cmd.category].push({ ...cmd, idx });
+            });
+            
+            Object.entries(grouped).forEach(([category, cmds]) => {
+                const categoryEl = document.createElement('div');
+                categoryEl.className = 'command-palette-category';
+                categoryEl.textContent = category;
+                results.appendChild(categoryEl);
+                
+                cmds.forEach(cmd => {
+                    const item = document.createElement('div');
+                    item.className = `command-palette-item${cmd.idx === selectedIndex ? ' selected' : ''}`;
+                    item.innerHTML = `
+                        <span class="command-label">${cmd.label}</span>
+                        ${cmd.shortcut ? `<span class="command-shortcut">${cmd.shortcut}</span>` : ''}
+                    `;
+                    item.addEventListener('click', () => {
+                        closeDialog();
+                        cmd.action();
+                    });
+                    item.addEventListener('mouseenter', () => {
+                        selectedIndex = cmd.idx;
+                        renderResults();
+                    });
+                    results.appendChild(item);
+                });
+            });
+        };
+        
+        const filterCommands = (query) => {
+            if (!query) {
+                filteredCommands = [...commands];
+            } else {
+                const lowerQuery = query.toLowerCase();
+                filteredCommands = commands.filter(cmd => 
+                    cmd.label.toLowerCase().includes(lowerQuery) ||
+                    cmd.category.toLowerCase().includes(lowerQuery)
+                ).sort((a, b) => {
+                    // Prioritize matches at start of label
+                    const aStarts = a.label.toLowerCase().startsWith(lowerQuery);
+                    const bStarts = b.label.toLowerCase().startsWith(lowerQuery);
+                    if (aStarts && !bStarts) return -1;
+                    if (!aStarts && bStarts) return 1;
+                    return 0;
+                });
+            }
+            selectedIndex = 0;
+            renderResults();
+        };
+        
+        const closeDialog = () => {
+            dialog.remove();
+        };
+        
+        input.addEventListener('input', (e) => filterCommands(e.target.value));
+        
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                selectedIndex = Math.min(selectedIndex + 1, Math.min(filteredCommands.length - 1, 14));
+                renderResults();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                selectedIndex = Math.max(selectedIndex - 1, 0);
+                renderResults();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (filteredCommands[selectedIndex]) {
+                    closeDialog();
+                    filteredCommands[selectedIndex].action();
+                }
+            } else if (e.key === 'Escape') {
+                closeDialog();
+            }
+        });
+        
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) closeDialog();
+        });
+        
+        renderResults();
+        input.focus();
+    }
+
+    // ==========================================
+    // FIND AND REPLACE
+    // ==========================================
+    
+    showFindReplace() {
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-overlay';
+        dialog.innerHTML = `
+            <div class="modal-dialog" style="max-width: 450px;">
+                <div class="modal-header">
+                    <h3>Find and Replace</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-size: 13px;">Find:</label>
+                        <input type="text" id="find-input" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);" placeholder="Text to find...">
+                    </div>
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-size: 13px;">Replace with:</label>
+                        <input type="text" id="replace-input" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);" placeholder="Replacement text...">
+                    </div>
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: flex; align-items: center; gap: 8px; font-size: 13px;">
+                            <input type="checkbox" id="find-case-sensitive">
+                            Case sensitive
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; margin-top: 8px;">
+                            <input type="checkbox" id="find-selected-only">
+                            Selected objects only
+                        </label>
+                    </div>
+                    <div id="find-results" style="font-size: 13px; color: var(--color-text-muted); min-height: 20px;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" id="btn-find-next">Find Next</button>
+                    <button class="btn btn-secondary" id="btn-replace-one">Replace</button>
+                    <button class="btn btn-primary" id="btn-replace-all">Replace All</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        
+        const findInput = dialog.querySelector('#find-input');
+        const replaceInput = dialog.querySelector('#replace-input');
+        const caseSensitive = dialog.querySelector('#find-case-sensitive');
+        const selectedOnly = dialog.querySelector('#find-selected-only');
+        const resultsDiv = dialog.querySelector('#find-results');
+        
+        const getTextObjects = () => {
+            let objects = [];
+            if (selectedOnly.checked && AppState.selectedObjects.length > 0) {
+                objects = AppState.selectedObjects.filter(obj => obj.text !== undefined);
+            } else {
+                for (const layer of AppState.layers) {
+                    if (layer.objects) {
+                        objects.push(...layer.objects.filter(obj => obj.text !== undefined));
+                    }
+                }
+            }
+            return objects;
+        };
+        
+        const findMatches = () => {
+            const find = findInput.value;
+            if (!find) return [];
+            
+            const objects = getTextObjects();
+            const matches = [];
+            
+            for (const obj of objects) {
+                const text = obj.text || '';
+                const searchText = caseSensitive.checked ? text : text.toLowerCase();
+                const searchFind = caseSensitive.checked ? find : find.toLowerCase();
+                
+                if (searchText.includes(searchFind)) {
+                    matches.push(obj);
+                }
+            }
+            
+            return matches;
+        };
+        
+        const updateResults = () => {
+            const matches = findMatches();
+            resultsDiv.textContent = matches.length > 0 
+                ? `Found ${matches.length} match${matches.length === 1 ? '' : 'es'}`
+                : findInput.value ? 'No matches found' : '';
+        };
+        
+        findInput.addEventListener('input', updateResults);
+        caseSensitive.addEventListener('change', updateResults);
+        selectedOnly.addEventListener('change', updateResults);
+        
+        dialog.querySelector('#btn-find-next').addEventListener('click', () => {
+            const matches = findMatches();
+            if (matches.length > 0) {
+                AppState.selectedObjects = [matches[0]];
+                this.renderAllObjects();
+                this._updateLayerList();
+                this._updateStatus(`Found in: ${matches[0].name || matches[0].text?.substring(0, 20)}`);
+            }
+        });
+        
+        dialog.querySelector('#btn-replace-one').addEventListener('click', () => {
+            const find = findInput.value;
+            const replace = replaceInput.value;
+            if (!find) return;
+            
+            const matches = findMatches();
+            if (matches.length > 0) {
+                this.saveStateForUndo();
+                const obj = matches[0];
+                if (caseSensitive.checked) {
+                    obj.text = obj.text.replace(find, replace);
+                } else {
+                    obj.text = obj.text.replace(new RegExp(find, 'i'), replace);
+                }
+                this.renderAllObjects();
+                updateResults();
+                this._updateStatus('Replaced 1 occurrence');
+            }
+        });
+        
+        dialog.querySelector('#btn-replace-all').addEventListener('click', () => {
+            const find = findInput.value;
+            const replace = replaceInput.value;
+            if (!find) return;
+            
+            const matches = findMatches();
+            if (matches.length > 0) {
+                this.saveStateForUndo();
+                let count = 0;
+                for (const obj of matches) {
+                    const flags = caseSensitive.checked ? 'g' : 'gi';
+                    const before = obj.text;
+                    obj.text = obj.text.replace(new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags), replace);
+                    if (before !== obj.text) count++;
+                }
+                this.renderAllObjects();
+                updateResults();
+                this._updateStatus(`Replaced in ${count} object${count === 1 ? '' : 's'}`);
+            }
+        });
+        
+        const closeDialog = () => dialog.remove();
+        
+        dialog.querySelector('.modal-close').addEventListener('click', closeDialog);
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) closeDialog();
+        });
+        
+        findInput.focus();
+    }
+
+    // ==========================================
+    // SELECT BY TYPE
+    // ==========================================
+    
+    selectByType(type) {
+        AppState.selectedObjects = [];
+        
+        const typeMatchers = {
+            'rectangle': (obj) => obj.type === 'rectangle',
+            'ellipse': (obj) => obj.type === 'ellipse',
+            'line': (obj) => obj.type === 'line',
+            'text': (obj) => obj.type === 'text' || obj.type === 'ascii-text',
+            'path': (obj) => obj.type === 'path',
+            'group': (obj) => obj.type === 'group',
+            'flowchart': (obj) => obj.type?.startsWith('flowchart-') || ['process', 'decision', 'terminal', 'io', 'document', 'database', 'subprocess', 'connector'].includes(obj.type),
+            'component': (obj) => obj.uiComponentType || obj.avaloniaType,
+        };
+        
+        const matcher = typeMatchers[type];
+        if (!matcher) {
+            this._updateStatus(`Unknown type: ${type}`);
+            return;
+        }
+        
+        for (const layer of AppState.layers) {
+            if (!layer.visible || layer.locked || !layer.objects) continue;
+            
+            for (const obj of layer.objects) {
+                if (obj.visible && !obj.locked && matcher(obj)) {
+                    AppState.selectedObjects.push(obj);
+                }
+            }
+        }
+        
+        this.renderAllObjects();
+        this._updateLayerList();
+        this._updateStatus(`Selected ${AppState.selectedObjects.length} ${type} object${AppState.selectedObjects.length === 1 ? '' : 's'}`);
+    }
+
+    // ==========================================
+    // RENAME
+    // ==========================================
+    
+    renameSelected() {
+        if (AppState.selectedObjects.length === 0) {
+            this._updateStatus('No object selected');
+            return;
+        }
+        
+        const obj = AppState.selectedObjects[0];
+        const currentName = obj.name || obj.text?.substring(0, 20) || `${obj.type} ${obj.id}`;
+        
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-overlay';
+        dialog.innerHTML = `
+            <div class="modal-dialog" style="max-width: 350px;">
+                <div class="modal-header">
+                    <h3>Rename</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <input type="text" id="rename-input" value="${currentName}" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary modal-cancel">Cancel</button>
+                    <button class="btn btn-primary modal-ok">Rename</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        
+        const input = dialog.querySelector('#rename-input');
+        
+        const doRename = () => {
+            const newName = input.value.trim();
+            if (newName) {
+                this.saveStateForUndo();
+                obj.name = newName;
+                this._updateLayerList();
+                this._updateStatus(`Renamed to "${newName}"`);
+            }
+            dialog.remove();
+        };
+        
+        const closeDialog = () => dialog.remove();
+        
+        dialog.querySelector('.modal-close').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-cancel').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-ok').addEventListener('click', doRename);
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') doRename();
+            if (e.key === 'Escape') closeDialog();
+        });
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) closeDialog();
+        });
+        
+        input.focus();
+        input.select();
+    }
+
+    // ==========================================
+    // FRAMES (Containers)
+    // ==========================================
+    
+    frameSelection() {
+        if (AppState.selectedObjects.length === 0) {
+            this._updateStatus('No objects selected');
+            return;
+        }
+        
+        this.saveStateForUndo();
+        
+        // Calculate bounds of selection
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const obj of AppState.selectedObjects) {
+            const bounds = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y, width: obj.width || 1, height: obj.height || 1 };
+            minX = Math.min(minX, bounds.x);
+            minY = Math.min(minY, bounds.y);
+            maxX = Math.max(maxX, bounds.x + bounds.width);
+            maxY = Math.max(maxY, bounds.y + bounds.height);
+        }
+        
+        // Create a frame (rectangle with clipping)
+        const frame = new RectangleObject(minX - 1, minY - 1, maxX - minX + 2, maxY - minY + 2);
+        frame.type = 'frame';
+        frame.name = 'Frame';
+        frame.isFrame = true;
+        frame.clipContent = true;
+        frame.children = [];
+        frame.strokeChar = '│';
+        frame.lineStyle = 'single';
+        
+        // Move objects into frame
+        for (const obj of AppState.selectedObjects) {
+            this.removeObject(obj.id);
+            frame.children.push(obj);
+            // Convert to relative coordinates
+            obj.x -= frame.x;
+            obj.y -= frame.y;
+        }
+        
+        this.addObject(frame);
+        AppState.selectedObjects = [frame];
+        this.renderAllObjects();
+        this._updateLayerList();
+        this._updateStatus('Created frame');
+    }
+
+    // ==========================================
+    // BOOLEAN OPERATIONS
+    // ==========================================
+    
+    booleanOperation(operation) {
+        if (AppState.selectedObjects.length < 2) {
+            this._updateStatus('Select at least 2 shapes for boolean operations');
+            return;
+        }
+        
+        // Only work with rectangles and ellipses for ASCII
+        const shapes = AppState.selectedObjects.filter(obj => 
+            obj.type === 'rectangle' || obj.type === 'ellipse'
+        );
+        
+        if (shapes.length < 2) {
+            this._updateStatus('Boolean operations require rectangle or ellipse shapes');
+            return;
+        }
+        
+        this.saveStateForUndo();
+        
+        // Get bounds of all shapes
+        const allBounds = shapes.map(s => s.getBounds ? s.getBounds() : { x: s.x, y: s.y, width: s.width, height: s.height });
+        
+        // Calculate union bounds
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const b of allBounds) {
+            minX = Math.min(minX, b.x);
+            minY = Math.min(minY, b.y);
+            maxX = Math.max(maxX, b.x + b.width);
+            maxY = Math.max(maxY, b.y + b.height);
+        }
+        
+        // Create result based on operation
+        const width = maxX - minX;
+        const height = maxY - minY;
+        
+        // For ASCII art, we simulate boolean ops by creating a text grid
+        const grid = [];
+        for (let y = 0; y < height; y++) {
+            grid[y] = [];
+            for (let x = 0; x < width; x++) {
+                const worldX = minX + x;
+                const worldY = minY + y;
+                
+                // Check which shapes contain this point
+                const containedBy = shapes.filter((shape, idx) => {
+                    const b = allBounds[idx];
+                    if (shape.type === 'rectangle') {
+                        return worldX >= b.x && worldX < b.x + b.width &&
+                               worldY >= b.y && worldY < b.y + b.height;
+                    } else if (shape.type === 'ellipse') {
+                        const cx = b.x + b.width / 2;
+                        const cy = b.y + b.height / 2;
+                        const rx = b.width / 2;
+                        const ry = b.height / 2;
+                        return Math.pow((worldX - cx) / rx, 2) + Math.pow((worldY - cy) / ry, 2) <= 1;
+                    }
+                    return false;
+                });
+                
+                let filled = false;
+                switch (operation) {
+                    case 'union':
+                        filled = containedBy.length > 0;
+                        break;
+                    case 'subtract':
+                        // First shape minus others
+                        filled = containedBy.includes(shapes[0]) && containedBy.length === 1;
+                        break;
+                    case 'intersect':
+                        filled = containedBy.length === shapes.length;
+                        break;
+                    case 'exclude':
+                        // XOR - odd number of containments
+                        filled = containedBy.length % 2 === 1;
+                        break;
+                }
+                
+                grid[y][x] = filled ? '█' : ' ';
+            }
+        }
+        
+        // Create text object from grid
+        const text = grid.map(row => row.join('')).join('\n');
+        const resultObj = new TextObject(minX, minY, text);
+        resultObj.name = `Boolean ${operation.charAt(0).toUpperCase() + operation.slice(1)}`;
+        
+        // Remove original shapes
+        for (const shape of shapes) {
+            this.removeObject(shape.id);
+        }
+        
+        this.addObject(resultObj);
+        AppState.selectedObjects = [resultObj];
+        this.renderAllObjects();
+        this._updateLayerList();
+        this._updateStatus(`Boolean ${operation} complete`);
     }
 
     // Chart insertion
