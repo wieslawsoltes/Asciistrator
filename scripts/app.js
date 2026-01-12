@@ -10030,7 +10030,7 @@ class Asciistrator extends EventEmitter {
         // File open dialog
         const input = createElement('input', {
             type: 'file',
-            accept: '.asc,.txt',
+            accept: '.asc,.txt,.ascii,.json',
             style: { display: 'none' }
         });
         
@@ -10038,12 +10038,132 @@ class Asciistrator extends EventEmitter {
             const file = e.target.files[0];
             if (file) {
                 const text = await file.text();
+                const ext = file.name.split('.').pop().toLowerCase();
+                
+                // Try to detect and load native format (JSON)
+                if (ext === 'ascii' || ext === 'json') {
+                    try {
+                        await this._loadFromNativeFormat(text);
+                        AppState.filename = file.name;
+                        this._updateStatus(`Opened ${file.name}`);
+                        return;
+                    } catch (err) {
+                        // Not a valid native format, fall through to plain text
+                        console.warn('Failed to load as native format, trying as plain text:', err);
+                    }
+                }
+                
+                // Load as plain text
                 this._loadFromText(text);
                 AppState.filename = file.name;
+                this._updateStatus(`Opened ${file.name}`);
             }
         });
         
         input.click();
+    }
+    
+    async _loadFromNativeFormat(text) {
+        const data = JSON.parse(text);
+        
+        // Validate this looks like a native document
+        if (!data.version && !data.layers && !data.objects) {
+            throw new Error('Not a valid native format document');
+        }
+        
+        // Clear current state
+        this.renderer.clear();
+        AppState.selectedObjects = [];
+        
+        // Restore document settings
+        if (data.document) {
+            if (data.document.width) AppState.canvasWidth = data.document.width;
+            if (data.document.height) AppState.canvasHeight = data.document.height;
+        }
+        
+        // Restore layers
+        if (data.layers && data.layers.length > 0) {
+            // Create layer map for object assignment
+            const layerMap = new Map();
+            
+            // Restore or create layers
+            AppState.layers = data.layers.map((layerData, index) => {
+                const layer = {
+                    id: layerData.id !== undefined ? layerData.id : index,
+                    name: layerData.name || `Layer ${index + 1}`,
+                    visible: layerData.visible !== false,
+                    locked: layerData.locked || false,
+                    opacity: layerData.opacity || 1,
+                    buffer: new AsciiBuffer(AppState.canvasWidth, AppState.canvasHeight),
+                    objects: []
+                };
+                layerMap.set(layer.id, layer);
+                return layer;
+            });
+            
+            // Restore objects to their layers
+            if (data.objects && Array.isArray(data.objects)) {
+                for (const objData of data.objects) {
+                    const obj = this._createObjectFromJSON(objData);
+                    if (obj) {
+                        // Find the layer for this object
+                        const layerId = objData.layerId !== undefined ? objData.layerId : AppState.layers[0]?.id;
+                        const layer = layerMap.get(layerId) || AppState.layers[0];
+                        if (layer) {
+                            layer.objects.push(obj);
+                        }
+                    }
+                }
+            }
+            
+            // Set active layer to first layer
+            AppState.activeLayerId = AppState.layers[0]?.id || 0;
+        } else {
+            // No layers in document, create default layer
+            AppState.layers = [{
+                id: 0,
+                name: 'Layer 1',
+                visible: true,
+                locked: false,
+                buffer: new AsciiBuffer(AppState.canvasWidth, AppState.canvasHeight),
+                objects: []
+            }];
+            AppState.activeLayerId = 0;
+        }
+        
+        // Clear undo/redo stacks for fresh document
+        AppState.undoStack = [];
+        AppState.redoStack = [];
+        
+        // Restore component libraries
+        if (data.componentLibraries && Array.isArray(data.componentLibraries)) {
+            const { ComponentLibrary } = await import('./components/ComponentLibrary.js');
+            for (const libData of data.componentLibraries) {
+                // Skip if library already exists (by ID)
+                const existing = componentLibraryManager.getLibrary(libData.id);
+                if (existing && existing.isBuiltIn) {
+                    continue; // Don't overwrite built-in libraries
+                }
+                
+                // Remove existing non-built-in library with same ID
+                if (existing) {
+                    componentLibraryManager.removeLibrary(libData.id);
+                }
+                
+                // Create and add the library
+                const library = ComponentLibrary.fromJSON(libData);
+                library.isBuiltIn = false;
+                componentLibraryManager.addLibrary(library);
+            }
+            this._renderComponentLibraries();
+        }
+        
+        // Invalidate spatial index and re-render
+        this._spatialIndexDirty = true;
+        this.renderAllObjects();
+        this._updateLayerList();
+        this._updateUndoRedoButtons();
+        AppState.modified = false;
     }
     
     _loadFromText(text) {
@@ -10058,18 +10178,52 @@ class Asciistrator extends EventEmitter {
     }
     
     save() {
-        const text = this.renderer.exportText();
-        const blob = new Blob([text], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
+        // Check if there are any objects in layers
+        const hasObjects = AppState.layers.some(layer => layer.objects && layer.objects.length > 0);
         
-        const a = createElement('a', {
-            href: url,
-            download: AppState.filename
-        });
-        a.click();
-        
-        URL.revokeObjectURL(url);
+        if (hasObjects) {
+            // Save in native format to preserve objects
+            this._saveNativeFormat();
+        } else {
+            // Save as plain text for simple documents
+            const text = this.renderer.exportText();
+            const blob = new Blob([text], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = createElement('a', {
+                href: url,
+                download: AppState.filename.endsWith('.ascii') ? AppState.filename : AppState.filename
+            });
+            a.click();
+            
+            URL.revokeObjectURL(url);
+        }
         AppState.modified = false;
+    }
+    
+    async _saveNativeFormat() {
+        const { saveNativeDocument } = await import('./io/native.js');
+        
+        // Ensure filename has .ascii extension
+        let filename = AppState.filename;
+        if (!filename.endsWith('.ascii')) {
+            // Replace any existing extension with .ascii
+            const lastDot = filename.lastIndexOf('.');
+            if (lastDot > 0) {
+                filename = filename.substring(0, lastDot) + '.ascii';
+            } else {
+                filename = filename + '.ascii';
+            }
+            AppState.filename = filename;
+        }
+        
+        // Get user component libraries (non-built-in)
+        const componentLibraries = componentLibraryManager.getAllLibraries()
+            .filter(lib => !lib.isBuiltIn)
+            .map(lib => lib.toJSON());
+        
+        saveNativeDocument(AppState, AppState.layers, filename, componentLibraries);
+        this._updateStatus(`Saved ${filename}`);
     }
     
     export(format = 'txt') {
