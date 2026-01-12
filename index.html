@@ -262,6 +262,11 @@
                                 </select>
                             </div>
                         </div>
+                        <!-- UI Component Properties -->
+                        <div class="property-group" id="prop-ui-component-group" style="display:none;">
+                            <label>UI Component: <span id="prop-ui-type"></span></label>
+                            <div id="prop-ui-properties"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -273,11 +278,21 @@
                             <button class="icon-btn small" title="Create Component from Selection" id="btn-create-component">+</button>
                             <button class="icon-btn small" title="Import Library" id="btn-import-library">📥</button>
                             <button class="icon-btn small" title="Export Library" id="btn-export-library">📤</button>
+                            <button class="icon-btn small" title="Export to Avalonia XAML" id="btn-export-avalonia">⚡</button>
                             <button class="icon-btn small" title="New Library" id="btn-new-library">📁</button>
                         </div>
                     </div>
                     <div class="components-toolbar">
                         <input type="text" id="component-search" class="component-search" placeholder="Search components...">
+                        <select id="component-export-format" class="component-export-select" title="Export Format">
+                            <option value="">Export as...</option>
+                            <option value="avalonia-xaml">Avalonia XAML</option>
+                            <option value="avalonia-window">Avalonia Window</option>
+                            <option value="avalonia-usercontrol">Avalonia UserControl</option>
+                            <option value="react">React Component</option>
+                            <option value="vue">Vue Component</option>
+                            <option value="html">HTML</option>
+                        </select>
                     </div>
                     <div id="component-libraries" class="component-libraries">
                         <!-- Libraries and components will be populated by JavaScript -->
