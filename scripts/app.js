@@ -1561,6 +1561,270 @@ class GroupObject extends SceneObject {
 }
 
 // ==========================================
+// FRAME OBJECT (Container with clipping)
+// ==========================================
+
+/**
+ * Frame object - nestable container with clipping support
+ * Similar to Figma frames - contains children and clips them to bounds
+ */
+class FrameObject extends SceneObject {
+    constructor(x = 0, y = 0, width = 20, height = 10) {
+        super('frame');
+        this.x = x;
+        this.y = y;
+        this.width = width;
+        this.height = height;
+        this.children = [];
+        this.clipContent = true;     // Whether to clip children to frame bounds
+        this.showBorder = true;      // Show frame border
+        this.borderStyle = 'single'; // single, double, rounded, dashed
+        this.backgroundColor = null; // Fill color (null = transparent)
+        this.backgroundChar = ' ';   // Character for background
+        this.title = '';             // Optional title shown at top
+        this.padding = { top: 1, right: 1, bottom: 1, left: 1 };
+        this.autoSize = false;       // Auto-resize to fit content
+    }
+    
+    /**
+     * Add child object to frame
+     */
+    addChild(obj) {
+        // Store original position relative to frame
+        obj._frameOffset = {
+            x: obj.x - this.x,
+            y: obj.y - this.y
+        };
+        obj.parentFrame = this.id;
+        this.children.push(obj);
+        if (this.autoSize) this._autoResize();
+    }
+    
+    /**
+     * Remove child from frame
+     */
+    removeChild(obj) {
+        const idx = this.children.indexOf(obj);
+        if (idx > -1) {
+            obj.parentFrame = null;
+            obj._frameOffset = null;
+            this.children.splice(idx, 1);
+            if (this.autoSize) this._autoResize();
+        }
+    }
+    
+    /**
+     * Get all children (including nested frame children)
+     */
+    getAllChildren(recursive = true) {
+        const result = [...this.children];
+        if (recursive) {
+            for (const child of this.children) {
+                if (child.type === 'frame' && child.getAllChildren) {
+                    result.push(...child.getAllChildren(true));
+                }
+            }
+        }
+        return result;
+    }
+    
+    /**
+     * Auto-resize frame to fit children with padding
+     */
+    _autoResize() {
+        if (this.children.length === 0) return;
+        
+        let minX = Infinity, minY = Infinity;
+        let maxX = -Infinity, maxY = -Infinity;
+        
+        for (const child of this.children) {
+            const b = child.getBounds ? child.getBounds() : { x: child.x, y: child.y, width: child.width || 1, height: child.height || 1 };
+            minX = Math.min(minX, b.x);
+            minY = Math.min(minY, b.y);
+            maxX = Math.max(maxX, b.x + b.width);
+            maxY = Math.max(maxY, b.y + b.height);
+        }
+        
+        this.x = minX - this.padding.left;
+        this.y = minY - this.padding.top;
+        this.width = (maxX - minX) + this.padding.left + this.padding.right;
+        this.height = (maxY - minY) + this.padding.top + this.padding.bottom;
+    }
+    
+    /**
+     * Get content area bounds (inside padding)
+     */
+    getContentBounds() {
+        return {
+            x: this.x + this.padding.left,
+            y: this.y + this.padding.top,
+            width: this.width - this.padding.left - this.padding.right,
+            height: this.height - this.padding.top - this.padding.bottom
+        };
+    }
+    
+    getBounds() {
+        return {
+            x: this.x,
+            y: this.y,
+            width: this.width,
+            height: this.height
+        };
+    }
+    
+    containsPoint(px, py) {
+        return px >= this.x && px < this.x + this.width &&
+               py >= this.y && py < this.y + this.height;
+    }
+    
+    /**
+     * Move frame and all children
+     */
+    moveTo(newX, newY) {
+        const dx = newX - this.x;
+        const dy = newY - this.y;
+        this.x = newX;
+        this.y = newY;
+        
+        // Move all children
+        for (const child of this.children) {
+            child.x += dx;
+            child.y += dy;
+            if (child.x1 !== undefined) { child.x1 += dx; child.x2 += dx; }
+            if (child.y1 !== undefined) { child.y1 += dy; child.y2 += dy; }
+        }
+    }
+    
+    render(buffer) {
+        if (!this.visible) return;
+        
+        // Draw background if set
+        if (this.backgroundColor || this.backgroundChar !== ' ') {
+            for (let y = this.y; y < this.y + this.height; y++) {
+                for (let x = this.x; x < this.x + this.width; x++) {
+                    buffer.setChar(x, y, this.backgroundChar, this.backgroundColor);
+                }
+            }
+        }
+        
+        // Draw border
+        if (this.showBorder) {
+            this._renderBorder(buffer);
+        }
+        
+        // Draw title if set
+        if (this.title) {
+            const titleX = this.x + 2;
+            const titleY = this.y;
+            const displayTitle = ` ${this.title} `;
+            for (let i = 0; i < displayTitle.length && titleX + i < this.x + this.width - 1; i++) {
+                buffer.setChar(titleX + i, titleY, displayTitle[i], this.strokeColor);
+            }
+        }
+        
+        // Create clipping mask if enabled
+        const clipBounds = this.clipContent ? this.getContentBounds() : null;
+        
+        // Render children (clipped if enabled)
+        for (const child of this.children) {
+            if (this.clipContent) {
+                // Temporarily modify buffer to clip
+                const originalSetChar = buffer.setChar.bind(buffer);
+                buffer.setChar = (x, y, char, color) => {
+                    if (x >= clipBounds.x && x < clipBounds.x + clipBounds.width &&
+                        y >= clipBounds.y && y < clipBounds.y + clipBounds.height) {
+                        originalSetChar(x, y, char, color);
+                    }
+                };
+                child.render(buffer);
+                buffer.setChar = originalSetChar;
+            } else {
+                child.render(buffer);
+            }
+        }
+    }
+    
+    _renderBorder(buffer) {
+        const chars = this._getBorderChars();
+        const x = this.x;
+        const y = this.y;
+        const w = this.width;
+        const h = this.height;
+        const color = this.strokeColor;
+        
+        // Corners
+        buffer.setChar(x, y, chars.tl, color);
+        buffer.setChar(x + w - 1, y, chars.tr, color);
+        buffer.setChar(x, y + h - 1, chars.bl, color);
+        buffer.setChar(x + w - 1, y + h - 1, chars.br, color);
+        
+        // Horizontal edges
+        for (let i = x + 1; i < x + w - 1; i++) {
+            buffer.setChar(i, y, chars.h, color);
+            buffer.setChar(i, y + h - 1, chars.h, color);
+        }
+        
+        // Vertical edges
+        for (let i = y + 1; i < y + h - 1; i++) {
+            buffer.setChar(x, i, chars.v, color);
+            buffer.setChar(x + w - 1, i, chars.v, color);
+        }
+    }
+    
+    _getBorderChars() {
+        switch (this.borderStyle) {
+            case 'double':
+                return { tl: '╔', tr: '╗', bl: '╚', br: '╝', h: '═', v: '║' };
+            case 'rounded':
+                return { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│' };
+            case 'dashed':
+                return { tl: '┌', tr: '┐', bl: '└', br: '┘', h: '┄', v: '┆' };
+            case 'thick':
+                return { tl: '┏', tr: '┓', bl: '┗', br: '┛', h: '━', v: '┃' };
+            case 'single':
+            default:
+                return { tl: '┌', tr: '┐', bl: '└', br: '┘', h: '─', v: '│' };
+        }
+    }
+    
+    toJSON() {
+        return {
+            ...super.toJSON(),
+            width: this.width,
+            height: this.height,
+            children: this.children.map(c => c.toJSON()),
+            clipContent: this.clipContent,
+            showBorder: this.showBorder,
+            borderStyle: this.borderStyle,
+            backgroundColor: this.backgroundColor,
+            backgroundChar: this.backgroundChar,
+            title: this.title,
+            padding: this.padding,
+            autoSize: this.autoSize
+        };
+    }
+    
+    static fromJSON(data) {
+        const frame = new FrameObject(data.x, data.y, data.width, data.height);
+        frame.id = data.id;
+        frame.name = data.name;
+        frame.visible = data.visible !== false;
+        frame.locked = data.locked || false;
+        frame.clipContent = data.clipContent !== false;
+        frame.showBorder = data.showBorder !== false;
+        frame.borderStyle = data.borderStyle || 'single';
+        frame.backgroundColor = data.backgroundColor;
+        frame.backgroundChar = data.backgroundChar || ' ';
+        frame.title = data.title || '';
+        frame.padding = data.padding || { top: 1, right: 1, bottom: 1, left: 1 };
+        frame.autoSize = data.autoSize || false;
+        frame.strokeColor = data.strokeColor;
+        // Children will be reconstructed by the scene loader
+        return frame;
+    }
+}
+
+// ==========================================
 // FLOWCHART SHAPES
 // ==========================================
 
@@ -5192,6 +5456,75 @@ class EllipseTool extends Tool {
 }
 
 /**
+ * Frame Tool - Creates nestable container frames with clipping
+ */
+class FrameTool extends Tool {
+    constructor() {
+        super('frame', 'F', 'f');
+    }
+    
+    onMouseDown(x, y, button, renderer) {
+        if (button === 0) {
+            this.isDragging = true;
+            this.startX = x;
+            this.startY = y;
+        }
+    }
+    
+    onMouseMove(x, y, renderer) {
+        if (this.isDragging) {
+            renderer.clearPreview();
+            const minX = Math.min(this.startX, x);
+            const minY = Math.min(this.startY, y);
+            const width = Math.max(5, Math.abs(x - this.startX) + 1);
+            const height = Math.max(3, Math.abs(y - this.startY) + 1);
+            
+            // Draw frame preview with label
+            const previewColor = AppState.strokeColor || '#4a9eff';
+            drawRect(renderer.previewBuffer, minX, minY, width, height, {
+                style: 'rounded',
+                color: previewColor
+            });
+            
+            // Draw "Frame" label at top
+            const label = ' Frame ';
+            const labelX = minX + 2;
+            if (labelX + label.length < minX + width - 1) {
+                for (let i = 0; i < label.length; i++) {
+                    renderer.previewBuffer.setChar(labelX + i, minY, label[i], previewColor);
+                }
+            }
+            
+            renderer.render();
+        }
+    }
+    
+    onMouseUp(x, y, button, renderer, app) {
+        if (this.isDragging) {
+            renderer.clearPreview();
+            const minX = Math.min(this.startX, x);
+            const minY = Math.min(this.startY, y);
+            const width = Math.max(5, Math.abs(x - this.startX) + 1);
+            const height = Math.max(3, Math.abs(y - this.startY) + 1);
+            
+            // Create FrameObject
+            const frame = new FrameObject(minX, minY, width, height);
+            frame.strokeColor = AppState.strokeColor;
+            frame.borderStyle = AppState.lineStyle === 'double' ? 'double' : 
+                               AppState.lineStyle === 'rounded' ? 'rounded' : 'single';
+            frame.name = `Frame ${Date.now() % 10000}`;
+            
+            // Add to active layer
+            if (app && app.addObject) {
+                app.addObject(frame, true);
+            }
+            
+            this.isDragging = false;
+        }
+    }
+}
+
+/**
  * Text Tool
  */
 class TextTool extends Tool {
@@ -6518,6 +6851,7 @@ class ToolManager extends EventEmitter {
         this.register(new LineTool());
         this.register(new RectangleTool());
         this.register(new EllipseTool());
+        this.register(new FrameTool());
         this.register(new PolygonTool());
         this.register(new StarTool());
         this.register(new TextTool());
@@ -7732,6 +8066,7 @@ class Asciistrator extends EventEmitter {
                     'b': 'brush',        // Brush
                     'r': 'rectangle',    // Rectangle
                     'o': 'ellipse',      // Ellipse
+                    'f': 'frame',        // Frame
                     't': 'text',         // Text
                     'e': 'eraser',       // Eraser
                     '\\': 'line',        // Line
@@ -12522,6 +12857,264 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         this._updateStatus('Objects ungrouped');
     }
     
+    // ==========================================
+    // FRAME OPERATIONS
+    // ==========================================
+    
+    /**
+     * Create a frame containing the selected objects
+     */
+    createFrameFromSelection() {
+        if (AppState.selectedObjects.length === 0) {
+            this._updateStatus('No objects selected');
+            return;
+        }
+        
+        this.saveStateForUndo();
+        
+        // Calculate bounds of selected objects
+        let minX = Infinity, minY = Infinity;
+        let maxX = -Infinity, maxY = -Infinity;
+        
+        for (const obj of AppState.selectedObjects) {
+            const b = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y, width: obj.width || 1, height: obj.height || 1 };
+            minX = Math.min(minX, b.x);
+            minY = Math.min(minY, b.y);
+            maxX = Math.max(maxX, b.x + b.width);
+            maxY = Math.max(maxY, b.y + b.height);
+        }
+        
+        // Create frame with padding
+        const padding = 1;
+        const frame = new FrameObject(
+            minX - padding,
+            minY - padding,
+            (maxX - minX) + padding * 2,
+            (maxY - minY) + padding * 2
+        );
+        frame.name = `Frame ${Date.now() % 10000}`;
+        frame.strokeColor = AppState.strokeColor;
+        
+        // Add selected objects as children
+        for (const obj of AppState.selectedObjects) {
+            this.removeObject(obj.id);
+            frame.addChild(obj);
+        }
+        
+        this.addObject(frame);
+        AppState.selectedObjects = [frame];
+        this.renderAllObjects();
+        this._updateLayerList();
+        this._updateStatus(`Created frame with ${frame.children.length} objects`);
+    }
+    
+    /**
+     * Add selected objects to an existing frame
+     */
+    addSelectionToFrame() {
+        const frames = [];
+        const nonFrames = [];
+        
+        for (const obj of AppState.selectedObjects) {
+            if (obj.type === 'frame') {
+                frames.push(obj);
+            } else {
+                nonFrames.push(obj);
+            }
+        }
+        
+        if (frames.length === 0) {
+            this._updateStatus('No frame selected. Select a frame and objects to add.');
+            return;
+        }
+        
+        if (nonFrames.length === 0) {
+            this._updateStatus('Select objects to add to the frame');
+            return;
+        }
+        
+        this.saveStateForUndo();
+        
+        // Use the first frame
+        const targetFrame = frames[0];
+        
+        for (const obj of nonFrames) {
+            this.removeObject(obj.id);
+            targetFrame.addChild(obj);
+        }
+        
+        AppState.selectedObjects = [targetFrame];
+        this.renderAllObjects();
+        this._updateLayerList();
+        this._updateStatus(`Added ${nonFrames.length} objects to frame`);
+    }
+    
+    /**
+     * Remove selected objects from their parent frame
+     */
+    removeFromFrame() {
+        const objectsToRemove = [];
+        
+        for (const obj of AppState.selectedObjects) {
+            if (obj.parentFrame) {
+                objectsToRemove.push(obj);
+            }
+        }
+        
+        if (objectsToRemove.length === 0) {
+            this._updateStatus('No objects in frames selected');
+            return;
+        }
+        
+        this.saveStateForUndo();
+        
+        for (const obj of objectsToRemove) {
+            // Find parent frame
+            const parentFrame = this._findObjectById(obj.parentFrame);
+            if (parentFrame && parentFrame.removeChild) {
+                parentFrame.removeChild(obj);
+                this.addObject(obj);
+            }
+        }
+        
+        this.renderAllObjects();
+        this._updateLayerList();
+        this._updateStatus(`Removed ${objectsToRemove.length} objects from frames`);
+    }
+    
+    /**
+     * Find object by ID across all layers
+     */
+    _findObjectById(id) {
+        for (const layer of AppState.layers) {
+            if (!layer.objects) continue;
+            for (const obj of layer.objects) {
+                if (obj.id === id) return obj;
+                // Check frame children
+                if (obj.type === 'frame' && obj.children) {
+                    for (const child of obj.children) {
+                        if (child.id === id) return child;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * Show frame properties dialog
+     */
+    showFramePropertiesDialog() {
+        const selectedFrame = AppState.selectedObjects.find(obj => obj.type === 'frame');
+        if (!selectedFrame) {
+            this._updateStatus('No frame selected');
+            return;
+        }
+        
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-overlay';
+        dialog.innerHTML = `
+            <div class="modal-dialog" style="max-width: 400px;">
+                <div class="modal-header">
+                    <h3>📦 Frame Properties</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-size: 13px;">Name:</label>
+                        <input type="text" id="frame-name" value="${selectedFrame.name || ''}" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-size: 13px;">Title (shown on frame):</label>
+                        <input type="text" id="frame-title" value="${selectedFrame.title || ''}" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; font-size: 13px;">Width:</label>
+                            <input type="number" id="frame-width" value="${selectedFrame.width}" min="3" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; font-size: 13px;">Height:</label>
+                            <input type="number" id="frame-height" value="${selectedFrame.height}" min="3" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                        </div>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-size: 13px;">Border Style:</label>
+                        <select id="frame-border-style" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                            <option value="single" ${selectedFrame.borderStyle === 'single' ? 'selected' : ''}>Single ┌─┐</option>
+                            <option value="double" ${selectedFrame.borderStyle === 'double' ? 'selected' : ''}>Double ╔═╗</option>
+                            <option value="rounded" ${selectedFrame.borderStyle === 'rounded' ? 'selected' : ''}>Rounded ╭─╮</option>
+                            <option value="dashed" ${selectedFrame.borderStyle === 'dashed' ? 'selected' : ''}>Dashed ┌┄┐</option>
+                            <option value="thick" ${selectedFrame.borderStyle === 'thick' ? 'selected' : ''}>Thick ┏━┓</option>
+                        </select>
+                    </div>
+                    
+                    <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 15px;">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="frame-show-border" ${selectedFrame.showBorder ? 'checked' : ''}>
+                            <span style="font-size: 13px;">Show Border</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="frame-clip-content" ${selectedFrame.clipContent ? 'checked' : ''}>
+                            <span style="font-size: 13px;">Clip Content to Frame</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="frame-auto-size" ${selectedFrame.autoSize ? 'checked' : ''}>
+                            <span style="font-size: 13px;">Auto-resize to Content</span>
+                        </label>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-size: 13px;">Background Character:</label>
+                        <input type="text" id="frame-bg-char" value="${selectedFrame.backgroundChar || ' '}" maxlength="1" style="width: 60px; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary); text-align: center; font-family: monospace;">
+                        <span style="margin-left: 10px; font-size: 12px; color: var(--color-text-muted);">Empty for transparent</span>
+                    </div>
+                    
+                    <div style="padding: 10px; background: var(--color-bg-secondary); border-radius: 4px; font-size: 12px;">
+                        <strong>Children:</strong> ${selectedFrame.children ? selectedFrame.children.length : 0} objects
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary modal-cancel">Cancel</button>
+                    <button class="btn btn-primary modal-ok">Apply</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        
+        const closeDialog = () => dialog.remove();
+        
+        dialog.querySelector('.modal-close').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-cancel').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-ok').addEventListener('click', () => {
+            this.saveStateForUndo();
+            
+            selectedFrame.name = dialog.querySelector('#frame-name').value;
+            selectedFrame.title = dialog.querySelector('#frame-title').value;
+            selectedFrame.width = parseInt(dialog.querySelector('#frame-width').value) || selectedFrame.width;
+            selectedFrame.height = parseInt(dialog.querySelector('#frame-height').value) || selectedFrame.height;
+            selectedFrame.borderStyle = dialog.querySelector('#frame-border-style').value;
+            selectedFrame.showBorder = dialog.querySelector('#frame-show-border').checked;
+            selectedFrame.clipContent = dialog.querySelector('#frame-clip-content').checked;
+            selectedFrame.autoSize = dialog.querySelector('#frame-auto-size').checked;
+            selectedFrame.backgroundChar = dialog.querySelector('#frame-bg-char').value || ' ';
+            
+            this.renderAllObjects();
+            this._updateLayerList();
+            this._updatePropertiesPanel();
+            this._updateStatus('Frame properties updated');
+            closeDialog();
+        });
+        
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) closeDialog();
+        });
+    }
+    
     bringToFront() {
         if (AppState.selectedObjects.length > 0) {
             this.saveStateForUndo();
@@ -12877,6 +13470,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             { label: 'Pencil Tool', action: () => this.toolManager.setActiveTool('pencil'), category: 'Tools', shortcut: 'N' },
             { label: 'Rectangle Tool', action: () => this.toolManager.setActiveTool('rectangle'), category: 'Tools', shortcut: 'R' },
             { label: 'Ellipse Tool', action: () => this.toolManager.setActiveTool('ellipse'), category: 'Tools', shortcut: 'O' },
+            { label: 'Frame Tool', action: () => this.toolManager.setActiveTool('frame'), category: 'Tools', shortcut: 'F' },
             { label: 'Line Tool', action: () => this.toolManager.setActiveTool('line'), category: 'Tools', shortcut: 'L' },
             { label: 'Text Tool', action: () => this.toolManager.setActiveTool('text'), category: 'Tools', shortcut: 'T' },
             { label: 'Eraser Tool', action: () => this.toolManager.setActiveTool('eraser'), category: 'Tools', shortcut: 'E' },
@@ -12935,8 +13529,14 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             { label: 'Select All Text', action: () => this.selectByType('text'), category: 'Select' },
             { label: 'Select All Paths', action: () => this.selectByType('path'), category: 'Select' },
             { label: 'Select All Groups', action: () => this.selectByType('group'), category: 'Select' },
+            { label: 'Select All Frames', action: () => this.selectByType('frame'), category: 'Select' },
             { label: 'Select All Components', action: () => this.selectByType('component'), category: 'Select' },
             { label: 'Selection Filters...', action: () => this.showSelectionFilters(), category: 'Select' },
+            // Frame operations
+            { label: 'Create Frame from Selection', action: () => this.createFrameFromSelection(), category: 'Object' },
+            { label: 'Add to Frame', action: () => this.addSelectionToFrame(), category: 'Object' },
+            { label: 'Remove from Frame', action: () => this.removeFromFrame(), category: 'Object' },
+            { label: 'Frame Properties...', action: () => this.showFramePropertiesDialog(), category: 'Object' },
             // View
             { label: 'Zoom In', action: () => this.zoomIn(), category: 'View', shortcut: 'Ctrl++' },
             { label: 'Zoom Out', action: () => this.zoomOut(), category: 'View', shortcut: 'Ctrl+-' },
@@ -13355,47 +13955,8 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
     // ==========================================
     
     frameSelection() {
-        if (AppState.selectedObjects.length === 0) {
-            this._updateStatus('No objects selected');
-            return;
-        }
-        
-        this.saveStateForUndo();
-        
-        // Calculate bounds of selection
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const obj of AppState.selectedObjects) {
-            const bounds = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y, width: obj.width || 1, height: obj.height || 1 };
-            minX = Math.min(minX, bounds.x);
-            minY = Math.min(minY, bounds.y);
-            maxX = Math.max(maxX, bounds.x + bounds.width);
-            maxY = Math.max(maxY, bounds.y + bounds.height);
-        }
-        
-        // Create a frame (rectangle with clipping)
-        const frame = new RectangleObject(minX - 1, minY - 1, maxX - minX + 2, maxY - minY + 2);
-        frame.type = 'frame';
-        frame.name = 'Frame';
-        frame.isFrame = true;
-        frame.clipContent = true;
-        frame.children = [];
-        frame.strokeChar = '│';
-        frame.lineStyle = 'single';
-        
-        // Move objects into frame
-        for (const obj of AppState.selectedObjects) {
-            this.removeObject(obj.id);
-            frame.children.push(obj);
-            // Convert to relative coordinates
-            obj.x -= frame.x;
-            obj.y -= frame.y;
-        }
-        
-        this.addObject(frame);
-        AppState.selectedObjects = [frame];
-        this.renderAllObjects();
-        this._updateLayerList();
-        this._updateStatus('Created frame');
+        // Alias to the new method
+        this.createFrameFromSelection();
     }
 
     // ==========================================
@@ -15228,6 +15789,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                                 <kbd>P</kbd><span>Pen Tool</span>
                                 <kbd>R</kbd><span>Rectangle Tool</span>
                                 <kbd>O</kbd><span>Ellipse Tool</span>
+                                <kbd>F</kbd><span>Frame Tool</span>
                                 <kbd>L</kbd><span>Line Tool</span>
                                 <kbd>T</kbd><span>Text Tool</span>
                                 <kbd>E</kbd><span>Eraser Tool</span>
