@@ -7728,6 +7728,13 @@ class Asciistrator extends EventEmitter {
                     return;
                 }
                 
+                // M key for Measure Tool
+                if (e.key.toLowerCase() === 'm') {
+                    e.preventDefault();
+                    this.activateMeasureTool();
+                    return;
+                }
+                
                 // X key to swap colors
                 if (e.key.toLowerCase() === 'x') {
                     e.preventDefault();
@@ -7741,6 +7748,27 @@ class Asciistrator extends EventEmitter {
             
             // Global shortcuts
             if (e.ctrlKey || e.metaKey) {
+                // Check for Alt key combinations first
+                if (e.altKey) {
+                    switch (e.key.toLowerCase()) {
+                        case 'c':
+                            // Copy Properties (Ctrl+Alt+C)
+                            e.preventDefault();
+                            this.copyProperties();
+                            return;
+                        case 'v':
+                            // Paste Properties (Ctrl+Alt+V)
+                            e.preventDefault();
+                            this.pasteProperties();
+                            return;
+                        case 'g':
+                            // Frame Selection (Ctrl+Alt+G)
+                            e.preventDefault();
+                            this.frameSelection();
+                            return;
+                    }
+                }
+                
                 switch (e.key.toLowerCase()) {
                     case 'z':
                         e.preventDefault();
@@ -8160,11 +8188,14 @@ class Asciistrator extends EventEmitter {
             ],
             edit: [
                 { label: 'Undo', action: 'undo', shortcut: 'Ctrl+Z' },
-                { label: 'Redo', action: 'redo', shortcut: 'Ctrl+Y' },
+                { label: 'Redo', action: 'redo', shortcut: 'Ctrl+Shift+Z' },
                 { type: 'separator' },
                 { label: 'Cut', action: 'cut', shortcut: 'Ctrl+X' },
                 { label: 'Copy', action: 'copy', shortcut: 'Ctrl+C' },
                 { label: 'Paste', action: 'paste', shortcut: 'Ctrl+V' },
+                { type: 'separator' },
+                { label: 'Copy Properties', action: 'copy-properties', shortcut: 'Ctrl+Alt+C' },
+                { label: 'Paste Properties', action: 'paste-properties', shortcut: 'Ctrl+Alt+V' },
                 { type: 'separator' },
                 { label: 'Find and Replace...', action: 'find-replace', shortcut: 'Ctrl+H' },
                 { type: 'separator' },
@@ -8212,6 +8243,9 @@ class Asciistrator extends EventEmitter {
                         { label: 'Show Distances', action: 'snap-show-distances', checked: () => AppState.smartGuides.showDistances },
                     ]
                 },
+                { type: 'separator' },
+                { label: 'Outline View', action: 'outline-view', shortcut: 'Ctrl+Y' },
+                { label: 'Measure Tool', action: 'measure-tool', shortcut: 'M' },
                 { type: 'separator' },
                 { label: 'Zoom In', action: 'zoom-in', shortcut: 'Ctrl++' },
                 { label: 'Zoom Out', action: 'zoom-out', shortcut: 'Ctrl+-' },
@@ -8265,6 +8299,8 @@ class Asciistrator extends EventEmitter {
                         { label: 'Distribute Vertically', action: 'distribute-v' },
                         { type: 'separator' },
                         { label: 'Tidy Up', action: 'tidy-up' },
+                        { type: 'separator' },
+                        { label: 'Auto Layout...', action: 'auto-layout' },
                     ]
                 },
                 { type: 'separator' },
@@ -8279,11 +8315,16 @@ class Asciistrator extends EventEmitter {
                     ]
                 },
                 { type: 'separator' },
+                { label: 'Constraints...', action: 'constraints' },
+                { label: 'Batch Rename...', action: 'batch-rename' },
+                { type: 'separator' },
                 { label: 'Lock/Unlock', action: 'toggle-lock', shortcut: 'Ctrl+Shift+L' },
                 { label: 'Hide/Show', action: 'toggle-visible', shortcut: 'Ctrl+Shift+H' },
                 { type: 'separator' },
                 { label: 'Create Component...', action: 'create-component' },
                 { label: 'Detach Instance', action: 'detach-instance' },
+                { type: 'separator' },
+                { label: 'Saved Styles...', action: 'saved-styles' },
                 { type: 'separator' },
                 { label: 'Outline Stroke', action: 'outline-stroke' },
                 { label: 'Flatten Selection', action: 'flatten' },
@@ -8688,6 +8729,10 @@ class Asciistrator extends EventEmitter {
             case 'tidy-up':
                 this.tidyUp();
                 break;
+            // Auto Layout
+            case 'auto-layout':
+                this.showAutoLayoutDialog();
+                break;
             // Transform
             case 'flip-h':
                 this.flipObjects('horizontal');
@@ -8719,6 +8764,31 @@ class Asciistrator extends EventEmitter {
                 break;
             case 'create-component':
                 this._showCreateComponentDialog();
+                break;
+            // Medium Impact Features
+            case 'constraints':
+                this.showConstraintsDialog();
+                break;
+            case 'batch-rename':
+                this.showBatchRenameDialog();
+                break;
+            case 'saved-styles':
+                this.showSavedStylesDialog();
+                break;
+            case 'copy-properties':
+                this.copyProperties();
+                break;
+            case 'paste-properties':
+                this.pasteProperties();
+                break;
+            case 'outline-view':
+                this.toggleOutlineView();
+                break;
+            case 'measure-tool':
+                this.activateMeasureTool();
+                break;
+            case 'measure-between':
+                this.showMeasureBetweenObjects();
                 break;
             // Charts
             case 'chart-bar':
@@ -12804,6 +12874,16 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             { label: 'Align Bottom', action: () => this.alignObjects('bottom'), category: 'Align' },
             { label: 'Distribute Horizontally', action: () => this.distributeObjects('horizontal'), category: 'Align' },
             { label: 'Distribute Vertically', action: () => this.distributeObjects('vertical'), category: 'Align' },
+            { label: 'Auto Layout...', action: () => this.showAutoLayoutDialog(), category: 'Align' },
+            // Medium Impact Features
+            { label: 'Constraints...', action: () => this.showConstraintsDialog(), category: 'Object', shortcut: '' },
+            { label: 'Batch Rename...', action: () => this.showBatchRenameDialog(), category: 'Object', shortcut: '' },
+            { label: 'Saved Styles...', action: () => this.showSavedStylesDialog(), category: 'Object', shortcut: '' },
+            { label: 'Copy Properties', action: () => this.copyProperties(), category: 'Edit', shortcut: 'Ctrl+Alt+C' },
+            { label: 'Paste Properties', action: () => this.pasteProperties(), category: 'Edit', shortcut: 'Ctrl+Alt+V' },
+            { label: 'Measure Tool', action: () => this.activateMeasureTool(), category: 'View', shortcut: 'M' },
+            { label: 'Measure Between Objects', action: () => this.showMeasureBetweenObjects(), category: 'View', shortcut: '' },
+            { label: 'Toggle Outline View', action: () => this.toggleOutlineView(), category: 'View', shortcut: '' },
             // Select by type
             { label: 'Select All Rectangles', action: () => this.selectByType('rectangle'), category: 'Select' },
             { label: 'Select All Ellipses', action: () => this.selectByType('ellipse'), category: 'Select' },
@@ -13346,6 +13426,740 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         this._updateStatus(`Boolean ${operation} complete`);
     }
 
+    // ==========================================
+    // AUTO LAYOUT
+    // ==========================================
+    
+    autoLayout(direction = 'horizontal', spacing = 2) {
+        if (AppState.selectedObjects.length < 2) {
+            this._updateStatus('Select at least 2 objects for auto layout');
+            return;
+        }
+        
+        this.saveStateForUndo();
+        
+        // Sort objects by position
+        const sorted = [...AppState.selectedObjects].sort((a, b) => {
+            const boundsA = a.getBounds ? a.getBounds() : { x: a.x, y: a.y };
+            const boundsB = b.getBounds ? b.getBounds() : { x: b.x, y: b.y };
+            return direction === 'horizontal' 
+                ? boundsA.x - boundsB.x 
+                : boundsA.y - boundsB.y;
+        });
+        
+        // Get first object position as anchor
+        const firstBounds = sorted[0].getBounds ? sorted[0].getBounds() : { x: sorted[0].x, y: sorted[0].y, width: sorted[0].width || 1, height: sorted[0].height || 1 };
+        let currentPos = direction === 'horizontal' 
+            ? firstBounds.x + firstBounds.width + spacing
+            : firstBounds.y + firstBounds.height + spacing;
+        
+        // Position remaining objects
+        for (let i = 1; i < sorted.length; i++) {
+            const obj = sorted[i];
+            const bounds = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y, width: obj.width || 1, height: obj.height || 1 };
+            
+            if (direction === 'horizontal') {
+                const deltaX = currentPos - bounds.x;
+                obj.x += deltaX;
+                if (obj.x1 !== undefined) { obj.x1 += deltaX; obj.x2 += deltaX; }
+                currentPos += bounds.width + spacing;
+            } else {
+                const deltaY = currentPos - bounds.y;
+                obj.y += deltaY;
+                if (obj.y1 !== undefined) { obj.y1 += deltaY; obj.y2 += deltaY; }
+                currentPos += bounds.height + spacing;
+            }
+        }
+        
+        this.renderAllObjects();
+        this._updateStatus(`Auto layout applied (${direction}, spacing: ${spacing})`);
+    }
+    
+    showAutoLayoutDialog() {
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-overlay';
+        dialog.innerHTML = `
+            <div class="modal-dialog" style="max-width: 350px;">
+                <div class="modal-header">
+                    <h3>Auto Layout</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 8px; font-size: 13px; font-weight: 500;">Direction:</label>
+                        <div style="display: flex; gap: 10px;">
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                <input type="radio" name="layout-direction" value="horizontal" checked>
+                                <span>→ Horizontal</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                <input type="radio" name="layout-direction" value="vertical">
+                                <span>↓ Vertical</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-size: 13px;">Spacing:</label>
+                        <input type="number" id="layout-spacing" value="2" min="0" max="20" style="width: 80px; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                        <span style="margin-left: 8px; font-size: 13px; color: var(--color-text-muted);">characters</span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary modal-cancel">Cancel</button>
+                    <button class="btn btn-primary modal-ok">Apply</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        
+        const closeDialog = () => dialog.remove();
+        
+        dialog.querySelector('.modal-close').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-cancel').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-ok').addEventListener('click', () => {
+            const direction = dialog.querySelector('input[name="layout-direction"]:checked').value;
+            const spacing = parseInt(dialog.querySelector('#layout-spacing').value) || 2;
+            this.autoLayout(direction, spacing);
+            closeDialog();
+        });
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) closeDialog();
+        });
+    }
+
+    // ==========================================
+    // CONSTRAINTS
+    // ==========================================
+    
+    showConstraintsDialog() {
+        if (AppState.selectedObjects.length === 0) {
+            this._updateStatus('No object selected');
+            return;
+        }
+        
+        const obj = AppState.selectedObjects[0];
+        const constraints = obj.constraints || { left: false, right: false, top: false, bottom: false, centerH: false, centerV: false };
+        
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-overlay';
+        dialog.innerHTML = `
+            <div class="modal-dialog" style="max-width: 300px;">
+                <div class="modal-header">
+                    <h3>Constraints</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p style="font-size: 12px; color: var(--color-text-muted); margin-bottom: 15px;">Pin object to canvas edges or center</p>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 15px;">
+                        <div></div>
+                        <label style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="constraint-top" ${constraints.top ? 'checked' : ''}>
+                            <span style="font-size: 11px;">Top</span>
+                        </label>
+                        <div></div>
+                        <label style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="constraint-left" ${constraints.left ? 'checked' : ''}>
+                            <span style="font-size: 11px;">Left</span>
+                        </label>
+                        <div style="width: 50px; height: 50px; border: 2px dashed var(--color-border); border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+                            <div style="width: 20px; height: 14px; background: var(--color-accent); border-radius: 2px;"></div>
+                        </div>
+                        <label style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="constraint-right" ${constraints.right ? 'checked' : ''}>
+                            <span style="font-size: 11px;">Right</span>
+                        </label>
+                        <div></div>
+                        <label style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+                            <input type="checkbox" id="constraint-bottom" ${constraints.bottom ? 'checked' : ''}>
+                            <span style="font-size: 11px;">Bottom</span>
+                        </label>
+                        <div></div>
+                    </div>
+                    <div style="display: flex; gap: 15px; justify-content: center; padding-top: 10px; border-top: 1px solid var(--color-border);">
+                        <label style="display: flex; align-items: center; gap: 6px;">
+                            <input type="checkbox" id="constraint-centerH" ${constraints.centerH ? 'checked' : ''}>
+                            <span style="font-size: 12px;">Center H</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 6px;">
+                            <input type="checkbox" id="constraint-centerV" ${constraints.centerV ? 'checked' : ''}>
+                            <span style="font-size: 12px;">Center V</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" id="btn-clear-constraints">Clear All</button>
+                    <button class="btn btn-primary modal-ok">Apply</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        
+        const closeDialog = () => dialog.remove();
+        
+        dialog.querySelector('.modal-close').addEventListener('click', closeDialog);
+        dialog.querySelector('#btn-clear-constraints').addEventListener('click', () => {
+            dialog.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+        });
+        dialog.querySelector('.modal-ok').addEventListener('click', () => {
+            this.saveStateForUndo();
+            obj.constraints = {
+                left: dialog.querySelector('#constraint-left').checked,
+                right: dialog.querySelector('#constraint-right').checked,
+                top: dialog.querySelector('#constraint-top').checked,
+                bottom: dialog.querySelector('#constraint-bottom').checked,
+                centerH: dialog.querySelector('#constraint-centerH').checked,
+                centerV: dialog.querySelector('#constraint-centerV').checked
+            };
+            this.applyConstraints(obj);
+            this._updateStatus('Constraints applied');
+            closeDialog();
+        });
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) closeDialog();
+        });
+    }
+    
+    applyConstraints(obj) {
+        if (!obj.constraints) return;
+        
+        const c = obj.constraints;
+        const bounds = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y, width: obj.width || 1, height: obj.height || 1 };
+        
+        // Apply horizontal constraints
+        if (c.centerH) {
+            const newX = Math.floor((AppState.canvasWidth - bounds.width) / 2);
+            const deltaX = newX - bounds.x;
+            obj.x += deltaX;
+            if (obj.x1 !== undefined) { obj.x1 += deltaX; obj.x2 += deltaX; }
+        } else if (c.left && c.right) {
+            // Stretch to fill
+            obj.x = 1;
+            obj.width = AppState.canvasWidth - 2;
+        } else if (c.left) {
+            const deltaX = 1 - bounds.x;
+            obj.x += deltaX;
+            if (obj.x1 !== undefined) { obj.x1 += deltaX; obj.x2 += deltaX; }
+        } else if (c.right) {
+            const newX = AppState.canvasWidth - bounds.width - 1;
+            const deltaX = newX - bounds.x;
+            obj.x += deltaX;
+            if (obj.x1 !== undefined) { obj.x1 += deltaX; obj.x2 += deltaX; }
+        }
+        
+        // Apply vertical constraints
+        if (c.centerV) {
+            const newY = Math.floor((AppState.canvasHeight - bounds.height) / 2);
+            const deltaY = newY - bounds.y;
+            obj.y += deltaY;
+            if (obj.y1 !== undefined) { obj.y1 += deltaY; obj.y2 += deltaY; }
+        } else if (c.top && c.bottom) {
+            // Stretch to fill
+            obj.y = 1;
+            obj.height = AppState.canvasHeight - 2;
+        } else if (c.top) {
+            const deltaY = 1 - bounds.y;
+            obj.y += deltaY;
+            if (obj.y1 !== undefined) { obj.y1 += deltaY; obj.y2 += deltaY; }
+        } else if (c.bottom) {
+            const newY = AppState.canvasHeight - bounds.height - 1;
+            const deltaY = newY - bounds.y;
+            obj.y += deltaY;
+            if (obj.y1 !== undefined) { obj.y1 += deltaY; obj.y2 += deltaY; }
+        }
+        
+        this.renderAllObjects();
+    }
+    
+    applyAllConstraints() {
+        // Called when canvas is resized
+        for (const layer of AppState.layers) {
+            if (!layer.objects) continue;
+            for (const obj of layer.objects) {
+                if (obj.constraints) {
+                    this.applyConstraints(obj);
+                }
+            }
+        }
+    }
+
+    // ==========================================
+    // SAVED STYLES
+    // ==========================================
+    
+    showSavedStylesDialog() {
+        // Initialize saved styles if not exists
+        if (!AppState.savedStyles) {
+            AppState.savedStyles = [
+                { name: 'Default', strokeChar: '*', fillChar: '█', strokeColor: null, fillColor: null, lineStyle: 'single' },
+                { name: 'Box Single', strokeChar: '│', fillChar: ' ', strokeColor: null, fillColor: null, lineStyle: 'single' },
+                { name: 'Box Double', strokeChar: '║', fillChar: ' ', strokeColor: null, fillColor: null, lineStyle: 'double' },
+                { name: 'Dotted', strokeChar: '·', fillChar: '·', strokeColor: null, fillColor: null, lineStyle: 'dotted' },
+                { name: 'Block Fill', strokeChar: '█', fillChar: '█', strokeColor: null, fillColor: null, lineStyle: 'single' },
+            ];
+        }
+        
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-overlay';
+        
+        const renderStylesList = () => {
+            return AppState.savedStyles.map((style, idx) => `
+                <div class="style-item" data-index="${idx}" style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 4px; cursor: pointer; border: 1px solid transparent; transition: all 0.15s;">
+                    <div style="width: 30px; height: 30px; border: 1px solid var(--color-border); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 16px; background: var(--color-bg-secondary);">${style.strokeChar}</div>
+                    <div style="flex: 1;">
+                        <div style="font-weight: 500;">${style.name}</div>
+                        <div style="font-size: 11px; color: var(--color-text-muted);">Stroke: ${style.strokeChar} | Fill: ${style.fillChar} | ${style.lineStyle}</div>
+                    </div>
+                    <button class="btn-delete-style" data-index="${idx}" style="background: none; border: none; color: var(--color-text-muted); cursor: pointer; padding: 4px 8px; font-size: 16px;" title="Delete style">&times;</button>
+                </div>
+            `).join('');
+        };
+        
+        dialog.innerHTML = `
+            <div class="modal-dialog" style="max-width: 400px;">
+                <div class="modal-header">
+                    <h3>Saved Styles</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body" style="max-height: 400px; overflow-y: auto;">
+                    <div id="styles-list" style="display: flex; flex-direction: column; gap: 4px;">
+                        ${renderStylesList()}
+                    </div>
+                </div>
+                <div class="modal-footer" style="justify-content: space-between;">
+                    <button class="btn btn-secondary" id="btn-save-current-style">Save Current Style</button>
+                    <button class="btn btn-primary modal-close-btn">Close</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        
+        const stylesList = dialog.querySelector('#styles-list');
+        
+        // Apply style on click
+        stylesList.addEventListener('click', (e) => {
+            const item = e.target.closest('.style-item');
+            if (item && !e.target.classList.contains('btn-delete-style')) {
+                const idx = parseInt(item.dataset.index);
+                const style = AppState.savedStyles[idx];
+                AppState.strokeChar = style.strokeChar;
+                AppState.fillChar = style.fillChar;
+                AppState.strokeColor = style.strokeColor;
+                AppState.fillColor = style.fillColor;
+                AppState.lineStyle = style.lineStyle;
+                this._updateStatus(`Applied style: ${style.name}`);
+                dialog.remove();
+            }
+        });
+        
+        // Delete style
+        stylesList.addEventListener('click', (e) => {
+            if (e.target.classList.contains('btn-delete-style')) {
+                const idx = parseInt(e.target.dataset.index);
+                if (AppState.savedStyles.length > 1) {
+                    AppState.savedStyles.splice(idx, 1);
+                    stylesList.innerHTML = renderStylesList();
+                }
+            }
+        });
+        
+        // Hover effect
+        stylesList.addEventListener('mouseover', (e) => {
+            const item = e.target.closest('.style-item');
+            if (item) item.style.background = 'var(--color-bg-tertiary)';
+        });
+        stylesList.addEventListener('mouseout', (e) => {
+            const item = e.target.closest('.style-item');
+            if (item) item.style.background = '';
+        });
+        
+        // Save current style
+        dialog.querySelector('#btn-save-current-style').addEventListener('click', () => {
+            const name = prompt('Style name:', `Style ${AppState.savedStyles.length + 1}`);
+            if (name) {
+                AppState.savedStyles.push({
+                    name,
+                    strokeChar: AppState.strokeChar,
+                    fillChar: AppState.fillChar,
+                    strokeColor: AppState.strokeColor,
+                    fillColor: AppState.fillColor,
+                    lineStyle: AppState.lineStyle
+                });
+                stylesList.innerHTML = renderStylesList();
+                this._updateStatus(`Saved style: ${name}`);
+            }
+        });
+        
+        const closeDialog = () => dialog.remove();
+        
+        dialog.querySelector('.modal-close').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-close-btn').addEventListener('click', closeDialog);
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) closeDialog();
+        });
+    }
+
+    // ==========================================
+    // BATCH RENAME
+    // ==========================================
+    
+    showBatchRenameDialog() {
+        if (AppState.selectedObjects.length === 0) {
+            this._updateStatus('Select objects to batch rename');
+            return;
+        }
+        
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-overlay';
+        dialog.innerHTML = `
+            <div class="modal-dialog" style="max-width: 400px;">
+                <div class="modal-header">
+                    <h3>Batch Rename (${AppState.selectedObjects.length} objects)</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-size: 13px;">New Name Pattern:</label>
+                        <input type="text" id="rename-pattern" value="Object" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);" placeholder="e.g., Button">
+                    </div>
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                            <input type="checkbox" id="rename-add-number" checked>
+                            <span style="font-size: 13px;">Add sequential number</span>
+                        </label>
+                        <div style="display: flex; gap: 10px; margin-left: 24px;">
+                            <div>
+                                <label style="font-size: 12px; color: var(--color-text-muted);">Start at:</label>
+                                <input type="number" id="rename-start" value="1" min="0" style="width: 60px; padding: 6px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                            </div>
+                            <div>
+                                <label style="font-size: 12px; color: var(--color-text-muted);">Digits:</label>
+                                <select id="rename-digits" style="padding: 6px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                                    <option value="1">1, 2, 3...</option>
+                                    <option value="2">01, 02, 03...</option>
+                                    <option value="3" selected>001, 002, 003...</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="padding: 10px; background: var(--color-bg-secondary); border-radius: 4px; font-size: 12px;">
+                        <div style="color: var(--color-text-muted); margin-bottom: 5px;">Preview:</div>
+                        <div id="rename-preview" style="font-family: monospace;">Object 001, Object 002, Object 003...</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary modal-cancel">Cancel</button>
+                    <button class="btn btn-primary modal-ok">Rename All</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        
+        const patternInput = dialog.querySelector('#rename-pattern');
+        const addNumberCheck = dialog.querySelector('#rename-add-number');
+        const startInput = dialog.querySelector('#rename-start');
+        const digitsSelect = dialog.querySelector('#rename-digits');
+        const previewDiv = dialog.querySelector('#rename-preview');
+        
+        const updatePreview = () => {
+            const pattern = patternInput.value || 'Object';
+            const addNumber = addNumberCheck.checked;
+            const start = parseInt(startInput.value) || 1;
+            const digits = parseInt(digitsSelect.value) || 1;
+            
+            const examples = [];
+            for (let i = 0; i < Math.min(3, AppState.selectedObjects.length); i++) {
+                const num = String(start + i).padStart(digits, '0');
+                examples.push(addNumber ? `${pattern} ${num}` : pattern);
+            }
+            if (AppState.selectedObjects.length > 3) examples.push('...');
+            previewDiv.textContent = examples.join(', ');
+        };
+        
+        patternInput.addEventListener('input', updatePreview);
+        addNumberCheck.addEventListener('change', updatePreview);
+        startInput.addEventListener('input', updatePreview);
+        digitsSelect.addEventListener('change', updatePreview);
+        
+        const closeDialog = () => dialog.remove();
+        
+        dialog.querySelector('.modal-close').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-cancel').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-ok').addEventListener('click', () => {
+            this.saveStateForUndo();
+            const pattern = patternInput.value || 'Object';
+            const addNumber = addNumberCheck.checked;
+            const start = parseInt(startInput.value) || 1;
+            const digits = parseInt(digitsSelect.value) || 1;
+            
+            AppState.selectedObjects.forEach((obj, i) => {
+                const num = String(start + i).padStart(digits, '0');
+                obj.name = addNumber ? `${pattern} ${num}` : pattern;
+            });
+            
+            this._updateLayerList();
+            this._updateStatus(`Renamed ${AppState.selectedObjects.length} objects`);
+            closeDialog();
+        });
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) closeDialog();
+        });
+        
+        patternInput.focus();
+        patternInput.select();
+    }
+
+    // ==========================================
+    // COPY/PASTE PROPERTIES
+    // ==========================================
+    
+    copyProperties() {
+        if (AppState.selectedObjects.length === 0) {
+            this._updateStatus('No object selected');
+            return;
+        }
+        
+        const obj = AppState.selectedObjects[0];
+        AppState.copiedProperties = {
+            strokeChar: obj.strokeChar,
+            fillChar: obj.fillChar,
+            strokeColor: obj.strokeColor,
+            fillColor: obj.fillColor,
+            lineStyle: obj.lineStyle,
+            filled: obj.filled
+        };
+        
+        this._updateStatus('Properties copied');
+    }
+    
+    pasteProperties() {
+        if (!AppState.copiedProperties) {
+            this._updateStatus('No properties copied');
+            return;
+        }
+        
+        if (AppState.selectedObjects.length === 0) {
+            this._updateStatus('No object selected');
+            return;
+        }
+        
+        this.saveStateForUndo();
+        
+        for (const obj of AppState.selectedObjects) {
+            if (AppState.copiedProperties.strokeChar !== undefined) obj.strokeChar = AppState.copiedProperties.strokeChar;
+            if (AppState.copiedProperties.fillChar !== undefined) obj.fillChar = AppState.copiedProperties.fillChar;
+            if (AppState.copiedProperties.strokeColor !== undefined) obj.strokeColor = AppState.copiedProperties.strokeColor;
+            if (AppState.copiedProperties.fillColor !== undefined) obj.fillColor = AppState.copiedProperties.fillColor;
+            if (AppState.copiedProperties.lineStyle !== undefined) obj.lineStyle = AppState.copiedProperties.lineStyle;
+            if (AppState.copiedProperties.filled !== undefined) obj.filled = AppState.copiedProperties.filled;
+        }
+        
+        this.renderAllObjects();
+        this._updateStatus(`Properties pasted to ${AppState.selectedObjects.length} object${AppState.selectedObjects.length > 1 ? 's' : ''}`);
+    }
+
+    // ==========================================
+    // MEASURE TOOL
+    // ==========================================
+    
+    activateMeasureTool() {
+        AppState.measureMode = true;
+        AppState.measureStart = null;
+        AppState.measureEnd = null;
+        this._updateStatus('Measure tool: Click to set start point, click again to measure');
+        
+        // Add visual indicator
+        const canvas = this.canvas;
+        if (canvas) {
+            canvas.element.style.cursor = 'crosshair';
+        }
+    }
+    
+    deactivateMeasureTool() {
+        AppState.measureMode = false;
+        AppState.measureStart = null;
+        AppState.measureEnd = null;
+        this.clearMeasureOverlay();
+        
+        const canvas = this.canvas;
+        if (canvas) {
+            canvas.element.style.cursor = '';
+        }
+    }
+    
+    handleMeasureClick(x, y) {
+        if (!AppState.measureMode) return;
+        
+        if (!AppState.measureStart) {
+            AppState.measureStart = { x, y };
+            this._updateStatus(`Start point: (${x}, ${y}) - Click to set end point`);
+        } else {
+            AppState.measureEnd = { x, y };
+            this.showMeasureResult();
+        }
+    }
+    
+    showMeasureResult() {
+        const start = AppState.measureStart;
+        const end = AppState.measureEnd;
+        
+        if (!start || !end) return;
+        
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const distance = Math.sqrt(dx * dx + dy * dy).toFixed(2);
+        const angle = (Math.atan2(dy, dx) * 180 / Math.PI).toFixed(1);
+        
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-overlay';
+        dialog.innerHTML = `
+            <div class="modal-dialog" style="max-width: 300px;">
+                <div class="modal-header">
+                    <h3>📏 Measurement</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="display: grid; grid-template-columns: auto 1fr; gap: 8px 15px; font-size: 14px;">
+                        <span style="color: var(--color-text-muted);">Start:</span>
+                        <span style="font-family: monospace;">(${start.x}, ${start.y})</span>
+                        <span style="color: var(--color-text-muted);">End:</span>
+                        <span style="font-family: monospace;">(${end.x}, ${end.y})</span>
+                        <span style="color: var(--color-text-muted);">Width (Δx):</span>
+                        <span style="font-family: monospace; font-weight: 500;">${Math.abs(dx)} chars</span>
+                        <span style="color: var(--color-text-muted);">Height (Δy):</span>
+                        <span style="font-family: monospace; font-weight: 500;">${Math.abs(dy)} chars</span>
+                        <span style="color: var(--color-text-muted);">Distance:</span>
+                        <span style="font-family: monospace; font-weight: 500; color: var(--color-accent);">${distance} chars</span>
+                        <span style="color: var(--color-text-muted);">Angle:</span>
+                        <span style="font-family: monospace;">${angle}°</span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" id="btn-measure-again">Measure Again</button>
+                    <button class="btn btn-primary modal-close-btn">Done</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        
+        const closeDialog = () => {
+            dialog.remove();
+            this.deactivateMeasureTool();
+        };
+        
+        dialog.querySelector('.modal-close').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-close-btn').addEventListener('click', closeDialog);
+        dialog.querySelector('#btn-measure-again').addEventListener('click', () => {
+            dialog.remove();
+            AppState.measureStart = null;
+            AppState.measureEnd = null;
+            this._updateStatus('Measure tool: Click to set start point');
+        });
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) closeDialog();
+        });
+    }
+    
+    clearMeasureOverlay() {
+        const overlay = document.querySelector('.measure-overlay');
+        if (overlay) overlay.remove();
+    }
+    
+    showMeasureBetweenObjects() {
+        if (AppState.selectedObjects.length !== 2) {
+            this._updateStatus('Select exactly 2 objects to measure between them');
+            return;
+        }
+        
+        const [obj1, obj2] = AppState.selectedObjects;
+        const bounds1 = obj1.getBounds ? obj1.getBounds() : { x: obj1.x, y: obj1.y, width: obj1.width || 1, height: obj1.height || 1 };
+        const bounds2 = obj2.getBounds ? obj2.getBounds() : { x: obj2.x, y: obj2.y, width: obj2.width || 1, height: obj2.height || 1 };
+        
+        // Calculate gaps
+        const gapLeft = bounds2.x - (bounds1.x + bounds1.width);
+        const gapRight = bounds1.x - (bounds2.x + bounds2.width);
+        const gapTop = bounds2.y - (bounds1.y + bounds1.height);
+        const gapBottom = bounds1.y - (bounds2.y + bounds2.height);
+        
+        const horizontalGap = Math.max(gapLeft, gapRight);
+        const verticalGap = Math.max(gapTop, gapBottom);
+        
+        // Center to center distance
+        const cx1 = bounds1.x + bounds1.width / 2;
+        const cy1 = bounds1.y + bounds1.height / 2;
+        const cx2 = bounds2.x + bounds2.width / 2;
+        const cy2 = bounds2.y + bounds2.height / 2;
+        const centerDistance = Math.sqrt(Math.pow(cx2 - cx1, 2) + Math.pow(cy2 - cy1, 2)).toFixed(2);
+        
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-overlay';
+        dialog.innerHTML = `
+            <div class="modal-dialog" style="max-width: 320px;">
+                <div class="modal-header">
+                    <h3>📏 Distance Between Objects</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="display: grid; grid-template-columns: auto 1fr; gap: 8px 15px; font-size: 14px;">
+                        <span style="color: var(--color-text-muted);">Horizontal Gap:</span>
+                        <span style="font-family: monospace; font-weight: 500;">${horizontalGap > 0 ? horizontalGap : 'overlapping'} chars</span>
+                        <span style="color: var(--color-text-muted);">Vertical Gap:</span>
+                        <span style="font-family: monospace; font-weight: 500;">${verticalGap > 0 ? verticalGap : 'overlapping'} chars</span>
+                        <span style="color: var(--color-text-muted);">Center Distance:</span>
+                        <span style="font-family: monospace; font-weight: 500; color: var(--color-accent);">${centerDistance} chars</span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-primary modal-close-btn">OK</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        
+        const closeDialog = () => dialog.remove();
+        
+        dialog.querySelector('.modal-close').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-close-btn').addEventListener('click', closeDialog);
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) closeDialog();
+        });
+    }
+
+    // ==========================================
+    // OUTLINE VIEW
+    // ==========================================
+    
+    toggleOutlineView() {
+        AppState.outlineView = !AppState.outlineView;
+        this.renderAllObjects();
+        this._updateStatus(`Outline view ${AppState.outlineView ? 'enabled' : 'disabled'}`);
+    }
+    
+    renderOutlineMode(obj, buffer) {
+        // Render object as outline only (no fill)
+        const bounds = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y, width: obj.width || 1, height: obj.height || 1 };
+        
+        // Draw simple outline rectangle
+        const char = '·';
+        
+        // Top and bottom edges
+        for (let x = bounds.x; x < bounds.x + bounds.width; x++) {
+            buffer.setChar(x, bounds.y, char);
+            buffer.setChar(x, bounds.y + bounds.height - 1, char);
+        }
+        
+        // Left and right edges
+        for (let y = bounds.y; y < bounds.y + bounds.height; y++) {
+            buffer.setChar(bounds.x, y, char);
+            buffer.setChar(bounds.x + bounds.width - 1, y, char);
+        }
+    }
+
     // Chart insertion
     insertChart(type) {
         const x = 10, y = 10;
@@ -13467,28 +14281,25 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         const dialog = document.createElement('div');
         dialog.className = 'modal-overlay';
         dialog.innerHTML = `
-            <div class="modal-dialog" style="max-width: 600px;">
+            <div class="modal-dialog" style="max-width: 700px;">
                 <div class="modal-header">
                     <h3>Keyboard Shortcuts</h3>
                     <button class="modal-close">&times;</button>
                 </div>
                 <div class="modal-body" style="padding: 20px; max-height: 70vh; overflow-y: auto;">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px;">
                         <div>
                             <h4 style="margin: 0 0 12px 0; color: var(--color-accent); border-bottom: 1px solid var(--color-border); padding-bottom: 6px;">Tools</h4>
                             <div style="display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13px;">
                                 <kbd>V</kbd><span>Select Tool</span>
                                 <kbd>A</kbd><span>Direct Select</span>
                                 <kbd>P</kbd><span>Pen Tool</span>
-                                <kbd>N</kbd><span>Pencil Tool</span>
-                                <kbd>B</kbd><span>Brush Tool</span>
                                 <kbd>R</kbd><span>Rectangle Tool</span>
                                 <kbd>O</kbd><span>Ellipse Tool</span>
                                 <kbd>L</kbd><span>Line Tool</span>
                                 <kbd>T</kbd><span>Text Tool</span>
                                 <kbd>E</kbd><span>Eraser Tool</span>
-                                <kbd>G</kbd><span>Fill Tool</span>
-                                <kbd>I</kbd><span>Eyedropper</span>
+                                <kbd>M</kbd><span>Measure Tool</span>
                             </div>
                             
                             <h4 style="margin: 20px 0 12px 0; color: var(--color-accent); border-bottom: 1px solid var(--color-border); padding-bottom: 6px;">File</h4>
@@ -13496,7 +14307,6 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                                 <kbd>Ctrl+N</kbd><span>New Document</span>
                                 <kbd>Ctrl+O</kbd><span>Open File</span>
                                 <kbd>Ctrl+S</kbd><span>Save</span>
-                                <kbd>Ctrl+Shift+S</kbd><span>Save As</span>
                                 <kbd>Ctrl+E</kbd><span>Export</span>
                             </div>
                         </div>
@@ -13505,20 +14315,27 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                             <h4 style="margin: 0 0 12px 0; color: var(--color-accent); border-bottom: 1px solid var(--color-border); padding-bottom: 6px;">Edit</h4>
                             <div style="display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13px;">
                                 <kbd>Ctrl+Z</kbd><span>Undo</span>
-                                <kbd>Ctrl+Y</kbd><span>Redo</span>
+                                <kbd>Ctrl+Shift+Z</kbd><span>Redo</span>
                                 <kbd>Ctrl+X</kbd><span>Cut</span>
                                 <kbd>Ctrl+C</kbd><span>Copy</span>
                                 <kbd>Ctrl+V</kbd><span>Paste</span>
+                                <kbd>Ctrl+Alt+C</kbd><span>Copy Props</span>
+                                <kbd>Ctrl+Alt+V</kbd><span>Paste Props</span>
                                 <kbd>Ctrl+A</kbd><span>Select All</span>
                                 <kbd>Ctrl+D</kbd><span>Duplicate</span>
-                                <kbd>Delete</kbd><span>Delete Selection</span>
-                                <kbd>Escape</kbd><span>Deselect / Cancel</span>
+                                <kbd>Ctrl+H</kbd><span>Find & Replace</span>
+                                <kbd>Ctrl+K</kbd><span>Quick Actions</span>
+                                <kbd>Delete</kbd><span>Delete</span>
                             </div>
-                            
-                            <h4 style="margin: 20px 0 12px 0; color: var(--color-accent); border-bottom: 1px solid var(--color-border); padding-bottom: 6px;">Object</h4>
+                        </div>
+                        
+                        <div>
+                            <h4 style="margin: 0 0 12px 0; color: var(--color-accent); border-bottom: 1px solid var(--color-border); padding-bottom: 6px;">Object</h4>
                             <div style="display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13px;">
                                 <kbd>Ctrl+G</kbd><span>Group</span>
                                 <kbd>Ctrl+Shift+G</kbd><span>Ungroup</span>
+                                <kbd>Ctrl+Alt+G</kbd><span>Frame</span>
+                                <kbd>Ctrl+R</kbd><span>Rename</span>
                                 <kbd>Ctrl+]</kbd><span>Bring Forward</span>
                                 <kbd>Ctrl+[</kbd><span>Send Backward</span>
                             </div>
@@ -13528,7 +14345,8 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                                 <kbd>Ctrl++</kbd><span>Zoom In</span>
                                 <kbd>Ctrl+-</kbd><span>Zoom Out</span>
                                 <kbd>Ctrl+0</kbd><span>Reset Zoom</span>
-                                <kbd>Space+Drag</kbd><span>Pan Canvas</span>
+                                <kbd>Ctrl+;</kbd><span>Toggle Snap</span>
+                                <kbd>Space</kbd><span>Pan Canvas</span>
                             </div>
                         </div>
                     </div>
