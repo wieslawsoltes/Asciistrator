@@ -859,10 +859,18 @@ body {
     flex-direction: column;
     flex: 1;
     overflow: hidden;
+    min-height: 0;
 }
 
 .panel-content.active {
     display: flex;
+}
+
+/* Allow panel content to scroll when needed */
+.panel-content > *:last-child:not(.panel-header) {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
 }
 
 .panel-header {
@@ -1032,6 +1040,17 @@ body {
    COMPONENTS PANEL
    ============================================ */
 
+#panel-components.active {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+#panel-components > .panel-header,
+#panel-components > .components-toolbar {
+    flex-shrink: 0;
+}
+
 .components-toolbar {
     padding: var(--space-sm) var(--space-md);
     border-bottom: 1px solid var(--color-border);
@@ -1059,7 +1078,9 @@ body {
 .component-libraries {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: var(--space-xs);
+    min-height: 0;
 }
 
 .component-library {
@@ -1159,8 +1180,8 @@ body {
 }
 
 .component-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    display: flex;
+    flex-direction: column;
     gap: var(--space-xs);
 }
 
@@ -1175,6 +1196,10 @@ body {
     cursor: grab;
     transition: all var(--transition-fast);
     user-select: none;
+    min-width: 0;
+    overflow: hidden;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .component-item:hover {
@@ -1196,17 +1221,19 @@ body {
 
 .component-preview {
     font-family: var(--font-family-mono);
-    font-size: 8px;
-    line-height: 1;
+    font-size: 7px;
+    line-height: 1.1;
     color: var(--color-canvas-text);
     background-color: var(--color-canvas-bg);
-    padding: var(--space-xs);
+    padding: 2px;
     border-radius: var(--radius-sm);
     white-space: pre;
     overflow: hidden;
-    max-width: 100%;
-    max-height: 50px;
+    width: 100%;
+    max-height: 45px;
     margin-bottom: var(--space-xs);
+    text-overflow: clip;
+    box-sizing: border-box;
 }
 
 .component-icon {

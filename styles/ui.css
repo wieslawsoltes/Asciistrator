@@ -1201,6 +1201,69 @@
 }
 
 /* ==========================================
+   UI COMPONENT PROPERTIES
+   ========================================== */
+
+#prop-ui-component-group {
+    margin-top: var(--ui-spacing);
+    padding-top: var(--ui-spacing);
+    border-top: 1px solid var(--ui-border);
+}
+
+#prop-ui-component-group > label {
+    display: block;
+    color: var(--ui-accent);
+    font-weight: 500;
+    margin-bottom: var(--ui-spacing);
+}
+
+#prop-ui-type {
+    color: var(--ui-text);
+    font-weight: normal;
+}
+
+#prop-ui-properties {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ui-spacing-sm);
+}
+
+#prop-ui-properties .property-row {
+    display: flex;
+    align-items: center;
+    gap: var(--ui-spacing);
+}
+
+#prop-ui-properties .property-row label {
+    width: 80px;
+    font-size: var(--ui-font-size-sm);
+    color: var(--ui-text-secondary);
+}
+
+#prop-ui-properties .property-row input[type="text"],
+#prop-ui-properties .property-row input[type="number"] {
+    flex: 1;
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius-sm);
+    padding: var(--ui-spacing-sm);
+    color: var(--ui-text);
+    font-size: var(--ui-font-size-sm);
+}
+
+#prop-ui-properties .property-row input[type="text"]:focus,
+#prop-ui-properties .property-row input[type="number"]:focus {
+    outline: none;
+    border-color: var(--ui-accent);
+}
+
+#prop-ui-properties .property-row input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--ui-accent);
+}
+
+/* ==========================================
    COLOR PANEL
    ========================================== */
 
@@ -1857,4 +1920,727 @@
 
 .inline-text-edit:focus {
     border-color: var(--ui-accent-hover);
+}
+
+/* ==========================================
+   SUBMENU SYSTEM
+   ========================================== */
+
+.submenu-wrapper {
+    position: relative;
+}
+
+.menu-dropdown-item.has-submenu {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.submenu-arrow {
+    font-size: 10px;
+    opacity: 0.7;
+    margin-left: var(--ui-spacing);
+}
+
+.submenu-dropdown {
+    position: absolute;
+    left: 100%;
+    top: 0;
+    min-width: 180px;
+    background: var(--ui-bg-tertiary);
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius);
+    box-shadow: var(--ui-shadow);
+    z-index: 1001;
+    display: none;
+    padding: var(--ui-spacing-sm) 0;
+}
+
+.submenu-dropdown.show {
+    display: block;
+}
+
+.submenu-dropdown .menu-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: var(--ui-spacing);
+    padding: var(--ui-spacing-sm) var(--ui-spacing);
+    margin: 0 var(--ui-spacing-sm);
+    background: transparent;
+    border: none;
+    border-radius: var(--ui-radius-sm);
+    color: var(--ui-text);
+    cursor: pointer;
+    white-space: nowrap;
+    text-align: left;
+    width: calc(100% - var(--ui-spacing));
+    font-size: var(--ui-font-size);
+}
+
+.submenu-dropdown .menu-dropdown-item:hover {
+    background: var(--ui-bg-active);
+    color: var(--ui-text-active);
+}
+
+.submenu-dropdown .menu-separator {
+    height: 1px;
+    background: var(--ui-border);
+    margin: var(--ui-spacing-sm);
+}
+
+/* ==========================================
+   AVALONIA EXPORT DIALOG
+   ========================================== */
+
+.avalonia-export-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(2px);
+}
+
+.avalonia-export-dialog {
+    width: 900px;
+    max-width: 95vw;
+    max-height: 90vh;
+    background: var(--ui-bg-secondary);
+    border-radius: var(--ui-radius);
+    border: 1px solid var(--ui-border);
+    box-shadow: var(--ui-shadow-lg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Dialog Header */
+.avalonia-export-dialog .dialog-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--ui-spacing) var(--ui-spacing-lg);
+    background: var(--ui-bg-tertiary);
+    border-bottom: 1px solid var(--ui-border);
+}
+
+.avalonia-export-dialog .dialog-header h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--ui-text);
+}
+
+.avalonia-export-dialog .dialog-close {
+    background: transparent;
+    border: none;
+    color: var(--ui-text-secondary);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: var(--ui-radius-sm);
+}
+
+.avalonia-export-dialog .dialog-close:hover {
+    background: var(--ui-bg-hover);
+    color: var(--ui-text);
+}
+
+/* Dialog Body */
+.avalonia-export-dialog .dialog-body {
+    flex: 1;
+    overflow: hidden;
+    padding: var(--ui-spacing-lg);
+}
+
+.avalonia-export-dialog .export-layout {
+    display: flex;
+    gap: var(--ui-spacing-lg);
+    height: 100%;
+}
+
+/* Options Panel */
+.avalonia-export-dialog .export-options-panel {
+    width: 300px;
+    flex-shrink: 0;
+    overflow-y: auto;
+    padding-right: var(--ui-spacing);
+}
+
+.avalonia-export-dialog .option-group {
+    margin-bottom: var(--ui-spacing-lg);
+}
+
+.avalonia-export-dialog .option-group h3 {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--ui-text-secondary);
+    margin: 0 0 var(--ui-spacing) 0;
+    letter-spacing: 0.5px;
+}
+
+/* Export Type Selector */
+.avalonia-export-dialog .export-type-selector {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ui-spacing-sm);
+}
+
+.avalonia-export-dialog .radio-option {
+    display: flex;
+    flex-direction: column;
+    padding: var(--ui-spacing);
+    background: var(--ui-bg-tertiary);
+    border-radius: var(--ui-radius);
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: all var(--ui-transition);
+}
+
+.avalonia-export-dialog .radio-option:hover {
+    background: var(--ui-bg-hover);
+}
+
+.avalonia-export-dialog .radio-option:has(input:checked) {
+    border-color: var(--ui-accent);
+    background: var(--ui-bg-active);
+}
+
+.avalonia-export-dialog .radio-option input {
+    display: none;
+}
+
+.avalonia-export-dialog .radio-label {
+    font-weight: 500;
+    color: var(--ui-text);
+}
+
+.avalonia-export-dialog .radio-desc {
+    font-size: var(--ui-font-size-sm);
+    color: var(--ui-text-secondary);
+    margin-top: 2px;
+}
+
+/* Option Rows */
+.avalonia-export-dialog .option-row {
+    display: flex;
+    align-items: center;
+    gap: var(--ui-spacing);
+    margin-bottom: var(--ui-spacing);
+}
+
+.avalonia-export-dialog .option-row label {
+    flex: 0 0 100px;
+    color: var(--ui-text-secondary);
+    font-size: var(--ui-font-size-sm);
+}
+
+.avalonia-export-dialog .option-row input[type="text"] {
+    flex: 1;
+    padding: var(--ui-spacing-sm) var(--ui-spacing);
+    background: var(--ui-bg-tertiary);
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius-sm);
+    color: var(--ui-text);
+    font-size: var(--ui-font-size);
+}
+
+.avalonia-export-dialog .option-row input[type="text"]:focus {
+    border-color: var(--ui-accent);
+    outline: none;
+}
+
+/* Checkbox Options */
+.avalonia-export-dialog .checkbox-option {
+    display: flex;
+    align-items: center;
+    gap: var(--ui-spacing);
+    padding: var(--ui-spacing-sm) 0;
+    cursor: pointer;
+}
+
+.avalonia-export-dialog .checkbox-option input {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--ui-accent);
+}
+
+.avalonia-export-dialog .checkbox-option span {
+    color: var(--ui-text);
+    font-size: var(--ui-font-size);
+}
+
+/* Select Dropdowns */
+.avalonia-export-dialog select {
+    width: 100%;
+    padding: var(--ui-spacing-sm) var(--ui-spacing);
+    background: var(--ui-bg-tertiary);
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius-sm);
+    color: var(--ui-text);
+    font-size: var(--ui-font-size);
+    cursor: pointer;
+}
+
+.avalonia-export-dialog select:focus {
+    border-color: var(--ui-accent);
+    outline: none;
+}
+
+/* Preview Panel */
+.avalonia-export-dialog .export-preview-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.avalonia-export-dialog .preview-tabs {
+    display: flex;
+    gap: var(--ui-spacing-sm);
+    margin-bottom: var(--ui-spacing);
+}
+
+.avalonia-export-dialog .preview-tab {
+    padding: var(--ui-spacing-sm) var(--ui-spacing);
+    background: var(--ui-bg-tertiary);
+    border: none;
+    border-radius: var(--ui-radius-sm);
+    color: var(--ui-text-secondary);
+    font-size: var(--ui-font-size-sm);
+    cursor: pointer;
+    transition: all var(--ui-transition);
+}
+
+.avalonia-export-dialog .preview-tab:hover:not(.disabled) {
+    background: var(--ui-bg-hover);
+}
+
+.avalonia-export-dialog .preview-tab.active {
+    background: var(--ui-accent);
+    color: white;
+}
+
+.avalonia-export-dialog .preview-tab.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.avalonia-export-dialog .preview-content {
+    flex: 1;
+    background: var(--ui-bg-tertiary);
+    border-radius: var(--ui-radius);
+    overflow: auto;
+    min-height: 300px;
+}
+
+.avalonia-export-dialog .preview-content pre {
+    margin: 0;
+    padding: var(--ui-spacing);
+}
+
+.avalonia-export-dialog .preview-content code {
+    font-family: var(--ui-font-mono);
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--ui-text);
+    white-space: pre;
+}
+
+/* Syntax Highlighting */
+.avalonia-export-dialog .preview-content code.language-xml {
+    color: #9cdcfe;
+}
+
+.avalonia-export-dialog .preview-content code.language-csharp {
+    color: #dcdcaa;
+}
+
+.avalonia-export-dialog .preview-info {
+    display: flex;
+    gap: var(--ui-spacing-lg);
+    margin-top: var(--ui-spacing);
+    font-size: var(--ui-font-size-sm);
+    color: var(--ui-text-secondary);
+}
+
+/* Dialog Footer */
+.avalonia-export-dialog .dialog-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--ui-spacing) var(--ui-spacing-lg);
+    background: var(--ui-bg-tertiary);
+    border-top: 1px solid var(--ui-border);
+}
+
+.avalonia-export-dialog .footer-info {
+    font-size: var(--ui-font-size-sm);
+    color: var(--ui-text-secondary);
+}
+
+.avalonia-export-dialog .footer-buttons {
+    display: flex;
+    gap: var(--ui-spacing);
+}
+
+.avalonia-export-dialog .btn {
+    padding: var(--ui-spacing-sm) var(--ui-spacing-lg);
+    border: none;
+    border-radius: var(--ui-radius);
+    font-size: var(--ui-font-size);
+    cursor: pointer;
+    transition: all var(--ui-transition);
+}
+
+.avalonia-export-dialog .btn-secondary {
+    background: var(--ui-bg-hover);
+    color: var(--ui-text);
+}
+
+.avalonia-export-dialog .btn-secondary:hover {
+    background: var(--ui-border-light);
+}
+
+.avalonia-export-dialog .btn-primary {
+    background: var(--ui-accent);
+    color: white;
+}
+
+.avalonia-export-dialog .btn-primary:hover {
+    background: var(--ui-accent-hover);
+}
+
+/* Export Notification */
+.export-notification {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    padding: var(--ui-spacing) var(--ui-spacing-lg);
+    background: var(--ui-success);
+    color: white;
+    border-radius: var(--ui-radius);
+    box-shadow: var(--ui-shadow);
+    z-index: 10001;
+    opacity: 0;
+    transform: translateY(10px);
+    transition: all 0.3s ease;
+}
+
+.export-notification.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.export-notification.error {
+    background: var(--ui-danger);
+}
+
+/* ==========================================
+   EXPORT DIALOG (GENERAL)
+   ========================================== */
+
+.export-dialog {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.export-dialog-layout {
+    display: flex;
+    gap: var(--ui-spacing-lg);
+    flex: 1;
+    overflow: hidden;
+}
+
+.export-sidebar {
+    width: 200px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ui-spacing);
+}
+
+.export-categories select {
+    width: 100%;
+    padding: var(--ui-spacing-sm);
+    background: var(--ui-bg-tertiary);
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius-sm);
+    color: var(--ui-text);
+}
+
+.export-format-list {
+    flex: 1;
+    overflow-y: auto;
+    background: var(--ui-bg-tertiary);
+    border-radius: var(--ui-radius);
+    border: 1px solid var(--ui-border);
+}
+
+.export-format-item {
+    padding: var(--ui-spacing);
+    cursor: pointer;
+    border-bottom: 1px solid var(--ui-border);
+}
+
+.export-format-item:last-child {
+    border-bottom: none;
+}
+
+.export-format-item:hover {
+    background: var(--ui-bg-hover);
+}
+
+.export-format-item.selected {
+    background: var(--ui-accent);
+    color: white;
+}
+
+.export-format-item .format-name {
+    font-weight: 500;
+}
+
+.export-format-item .format-ext {
+    font-size: var(--ui-font-size-sm);
+    opacity: 0.7;
+}
+
+.export-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ui-spacing);
+    min-width: 0;
+}
+
+.export-format-info {
+    padding: var(--ui-spacing);
+    background: var(--ui-bg-tertiary);
+    border-radius: var(--ui-radius);
+}
+
+.export-format-info h3 {
+    margin: 0 0 var(--ui-spacing-sm) 0;
+    font-size: 14px;
+}
+
+.export-format-info p {
+    margin: 0 0 var(--ui-spacing) 0;
+    color: var(--ui-text-secondary);
+    font-size: var(--ui-font-size-sm);
+}
+
+.export-format-details {
+    display: flex;
+    gap: var(--ui-spacing);
+}
+
+.export-format-details span {
+    padding: 2px 8px;
+    background: var(--ui-bg);
+    border-radius: var(--ui-radius-sm);
+    font-size: var(--ui-font-size-sm);
+}
+
+.export-options {
+    padding: var(--ui-spacing);
+    background: var(--ui-bg-tertiary);
+    border-radius: var(--ui-radius);
+}
+
+.export-option {
+    display: flex;
+    align-items: center;
+    gap: var(--ui-spacing);
+    margin-bottom: var(--ui-spacing-sm);
+}
+
+.export-option label {
+    flex: 1;
+    color: var(--ui-text);
+}
+
+.export-preview {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 100px;
+}
+
+.export-preview label {
+    margin-bottom: var(--ui-spacing-sm);
+    font-weight: 500;
+    color: var(--ui-text-secondary);
+}
+
+.export-preview-content {
+    flex: 1;
+    overflow: auto;
+    padding: var(--ui-spacing);
+    background: var(--ui-bg-tertiary);
+    border-radius: var(--ui-radius);
+    font-family: var(--ui-font-mono);
+    font-size: 11px;
+    white-space: pre;
+}
+
+.export-preview-content .placeholder {
+    opacity: 0.5;
+    font-style: italic;
+}
+
+/* ==========================================
+   COMPONENT PANEL EXPORT
+   ========================================== */
+
+/* Components panel specific layout - only when active */
+#panel-components.active {
+    display: flex;
+    flex-direction: column;
+    max-height: none;
+    height: 100%;
+}
+
+#panel-components .panel-header {
+    flex-shrink: 0;
+}
+
+#panel-components .components-toolbar {
+    flex-shrink: 0;
+}
+
+.component-libraries {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0;
+}
+
+/* Library section styling */
+.library-section {
+    margin-bottom: var(--ui-spacing);
+}
+
+.library-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--ui-spacing-sm) var(--ui-spacing);
+    background: var(--ui-bg-tertiary);
+    cursor: pointer;
+    user-select: none;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.library-header:hover {
+    background: var(--ui-bg-hover);
+}
+
+.library-name {
+    font-weight: 500;
+    font-size: var(--ui-font-size-sm);
+}
+
+.library-toggle {
+    font-size: 10px;
+    color: var(--ui-text-secondary);
+}
+
+.library-components {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+    gap: var(--ui-spacing-sm);
+    padding: var(--ui-spacing-sm);
+}
+
+.library-section.collapsed .library-components {
+    display: none;
+}
+
+.library-section.collapsed .library-toggle {
+    transform: rotate(-90deg);
+}
+
+.components-toolbar {
+    display: flex;
+    gap: var(--ui-spacing-sm);
+    padding: var(--ui-spacing-sm);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+.component-search {
+    flex: 1;
+    min-width: 120px;
+    padding: var(--ui-spacing-sm);
+    background: var(--ui-bg-tertiary);
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius-sm);
+    color: var(--ui-text);
+    font-size: var(--ui-font-size-sm);
+}
+
+.component-search:focus {
+    border-color: var(--ui-accent);
+    outline: none;
+}
+
+.component-export-select {
+    flex: 0 0 auto;
+    min-width: 100px;
+    padding: var(--ui-spacing-sm);
+    background: var(--ui-bg-tertiary);
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius-sm);
+    color: var(--ui-text);
+    font-size: var(--ui-font-size-sm);
+    cursor: pointer;
+}
+
+.component-export-select:focus {
+    border-color: var(--ui-accent);
+    outline: none;
+}
+
+.component-export-select option {
+    background: var(--ui-bg-secondary);
+    color: var(--ui-text);
+}
+
+/* Component item hover with export hint */
+.component-item {
+    position: relative;
+}
+
+.component-item::after {
+    content: '⚡';
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    font-size: 10px;
+    opacity: 0;
+    transition: opacity var(--ui-transition);
+}
+
+.component-item:hover::after {
+    opacity: 0.5;
+}
+
+/* Panel actions button for Avalonia */
+.panel-actions .icon-btn[title*="Avalonia"] {
+    color: var(--ui-accent);
+}
+
+.panel-actions .icon-btn[title*="Avalonia"]:hover {
+    background: var(--ui-accent);
+    color: white;
 }
