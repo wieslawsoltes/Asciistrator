@@ -345,7 +345,7 @@ class SceneObject {
      * @returns {Object}
      */
     toJSON() {
-        return {
+        const json = {
             id: this.id,
             type: this.type,
             name: this.name,
@@ -366,6 +366,20 @@ class SceneObject {
             opacity: this.opacity,
             layerId: this.layerId
         };
+        
+        // Include UI component properties if present
+        if (this.uiComponentType) {
+            json.uiComponentType = this.uiComponentType;
+        }
+        if (this.uiProperties && Object.keys(this.uiProperties).length > 0) {
+            json.uiProperties = this.uiProperties;
+        }
+        // Keep avaloniaType for backward compatibility
+        if (this.avaloniaType) {
+            json.avaloniaType = this.avaloniaType;
+        }
+        
+        return json;
     }
     
     /**
