@@ -21,6 +21,19 @@ export {
 } from './performance/index.js';
 
 // ==========================================
+// SMART GUIDES & SNAPPING
+// ==========================================
+
+export {
+    SmartGuides,
+    CanvasResizeHandler,
+    SnapConfig,
+    GuideLine,
+    DistanceIndicator,
+    SnapResult
+} from './smartguides.js';
+
+// ==========================================
 // RE-EXPORTS FROM SUBMODULES
 // ==========================================
 

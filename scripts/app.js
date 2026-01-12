@@ -25,6 +25,7 @@ import {
     floodFill 
 } from './core/ascii/rasterizer.js';
 import { ditherToAscii, bayerDither, floydSteinbergDither } from './core/ascii/dither.js';
+import { SmartGuides, CanvasResizeHandler } from './core/smartguides.js';
 import { EventEmitter, globalEventBus } from './utils/events.js';
 import { $, $$, createElement, domReady, getMousePos, debounce, throttle } from './utils/dom.js';
 import { clamp, uniqueId, uuid, deepClone, hexToRgb, rgbToHex } from './utils/helpers.js';
@@ -2787,6 +2788,22 @@ const AppState = {
     snapToGrid: true,
     gridSize: 1,
     
+    // Smart Guides & Snapping (Figma-like)
+    smartGuides: {
+        enabled: true,
+        snapTolerance: 3,           // Characters to snap within
+        showGuides: true,           // Show alignment guide lines
+        showDistances: true,        // Show distance measurements
+        showPositionLabel: true,    // Show position indicator during drag
+        snapToGrid: true,
+        snapToObjects: true,
+        snapToObjectCenters: true,
+        snapToObjectEdges: true,
+        snapToCanvasEdges: true,
+        snapToCanvasCenter: true,
+        gridSize: 4
+    },
+    
     // Layers
     layers: [],
     activeLayerId: null,
@@ -3942,6 +3959,10 @@ class SelectTool extends Tool {
         this.isEditingText = false;
         this.editingObject = null;
         this.appRef = null; // Store reference to app for property updates
+        
+        // Smart guides for Figma-like snapping and alignment
+        this.smartGuides = new SmartGuides();
+        this.lastSnapResult = null;
     }
     
     onMouseDown(x, y, button, renderer, app) {
@@ -4254,6 +4275,59 @@ class SelectTool extends Tool {
                     break;
             }
             
+            // Apply snapping during resize
+            if (AppState.smartGuides.enabled) {
+                const proposedBounds = { x: newX, y: newY, width: newW, height: newH };
+                
+                // Get other objects for snapping
+                const otherObjects = [];
+                for (const layer of AppState.layers) {
+                    if (!layer.visible || !layer.objects) continue;
+                    for (const o of layer.objects) {
+                        if (o !== obj && o.visible) {
+                            otherObjects.push(o);
+                        }
+                    }
+                }
+                
+                this.smartGuides.updateConfig(AppState.smartGuides);
+                const snapResult = this.smartGuides.calculateSnap(
+                    proposedBounds,
+                    otherObjects,
+                    AppState.canvasWidth,
+                    AppState.canvasHeight
+                );
+                
+                // Apply snap adjustments based on which handle is being used
+                if (this.resizeHandle.includes('w') && snapResult.snappedX !== newX) {
+                    const snapDiff = snapResult.snappedX - newX;
+                    newX = snapResult.snappedX;
+                    newW -= snapDiff;
+                } else if (this.resizeHandle.includes('e') && snapResult.snapTypeX) {
+                    // For east handles, snap the right edge
+                    const rightEdge = newX + newW - 1;
+                    const snappedRight = snapResult.snappedX + newW - 1;
+                    if (Math.abs(snappedRight - rightEdge) <= AppState.smartGuides.snapTolerance) {
+                        newW = snappedRight - newX + 1;
+                    }
+                }
+                
+                if (this.resizeHandle.includes('n') && snapResult.snappedY !== newY) {
+                    const snapDiff = snapResult.snappedY - newY;
+                    newY = snapResult.snappedY;
+                    newH -= snapDiff;
+                } else if (this.resizeHandle.includes('s') && snapResult.snapTypeY) {
+                    // For south handles, snap the bottom edge
+                    const bottomEdge = newY + newH - 1;
+                    const snappedBottom = snapResult.snappedY + newH - 1;
+                    if (Math.abs(snappedBottom - bottomEdge) <= AppState.smartGuides.snapTolerance) {
+                        newH = snappedBottom - newY + 1;
+                    }
+                }
+                
+                this.lastSnapResult = snapResult;
+            }
+            
             // Enforce minimum size
             if (newW >= 2 && newH >= 1) {
                 obj.x = newX;
@@ -4280,19 +4354,101 @@ class SelectTool extends Tool {
                 if (obj._updateBounds) obj._updateBounds();
                 if (obj._updateSnapPoints) obj._updateSnapPoints();
                 
-                if (app && app.renderAllObjects) app.renderAllObjects();
+                if (app && app.renderAllObjects) {
+                    app.renderAllObjects();
+                    
+                    // Render smart guides during resize
+                    if (this.lastSnapResult && AppState.smartGuides.enabled && AppState.smartGuides.showGuides) {
+                        const currentBounds = { x: newX, y: newY, width: newW, height: newH };
+                        this.smartGuides.renderGuides(renderer.previewBuffer, this.lastSnapResult, currentBounds);
+                        renderer.render();
+                    }
+                }
             }
         } else if (this.isMoving && this.initialPositions) {
             // Calculate delta from start position
-            const dx = Math.round(x - this.moveStartX);
-            const dy = Math.round(y - this.moveStartY);
+            let dx = Math.round(x - this.moveStartX);
+            let dy = Math.round(y - this.moveStartY);
+            
+            // Calculate current bounds for snapping
+            if (AppState.selectedObjects.length > 0 && AppState.smartGuides.enabled) {
+                // Get combined bounds of all selected objects at their new position
+                const firstPos = this.initialPositions[0];
+                const firstObj = firstPos.obj;
+                const currentBounds = firstObj.getBounds ? firstObj.getBounds() : { 
+                    x: firstPos.x + dx, 
+                    y: firstPos.y + dy, 
+                    width: firstObj.width || 1, 
+                    height: firstObj.height || 1 
+                };
+                
+                // Simulate position for snapping calculation
+                const proposedBounds = {
+                    x: firstPos.x + dx,
+                    y: firstPos.y + dy,
+                    width: currentBounds.width,
+                    height: currentBounds.height
+                };
+                
+                // Get all other objects (not selected) for snapping
+                const otherObjects = [];
+                for (const layer of AppState.layers) {
+                    if (!layer.visible || !layer.objects) continue;
+                    for (const obj of layer.objects) {
+                        if (!AppState.selectedObjects.includes(obj) && obj.visible) {
+                            otherObjects.push(obj);
+                        }
+                    }
+                }
+                
+                // Sync smart guides config with AppState
+                this.smartGuides.updateConfig(AppState.smartGuides);
+                
+                // Calculate snap
+                const snapResult = this.smartGuides.calculateSnap(
+                    proposedBounds,
+                    otherObjects,
+                    AppState.canvasWidth,
+                    AppState.canvasHeight
+                );
+                
+                // Adjust deltas based on snap
+                if (snapResult.snappedX !== proposedBounds.x) {
+                    dx = snapResult.snappedX - firstPos.x;
+                }
+                if (snapResult.snappedY !== proposedBounds.y) {
+                    dy = snapResult.snappedY - firstPos.y;
+                }
+                
+                this.lastSnapResult = snapResult;
+            }
             
             // Apply delta to all objects using the helper method
             for (const pos of this.initialPositions) {
                 this._applyMoveDelta(pos, dx, dy);
             }
             
-            if (app && app.renderAllObjects) app.renderAllObjects();
+            // Render objects and guides
+            if (app && app.renderAllObjects) {
+                app.renderAllObjects();
+                
+                // Render smart guides on top
+                if (this.lastSnapResult && AppState.smartGuides.enabled && AppState.smartGuides.showGuides) {
+                    const firstObj = AppState.selectedObjects[0];
+                    const currentBounds = firstObj.getBounds ? firstObj.getBounds() : {
+                        x: firstObj.x,
+                        y: firstObj.y,
+                        width: firstObj.width || 1,
+                        height: firstObj.height || 1
+                    };
+                    this.smartGuides.renderGuides(
+                        renderer.previewBuffer,
+                        this.lastSnapResult,
+                        currentBounds
+                    );
+                    renderer.render();
+                }
+            }
         }
     }
     
@@ -4302,12 +4458,17 @@ class SelectTool extends Tool {
             this.resizeHandle = null;
             this.resizeObj = null;
             this.resizeStartBounds = null;
+            // Clear smart guides
+            this.smartGuides.clearGuides();
+            this.lastSnapResult = null;
+            renderer.clearPreview();
             // Invalidate spatial index
             if (app && app.invalidateSpatialIndex) app.invalidateSpatialIndex();
             if (AppState.selectedObjects.length > 0) {
                 this._updatePropertiesPanel(AppState.selectedObjects[0]);
                 this._updateStatus(`Resized object`);
             }
+            if (app && app.renderAllObjects) app.renderAllObjects();
             return;
         }
         
@@ -4336,6 +4497,9 @@ class SelectTool extends Tool {
         } else if (this.isMoving) {
             this.isMoving = false;
             this.initialPositions = null;
+            // Clear smart guides
+            this.smartGuides.clearGuides();
+            this.lastSnapResult = null;
             // Invalidate spatial index after moving objects
             if (app && app.invalidateSpatialIndex) {
                 app.invalidateSpatialIndex();
@@ -4343,10 +4507,13 @@ class SelectTool extends Tool {
             if (app && app._updateLayerList) {
                 app._updateLayerList();
             }
+            // Clear preview buffer to remove guides
+            renderer.clearPreview();
             if (AppState.selectedObjects.length > 0) {
                 this._updatePropertiesPanel(AppState.selectedObjects[0]);
                 this._updateStatus(`Moved ${AppState.selectedObjects.length} object(s)`);
             }
+            if (app && app.renderAllObjects) app.renderAllObjects();
         }
     }
     
@@ -6412,6 +6579,9 @@ class Asciistrator extends EventEmitter {
         // Spatial index for fast hit-testing
         this.spatialIndex = null;
         this._spatialIndexDirty = true;
+        
+        // Canvas resize handler for Figma-like canvas border handles
+        this.canvasResizeHandler = new CanvasResizeHandler();
     }
     
     /**
@@ -6480,10 +6650,138 @@ class Asciistrator extends EventEmitter {
         // Setup mobile UI
         this._setupMobileUI();
         
+        // Setup canvas resize handles
+        this._setupCanvasResizeHandles();
+        
         this.initialized = true;
         console.log('✅ Asciistrator initialized');
         
         this.emit('ready');
+    }
+    
+    /**
+     * Setup canvas resize handles (Figma-like)
+     */
+    _setupCanvasResizeHandles() {
+        const viewport = $('#viewport');
+        const wrapper = $('#canvas-wrapper');
+        const canvas = $('#ascii-canvas');
+        
+        if (!viewport || !wrapper || !canvas) return;
+        
+        // Create a container for resize handles
+        let handleContainer = $('#canvas-resize-handles');
+        if (!handleContainer) {
+            handleContainer = createElement('div', { 
+                id: 'canvas-resize-handles',
+                style: {
+                    position: 'absolute',
+                    top: '0',
+                    left: '0',
+                    right: '0',
+                    bottom: '0',
+                    pointerEvents: 'none',
+                    zIndex: '50'
+                }
+            });
+            viewport.appendChild(handleContainer);
+        }
+        
+        const handler = this.canvasResizeHandler;
+        const self = this;
+        
+        // Track mouse position for handle detection
+        let currentHandle = null;
+        
+        const updateHandles = () => {
+            if (!this.renderer || !wrapper) return;
+            const canvasRect = canvas.getBoundingClientRect();
+            handler.renderHandles(handleContainer, canvasRect);
+            
+            // Make handles respond to pointer events
+            const handles = handleContainer.querySelectorAll('.canvas-resize-handle');
+            handles.forEach(h => {
+                h.style.pointerEvents = 'auto';
+            });
+        };
+        
+        // Update handles on zoom/pan changes
+        this.renderer.on('transform', updateHandles);
+        
+        // Initial render of handles (deferred)
+        requestAnimationFrame(() => {
+            updateHandles();
+        });
+        
+        // Handle resize start
+        handleContainer.addEventListener('pointerdown', (e) => {
+            const handle = e.target.dataset.handle;
+            if (!handle) return;
+            
+            e.preventDefault();
+            e.stopPropagation();
+            
+            handler.startResize(
+                handle, 
+                e.clientX, 
+                e.clientY, 
+                AppState.canvasWidth, 
+                AppState.canvasHeight
+            );
+            
+            currentHandle = handle;
+            document.body.style.cursor = handler.getCursor(handle);
+            
+            // Show size indicator
+            handler.showSizeIndicator(AppState.canvasWidth, AppState.canvasHeight, e.clientX, e.clientY);
+        });
+        
+        // Handle resize move (document level for drag outside)
+        document.addEventListener('pointermove', (e) => {
+            if (!handler.isResizing) return;
+            
+            const newSize = handler.calculateNewSize(
+                e.clientX, 
+                e.clientY, 
+                this.renderer.charWidth, 
+                this.renderer.charHeight
+            );
+            
+            // Update canvas size preview
+            handler.showSizeIndicator(newSize.width, newSize.height, e.clientX, e.clientY);
+        });
+        
+        // Handle resize end
+        document.addEventListener('pointerup', (e) => {
+            if (!handler.isResizing) return;
+            
+            const newSize = handler.calculateNewSize(
+                e.clientX, 
+                e.clientY, 
+                this.renderer.charWidth, 
+                this.renderer.charHeight
+            );
+            
+            // Apply the new canvas size
+            this.resizeCanvas(newSize.width, newSize.height);
+            
+            handler.endResize();
+            handler.hideSizeIndicator();
+            document.body.style.cursor = '';
+            currentHandle = null;
+            
+            // Update handles position
+            requestAnimationFrame(updateHandles);
+        });
+        
+        // Handle cursor changes on hover
+        handleContainer.addEventListener('pointermove', (e) => {
+            if (handler.isResizing) return;
+            const handle = e.target.dataset.handle;
+            if (handle) {
+                e.target.style.cursor = handler.getCursor(handle);
+            }
+        });
     }
     
     _setupContextMenu() {
@@ -7036,6 +7334,11 @@ class Asciistrator extends EventEmitter {
                         e.preventDefault();
                         this.duplicate();
                         break;
+                    case ';':
+                        // Toggle snapping (Ctrl+;)
+                        e.preventDefault();
+                        this.toggleSnapping();
+                        break;
                 }
             }
             
@@ -7256,6 +7559,40 @@ class Asciistrator extends EventEmitter {
             statusZoom.addEventListener('dblclick', () => this.zoomFit());
             statusZoom.title = 'Click to reset zoom, double-click to fit';
         }
+        
+        // Add click handler for snap toggle
+        const statusSnap = $('#status-snap');
+        if (statusSnap) {
+            statusSnap.addEventListener('click', () => this.toggleSnapping());
+            this._updateSnapStatus();
+        }
+    }
+    
+    /**
+     * Toggle snapping on/off
+     */
+    toggleSnapping() {
+        AppState.smartGuides.enabled = !AppState.smartGuides.enabled;
+        this._updateSnapStatus();
+        this._updateStatus(`Snapping ${AppState.smartGuides.enabled ? 'enabled' : 'disabled'}`);
+    }
+    
+    /**
+     * Update snap status indicator
+     */
+    _updateSnapStatus() {
+        const statusSnap = $('#status-snap');
+        if (statusSnap) {
+            if (AppState.smartGuides.enabled) {
+                statusSnap.textContent = '⊙ Snap';
+                statusSnap.classList.add('active');
+                statusSnap.style.color = 'var(--ui-accent)';
+            } else {
+                statusSnap.textContent = '○ Snap';
+                statusSnap.classList.remove('active');
+                statusSnap.style.color = '';
+            }
+        }
     }
     
     _updateStatusBar() {
@@ -7350,6 +7687,20 @@ class Asciistrator extends EventEmitter {
             view: [
                 { label: 'Toggle Grid', action: 'grid-toggle' },
                 { label: 'Grid Spacing...', action: 'grid-spacing' },
+                { type: 'separator' },
+                { label: 'Toggle Snapping', action: 'snap-toggle', shortcut: 'Ctrl+;' },
+                { 
+                    label: 'Snapping Options',
+                    submenu: [
+                        { label: 'Snap to Grid', action: 'snap-grid', checked: () => AppState.smartGuides.snapToGrid },
+                        { label: 'Snap to Objects', action: 'snap-objects', checked: () => AppState.smartGuides.snapToObjects },
+                        { label: 'Snap to Centers', action: 'snap-centers', checked: () => AppState.smartGuides.snapToObjectCenters },
+                        { label: 'Snap to Canvas', action: 'snap-canvas', checked: () => AppState.smartGuides.snapToCanvasEdges },
+                        { type: 'separator' },
+                        { label: 'Show Guides', action: 'snap-show-guides', checked: () => AppState.smartGuides.showGuides },
+                        { label: 'Show Distances', action: 'snap-show-distances', checked: () => AppState.smartGuides.showDistances },
+                    ]
+                },
                 { type: 'separator' },
                 { label: 'Zoom In', action: 'zoom-in', shortcut: 'Ctrl++' },
                 { label: 'Zoom Out', action: 'zoom-out', shortcut: 'Ctrl+-' },
@@ -7595,6 +7946,35 @@ class Asciistrator extends EventEmitter {
                 break;
             case 'grid-spacing':
                 this.showGridSpacingDialog();
+                break;
+            // View - Snapping
+            case 'snap-toggle':
+                this.toggleSnapping();
+                break;
+            case 'snap-grid':
+                AppState.smartGuides.snapToGrid = !AppState.smartGuides.snapToGrid;
+                this._updateStatus(`Snap to grid ${AppState.smartGuides.snapToGrid ? 'enabled' : 'disabled'}`);
+                break;
+            case 'snap-objects':
+                AppState.smartGuides.snapToObjects = !AppState.smartGuides.snapToObjects;
+                this._updateStatus(`Snap to objects ${AppState.smartGuides.snapToObjects ? 'enabled' : 'disabled'}`);
+                break;
+            case 'snap-centers':
+                AppState.smartGuides.snapToObjectCenters = !AppState.smartGuides.snapToObjectCenters;
+                this._updateStatus(`Snap to centers ${AppState.smartGuides.snapToObjectCenters ? 'enabled' : 'disabled'}`);
+                break;
+            case 'snap-canvas':
+                AppState.smartGuides.snapToCanvasEdges = !AppState.smartGuides.snapToCanvasEdges;
+                AppState.smartGuides.snapToCanvasCenter = AppState.smartGuides.snapToCanvasEdges;
+                this._updateStatus(`Snap to canvas ${AppState.smartGuides.snapToCanvasEdges ? 'enabled' : 'disabled'}`);
+                break;
+            case 'snap-show-guides':
+                AppState.smartGuides.showGuides = !AppState.smartGuides.showGuides;
+                this._updateStatus(`Show guides ${AppState.smartGuides.showGuides ? 'enabled' : 'disabled'}`);
+                break;
+            case 'snap-show-distances':
+                AppState.smartGuides.showDistances = !AppState.smartGuides.showDistances;
+                this._updateStatus(`Show distances ${AppState.smartGuides.showDistances ? 'enabled' : 'disabled'}`);
                 break;
             // View - Zoom
             case 'zoom-in':

@@ -2593,3 +2593,57 @@ body {
         pointer-events: auto;
     }
 }
+/* ============================================
+   SMART GUIDES & SNAPPING
+   ============================================ */
+
+/* Clickable status bar items */
+.status-snap.clickable {
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-fast);
+    user-select: none;
+}
+
+.status-snap.clickable:hover {
+    background-color: var(--color-bg-hover);
+}
+
+.status-snap.active {
+    color: var(--color-accent);
+    font-weight: 500;
+}
+
+/* Canvas resize handles */
+.canvas-resize-handle {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    background: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border);
+    border-radius: 2px;
+    pointer-events: auto;
+    transition: background-color var(--transition-fast), transform var(--transition-fast);
+    z-index: 100;
+}
+
+.canvas-resize-handle:hover {
+    background: var(--color-accent);
+    transform: scale(1.2);
+}
+
+/* Canvas size indicator tooltip */
+#canvas-size-indicator {
+    position: fixed;
+    background: rgba(0, 0, 0, 0.85);
+    color: #fff;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    z-index: 1000;
+    pointer-events: none;
+    white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
