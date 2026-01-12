@@ -10648,12 +10648,44 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
     // Copy as text to clipboard
     copyAsText() {
         const text = this.renderer.exportText();
-        navigator.clipboard.writeText(text).then(() => {
-            this._updateStatus('Copied canvas as plain text');
-        }).catch(err => {
-            console.error('Failed to copy:', err);
+        
+        // Check if clipboard API is available
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(() => {
+                this._updateStatus('Copied canvas as plain text');
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                this._copyTextFallback(text);
+            });
+        } else {
+            this._copyTextFallback(text);
+        }
+    }
+    
+    // Fallback for copying text when clipboard API is not available
+    _copyTextFallback(text) {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        textarea.style.top = '0';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        
+        try {
+            const success = document.execCommand('copy');
+            if (success) {
+                this._updateStatus('Copied canvas as plain text');
+            } else {
+                this._updateStatus('Failed to copy to clipboard');
+            }
+        } catch (err) {
+            console.error('Fallback copy failed:', err);
             this._updateStatus('Failed to copy to clipboard');
-        });
+        }
+        
+        document.body.removeChild(textarea);
     }
     
     // Copy as HTML to clipboard
