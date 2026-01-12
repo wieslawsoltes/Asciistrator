@@ -422,8 +422,9 @@ class RectangleObject extends SceneObject {
         
         if (this.filled && this.fillChar) {
             fillRect(buffer, this.x, this.y, this.width, this.height, {
-                char: this.fillChar,
-                color: this.fillColor
+                fillChar: this.fillChar,
+                fillColor: this.fillColor,
+                border: false  // We draw border separately below
             });
         }
         
@@ -519,7 +520,7 @@ class EllipseObject extends SceneObject {
         
         if (this.filled && this.fillChar) {
             fillCircle(buffer, cx, cy, r, {
-                char: this.fillChar,
+                fillChar: this.fillChar,
                 color: this.fillColor
             });
         }
@@ -2792,7 +2793,7 @@ const AppState = {
     
     // Drawing settings
     strokeChar: '*',
-    fillChar: '█',
+    fillChar: '',  // Empty by default - shapes draw stroked, not filled
     strokeColor: null,
     fillColor: null,
     lineStyle: 'single',
@@ -6140,6 +6141,17 @@ class FlowchartTool extends Tool {
             }
             
             shape.strokeColor = AppState.strokeColor;
+            shape.strokeChar = AppState.strokeChar;
+            shape.lineStyle = AppState.lineStyle;
+            
+            // Auto-fill based on AppState.fillChar
+            const shouldFill = AppState.fillChar && AppState.fillChar !== '';
+            shape.filled = shouldFill;
+            if (shouldFill) {
+                shape.fillChar = AppState.fillChar;
+                shape.fillColor = AppState.fillColor;
+            }
+            
             shape.name = `${this.shapeType} ${Date.now() % 10000}`;
             
             if (app && app.addObject) {
@@ -6155,66 +6167,67 @@ class FlowchartTool extends Tool {
         const minY = Math.min(y1, y2);
         const width = Math.max(10, Math.abs(x2 - x1) + 1);
         const height = Math.max(3, Math.abs(y2 - y1) + 1);
+        const previewColor = AppState.strokeColor || '#4a9eff';
         
         switch (this.shapeType) {
             case 'process':
-                drawRect(buffer, minX, minY, width, height, { style: 'single', color: '#4a9eff' });
+                drawRect(buffer, minX, minY, width, height, { style: AppState.lineStyle || 'single', color: previewColor });
                 break;
             case 'decision':
-                this._drawDiamond(buffer, minX, minY, width, height);
+                this._drawDiamond(buffer, minX, minY, width, height, previewColor);
                 break;
             case 'terminal':
-                this._drawRoundedRect(buffer, minX, minY, width, height);
+                this._drawRoundedRect(buffer, minX, minY, width, height, previewColor);
                 break;
             case 'io':
-                drawRect(buffer, minX, minY, width, height, { style: 'double', color: '#4a9eff' });
+                drawRect(buffer, minX, minY, width, height, { style: 'double', color: previewColor });
                 break;
             case 'document':
-                drawRect(buffer, minX, minY, width, height, { style: 'single', color: '#4a9eff' });
+                drawRect(buffer, minX, minY, width, height, { style: AppState.lineStyle || 'single', color: previewColor });
                 break;
             case 'database':
-                this._drawRoundedRect(buffer, minX, minY, width, height);
+                this._drawRoundedRect(buffer, minX, minY, width, height, previewColor);
                 break;
             case 'subprocess':
-                drawRect(buffer, minX, minY, width, height, { style: 'single', color: '#4a9eff' });
+                drawRect(buffer, minX, minY, width, height, { style: AppState.lineStyle || 'single', color: previewColor });
                 break;
         }
     }
     
-    _drawDiamond(buffer, x, y, width, height) {
+    _drawDiamond(buffer, x, y, width, height, color = '#4a9eff') {
         const cx = x + Math.floor(width / 2);
         const cy = y + Math.floor(height / 2);
         
-        buffer.setChar(cx, y, '◇', '#4a9eff');
-        buffer.setChar(x, cy, '◇', '#4a9eff');
-        buffer.setChar(x + width - 1, cy, '◇', '#4a9eff');
-        buffer.setChar(cx, y + height - 1, '◇', '#4a9eff');
+        buffer.setChar(cx, y, '◇', color);
+        buffer.setChar(x, cy, '◇', color);
+        buffer.setChar(x + width - 1, cy, '◇', color);
+        buffer.setChar(cx, y + height - 1, '◇', color);
         
         // Draw diagonals
         const hw = Math.floor(width / 2);
         const hh = Math.floor(height / 2);
         for (let i = 1; i < hh; i++) {
             const offset = Math.floor((hw * i) / hh);
-            buffer.setChar(cx - offset, y + i, '╱', '#4a9eff');
-            buffer.setChar(cx + offset, y + i, '╲', '#4a9eff');
-            buffer.setChar(cx - offset, cy + i, '╲', '#4a9eff');
-            buffer.setChar(cx + offset, cy + i, '╱', '#4a9eff');
+            buffer.setChar(cx - offset, y + i, '╱', color);
+            buffer.setChar(cx + offset, y + i, '╲', color);
+            buffer.setChar(cx - offset, cy + i, '╲', color);
+            buffer.setChar(cx + offset, cy + i, '╱', color);
         }
     }
     
-    _drawRoundedRect(buffer, x, y, width, height) {
-        buffer.setChar(x, y, '╭', '#4a9eff');
-        buffer.setChar(x + width - 1, y, '╮', '#4a9eff');
-        buffer.setChar(x, y + height - 1, '╰', '#4a9eff');
-        buffer.setChar(x + width - 1, y + height - 1, '╯', '#4a9eff');
+    _drawRoundedRect(buffer, x, y, width, height, color = '#4a9eff') {
+        buffer.setChar(x, y, '╭', color);
+        buffer.setChar(x + width - 1, y, '╮', color);
+        buffer.setChar(x, y + height - 1, '╰', color);
+        buffer.setChar(x + width - 1, y + height - 1, '╯', color);
         
         for (let i = x + 1; i < x + width - 1; i++) {
-            buffer.setChar(i, y, '─', '#4a9eff');
-            buffer.setChar(i, y + height - 1, '─', '#4a9eff');
+            buffer.setChar(i, y, '─', color);
+            buffer.setChar(i, y + height - 1, '─', color);
         }
         for (let i = y + 1; i < y + height - 1; i++) {
-            buffer.setChar(x, i, '│', '#4a9eff');
-            buffer.setChar(x + width - 1, i, '│', '#4a9eff');
+            buffer.setChar(x, i, '│', color);
+            buffer.setChar(x + width - 1, i, '│', color);
         }
     }
 }
@@ -6310,6 +6323,8 @@ class ConnectorTool extends Tool {
             connector.arrowEnd = this.arrowEnd;
             connector.arrowStart = this.arrowStart;
             connector.strokeColor = AppState.strokeColor;
+            connector.strokeChar = AppState.strokeChar;
+            connector.lineStyle = AppState.lineStyle;
             connector.name = `Connector ${Date.now() % 10000}`;
             
             if (this.fromShape) {
@@ -6342,47 +6357,48 @@ class ConnectorTool extends Tool {
     }
     
     _drawConnectorPreview(buffer, x1, y1, x2, y2) {
+        const previewColor = AppState.strokeColor || '#4a9eff';
         if (this.connectorStyle === 'orthogonal') {
             // Draw orthogonal connector (L-shaped)
             const midX = Math.round((x1 + x2) / 2);
             
             // Horizontal line from start
-            this._drawLineSegment(buffer, x1, y1, midX, y1);
+            this._drawLineSegment(buffer, x1, y1, midX, y1, previewColor);
             // Vertical line
-            this._drawLineSegment(buffer, midX, y1, midX, y2);
+            this._drawLineSegment(buffer, midX, y1, midX, y2, previewColor);
             // Horizontal line to end
-            this._drawLineSegment(buffer, midX, y2, x2, y2);
+            this._drawLineSegment(buffer, midX, y2, x2, y2, previewColor);
             
             // Fix corners
             if (y1 !== y2) {
                 const corner1 = y2 > y1 ? '┐' : '┘';
                 const corner2 = y2 > y1 ? '└' : '┌';
-                buffer.setChar(midX, y1, x2 > x1 ? corner1 : (y2 > y1 ? '┌' : '└'), '#4a9eff');
-                buffer.setChar(midX, y2, x2 > x1 ? corner2 : (y2 > y1 ? '┘' : '┐'), '#4a9eff');
+                buffer.setChar(midX, y1, x2 > x1 ? corner1 : (y2 > y1 ? '┌' : '└'), previewColor);
+                buffer.setChar(midX, y2, x2 > x1 ? corner2 : (y2 > y1 ? '┘' : '┐'), previewColor);
             }
         } else {
             // Straight line
             drawLine(buffer, x1, y1, x2, y2, { 
                 style: this.lineType === 'dashed' ? 'dashed' : 'single',
-                color: '#4a9eff' 
+                color: previewColor 
             });
         }
         
         // Draw arrow at end
         if (this.arrowEnd) {
             const arrowChar = x2 > x1 ? '▶' : (x2 < x1 ? '◀' : (y2 > y1 ? '▼' : '▲'));
-            buffer.setChar(x2, y2, arrowChar, '#4a9eff');
+            buffer.setChar(x2, y2, arrowChar, previewColor);
         }
     }
     
-    _drawLineSegment(buffer, x1, y1, x2, y2) {
+    _drawLineSegment(buffer, x1, y1, x2, y2, color = '#4a9eff') {
         if (y1 === y2) {
             // Horizontal
             const minX = Math.min(x1, x2);
             const maxX = Math.max(x1, x2);
             const char = this.lineType === 'dashed' ? '┄' : '─';
             for (let x = minX; x <= maxX; x++) {
-                buffer.setChar(x, y1, char, '#4a9eff');
+                buffer.setChar(x, y1, char, color);
             }
         } else if (x1 === x2) {
             // Vertical
@@ -6390,7 +6406,7 @@ class ConnectorTool extends Tool {
             const maxY = Math.max(y1, y2);
             const char = this.lineType === 'dashed' ? '┆' : '│';
             for (let y = minY; y <= maxY; y++) {
-                buffer.setChar(x1, y, char, '#4a9eff');
+                buffer.setChar(x1, y, char, color);
             }
         }
     }
@@ -9064,20 +9080,24 @@ class Asciistrator extends EventEmitter {
         
         if (strokeColorInput) {
             strokeColorInput.addEventListener('change', (e) => {
+                AppState.strokeColor = e.target.value;
                 updateSelectedObject('strokeColor', e.target.value);
             });
             strokeColorInput.addEventListener('input', (e) => {
                 // Real-time preview
+                AppState.strokeColor = e.target.value;
                 updateSelectedObject('strokeColor', e.target.value);
             });
         }
         
         if (fillColorInput) {
             fillColorInput.addEventListener('change', (e) => {
+                AppState.fillColor = e.target.value;
                 updateSelectedObject('fillColor', e.target.value);
             });
             fillColorInput.addEventListener('input', (e) => {
                 // Real-time preview
+                AppState.fillColor = e.target.value;
                 updateSelectedObject('fillColor', e.target.value);
             });
         }
@@ -9087,6 +9107,7 @@ class Asciistrator extends EventEmitter {
         if (fillCharInput) {
             fillCharInput.addEventListener('change', (e) => {
                 const value = e.target.value || '';
+                AppState.fillChar = value;
                 updateSelectedObject('fillChar', value);
                 // Also set filled to true if fillChar is set, false if empty
                 updateSelectedObject('filled', value !== '');
@@ -12962,7 +12983,9 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             results.innerHTML = '';
             const grouped = {};
             
-            filteredCommands.slice(0, 15).forEach((cmd, idx) => {
+            // Show more results - up to 50 when no filter, 20 when filtered
+            const maxResults = input.value.trim() ? 20 : 50;
+            filteredCommands.slice(0, maxResults).forEach((cmd, idx) => {
                 if (!grouped[cmd.category]) grouped[cmd.category] = [];
                 grouped[cmd.category].push({ ...cmd, idx });
             });
@@ -12976,22 +12999,42 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                 cmds.forEach(cmd => {
                     const item = document.createElement('div');
                     item.className = `command-palette-item${cmd.idx === selectedIndex ? ' selected' : ''}`;
+                    item.dataset.commandIndex = cmd.idx;
                     item.innerHTML = `
                         <span class="command-label">${cmd.label}</span>
                         ${cmd.shortcut ? `<span class="command-shortcut">${cmd.shortcut}</span>` : ''}
                     `;
-                    item.addEventListener('click', () => {
-                        closeDialog();
-                        cmd.action();
-                    });
-                    item.addEventListener('mouseenter', () => {
-                        selectedIndex = cmd.idx;
-                        renderResults();
-                    });
                     results.appendChild(item);
                 });
             });
         };
+        
+        // Use event delegation for click and mouseenter
+        results.addEventListener('click', (e) => {
+            const item = e.target.closest('.command-palette-item');
+            if (item) {
+                const idx = parseInt(item.dataset.commandIndex, 10);
+                const cmd = filteredCommands[idx];
+                if (cmd) {
+                    closeDialog();
+                    cmd.action();
+                }
+            }
+        });
+        
+        results.addEventListener('mouseover', (e) => {
+            const item = e.target.closest('.command-palette-item');
+            if (item) {
+                const idx = parseInt(item.dataset.commandIndex, 10);
+                if (idx !== selectedIndex) {
+                    selectedIndex = idx;
+                    // Update selection styling without full re-render
+                    results.querySelectorAll('.command-palette-item').forEach(el => {
+                        el.classList.toggle('selected', parseInt(el.dataset.commandIndex, 10) === selectedIndex);
+                    });
+                }
+            }
+        });
         
         const filterCommands = (query) => {
             if (!query) {
@@ -13021,9 +13064,10 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         input.addEventListener('input', (e) => filterCommands(e.target.value));
         
         input.addEventListener('keydown', (e) => {
+            const maxResults = input.value.trim() ? 20 : 50;
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
-                selectedIndex = Math.min(selectedIndex + 1, Math.min(filteredCommands.length - 1, 14));
+                selectedIndex = Math.min(selectedIndex + 1, Math.min(filteredCommands.length - 1, maxResults - 1));
                 renderResults();
             } else if (e.key === 'ArrowUp') {
                 e.preventDefault();
@@ -13376,6 +13420,17 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         
         this.saveStateForUndo();
         
+        // Preserve style from the first shape (primary shape)
+        const primaryShape = shapes[0];
+        const preservedStyle = {
+            strokeChar: primaryShape.strokeChar || '*',
+            fillChar: primaryShape.fillChar || '█',
+            strokeColor: primaryShape.strokeColor,
+            fillColor: primaryShape.fillColor,
+            lineStyle: primaryShape.lineStyle || 'single',
+            filled: primaryShape.filled !== undefined ? primaryShape.filled : true
+        };
+        
         // Get bounds of all shapes
         const allBounds = shapes.map(s => s.getBounds ? s.getBounds() : { x: s.x, y: s.y, width: s.width, height: s.height });
         
@@ -13393,6 +13448,8 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         const height = maxY - minY;
         
         // For ASCII art, we simulate boolean ops by creating a text grid
+        // Use the fill character from the preserved style
+        const fillCharacter = preservedStyle.fillChar || '█';
         const grid = [];
         for (let y = 0; y < height; y++) {
             grid[y] = [];
@@ -13434,7 +13491,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                         break;
                 }
                 
-                grid[y][x] = filled ? '█' : ' ';
+                grid[y][x] = filled ? fillCharacter : ' ';
             }
         }
         
@@ -13442,6 +13499,13 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         const text = grid.map(row => row.join('')).join('\n');
         const resultObj = new TextObject(minX, minY, text);
         resultObj.name = `Boolean ${operation.charAt(0).toUpperCase() + operation.slice(1)}`;
+        
+        // Apply preserved style properties to the result
+        resultObj.strokeChar = preservedStyle.strokeChar;
+        resultObj.fillChar = preservedStyle.fillChar;
+        resultObj.strokeColor = preservedStyle.strokeColor;
+        resultObj.fillColor = preservedStyle.fillColor;
+        resultObj.lineStyle = preservedStyle.lineStyle;
         
         // Remove original shapes
         for (const shape of shapes) {
