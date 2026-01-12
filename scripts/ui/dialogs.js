@@ -879,6 +879,67 @@ export async function prompt(label, defaultValue = '', title = 'Input') {
 }
 
 // ==========================================
+// CREATE DIALOG HELPER
+// ==========================================
+
+/**
+ * Create a dialog with custom content
+ * @param {object} options - Dialog options
+ * @param {string} options.title - Dialog title
+ * @param {HTMLElement|string} options.content - Dialog content
+ * @param {number} options.width - Dialog width
+ * @param {number} options.height - Dialog height
+ * @param {Array} options.buttons - Button configurations
+ * @param {function} options.onAction - Action handler
+ * @param {function} options.onClose - Close handler
+ * @returns {Dialog} Dialog instance
+ */
+export function createDialog(options) {
+    const {
+        title = 'Dialog',
+        content,
+        width = 400,
+        height = null,
+        buttons = [],
+        onAction,
+        onClose
+    } = options;
+    
+    // Convert button configs to DialogButton instances
+    const dialogButtons = buttons.map(btn => new DialogButton({
+        label: btn.text || btn.label,
+        type: btn.primary ? 'primary' : (btn.secondary ? 'secondary' : 'default'),
+        onClick: async () => {
+            if (onAction) {
+                const result = await onAction(btn.action);
+                if (result !== false) {
+                    dialog.close();
+                }
+            } else {
+                dialog.close();
+            }
+        }
+    }));
+    
+    const dialog = new Dialog({
+        title,
+        content,
+        width,
+        height,
+        buttons: dialogButtons,
+        showClose: true,
+        closeOnOverlay: true,
+        closeOnEscape: true
+    });
+    
+    dialog.on('close', () => {
+        if (onClose) onClose();
+    });
+    
+    return dialog;
+}
+
+// ==========================================
 // EXPORTS
 // ==========================================
 
@@ -892,5 +953,6 @@ export default {
     FormDialog,
     alert,
     confirm,
-    prompt
+    prompt,
+    createDialog
 };
