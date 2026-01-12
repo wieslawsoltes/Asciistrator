@@ -1,7 +1,10 @@
 /**
  * Asciistrator - I/O Module Index
  * 
- * Exports all file import/export functionality.
+ * Exports all file import/export functionality including the
+ * extensible export system architecture.
+ * 
+ * @version 2.0.0
  */
 
 // Native format
@@ -25,7 +28,7 @@ export {
     ImageToAscii
 } from './image.js';
 
-// Export formats
+// Legacy export formats (for backwards compatibility)
 export {
     TextExporter,
     HTMLExporter,
@@ -35,6 +38,92 @@ export {
     PDFExporter,
     exportAs
 } from './export.js';
+
+// ==========================================
+// EXTENSIBLE EXPORT SYSTEM (Phase 3)
+// ==========================================
+
+// Exporter Registry
+export {
+    ExportCategory,
+    StyleExportMode,
+    DefaultExportOptions,
+    ValidationResult,
+    ExportResult,
+    ExporterRegistry,
+    globalRegistry
+} from './ExporterRegistry.js';
+
+// Export Manager
+export {
+    ExportJobStatus,
+    ExportJob,
+    BatchExportResult,
+    ExportManager,
+    exportManager
+} from './ExportManager.js';
+
+// All Exporters
+export {
+    // Base
+    BaseExporter,
+    
+    // Plain Text
+    TextExporter as NewTextExporter,
+    
+    // Rich Text
+    HTMLExporter as NewHTMLExporter,
+    ANSIExporter as NewANSIExporter,
+    ANSI,
+    MarkdownExporter as NewMarkdownExporter,
+    
+    // Vector
+    SVGExporter as NewSVGExporter,
+    
+    // Image
+    PNGExporter as NewPNGExporter,
+    
+    // Document
+    JSONExporter,
+    LaTeXExporter,
+    
+    // UI Frameworks
+    BaseXAMLExporter,
+    AvaloniaExporter,
+    WPFExporter,
+    MAUIExporter,
+    UWPExporter,
+    
+    // Web Frameworks
+    BaseWebExporter,
+    ReactExporter,
+    VueExporter,
+    AngularExporter,
+    SvelteExporter,
+    WebComponentExporter,
+    
+    // Collections
+    ExporterClasses,
+    createAllExporters,
+    getExporter,
+    listExporterIds,
+    getExporterMetadata
+} from './exporters/index.js';
+
+// Export Dialog UI
+export {
+    ExportDialog,
+    showExportDialog,
+    quickExport,
+    getExportString
+} from './ExportDialog.js';
+
+// Avalonia Export Dialog
+export {
+    AvaloniaExportDialog,
+    showAvaloniaExportDialog,
+    quickAvaloniaExport
+} from './AvaloniaExportDialog.js';
 
 // ==========================================
 // UNIFIED IMPORT/EXPORT INTERFACE
@@ -76,7 +165,7 @@ export const ImportFormats = {
 };
 
 /**
- * Supported export formats
+ * Supported export formats (legacy)
  */
 export const ExportFormats = {
     native: {
@@ -118,6 +207,62 @@ export const ExportFormats = {
         name: 'PDF (Print)',
         extension: '.pdf',
         mimeType: 'application/pdf'
+    },
+    // New export formats (Phase 3)
+    json: {
+        name: 'JSON (.json)',
+        extension: '.json',
+        mimeType: 'application/json'
+    },
+    latex: {
+        name: 'LaTeX (.tex)',
+        extension: '.tex',
+        mimeType: 'application/x-latex'
+    },
+    avalonia: {
+        name: 'Avalonia UI (.axaml)',
+        extension: '.axaml',
+        mimeType: 'application/xaml+xml'
+    },
+    wpf: {
+        name: 'WPF XAML (.xaml)',
+        extension: '.xaml',
+        mimeType: 'application/xaml+xml'
+    },
+    maui: {
+        name: '.NET MAUI (.xaml)',
+        extension: '.xaml',
+        mimeType: 'application/xaml+xml'
+    },
+    uwp: {
+        name: 'UWP XAML (.xaml)',
+        extension: '.xaml',
+        mimeType: 'application/xaml+xml'
+    },
+    react: {
+        name: 'React Component (.jsx)',
+        extension: '.jsx',
+        mimeType: 'text/javascript'
+    },
+    vue: {
+        name: 'Vue Component (.vue)',
+        extension: '.vue',
+        mimeType: 'text/x-vue'
+    },
+    angular: {
+        name: 'Angular Component (.ts)',
+        extension: '.ts',
+        mimeType: 'text/typescript'
+    },
+    svelte: {
+        name: 'Svelte Component (.svelte)',
+        extension: '.svelte',
+        mimeType: 'text/x-svelte'
+    },
+    webcomponent: {
+        name: 'Web Component (.js)',
+        extension: '.js',
+        mimeType: 'text/javascript'
     }
 };
 
@@ -160,7 +305,7 @@ export async function importFile(file, options = {}) {
 }
 
 /**
- * Export to specified format
+ * Export to specified format (legacy)
  * @param {object} data - Data to export (buffer, document, etc.)
  * @param {string} format - Export format key
  * @param {object} options - Format-specific options
@@ -194,6 +339,41 @@ export async function exportFile(data, format, options = {}, filename = null) {
     }
 }
 
+/**
+ * Export using the new extensible export system (Phase 3)
+ * @param {object} document - Document to export
+ * @param {string} formatId - Export format ID
+ * @param {object} options - Export options
+ * @param {string} filename - Output filename (optional)
+ * @returns {Promise<void>}
+ */
+export async function exportDocument(document, formatId, options = {}, filename = null) {
+    const { exportManager } = await import('./ExportManager.js');
+    
+    if (!exportManager.isInitialized) {
+        exportManager.initialize();
+    }
+    
+    return exportManager.exportToFile(document, formatId, filename, options);
+}
+
+/**
+ * Get export result without downloading (Phase 3)
+ * @param {object} document - Document to export
+ * @param {string} formatId - Export format ID
+ * @param {object} options - Export options
+ * @returns {ExportResult}
+ */
+export async function exportToString(document, formatId, options = {}) {
+    const { exportManager } = await import('./ExportManager.js');
+    
+    if (!exportManager.isInitialized) {
+        exportManager.initialize();
+    }
+    
+    return exportManager.export(document, formatId, options);
+}
+
 // ==========================================
 // DEFAULT EXPORT
 // ==========================================
@@ -214,7 +394,7 @@ export default {
     AsciiPalettes,
     ImageToAscii,
     
-    // Export
+    // Legacy Export
     TextExporter,
     HTMLExporter,
     ANSIExporter,
@@ -223,10 +403,51 @@ export default {
     PDFExporter,
     exportAs,
     
-    // Unified interface
+    // Unified interface (legacy)
     ImportFormats,
     ExportFormats,
     detectImportFormat,
     importFile,
-    exportFile
+    exportFile,
+    
+    // Phase 3: Extensible Export System
+    ExportCategory,
+    StyleExportMode,
+    DefaultExportOptions,
+    ValidationResult,
+    ExportResult,
+    ExporterRegistry,
+    globalRegistry,
+    ExportJobStatus,
+    ExportJob,
+    BatchExportResult,
+    ExportManager,
+    exportManager,
+    BaseExporter,
+    JSONExporter,
+    LaTeXExporter,
+    BaseXAMLExporter,
+    AvaloniaExporter,
+    WPFExporter,
+    MAUIExporter,
+    UWPExporter,
+    BaseWebExporter,
+    ReactExporter,
+    VueExporter,
+    AngularExporter,
+    SvelteExporter,
+    WebComponentExporter,
+    ExporterClasses,
+    createAllExporters,
+    getExporter,
+    listExporterIds,
+    getExporterMetadata,
+    exportDocument,
+    exportToString,
+    
+    // Export Dialog
+    ExportDialog,
+    showExportDialog,
+    quickExport,
+    getExportString
 };
