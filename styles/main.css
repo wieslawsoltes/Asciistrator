@@ -2960,3 +2960,85 @@ body {
 .modal-footer .btn-secondary:hover {
     background: var(--color-bg-hover);
 }
+
+/* ============================================
+   COMMAND PALETTE
+   ============================================ */
+
+.command-palette-overlay {
+    align-items: flex-start;
+    padding-top: 15vh;
+}
+
+.command-palette {
+    background: var(--color-bg-secondary);
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    width: 90%;
+    max-width: 550px;
+    overflow: hidden;
+    animation: modalFadeIn 0.15s ease-out;
+}
+
+.command-palette-input-wrapper {
+    padding: 12px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.command-palette-input {
+    width: 100%;
+    padding: 10px 12px;
+    font-size: 16px;
+    border: none;
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-primary);
+    border-radius: 6px;
+    outline: none;
+}
+
+.command-palette-input::placeholder {
+    color: var(--color-text-muted);
+}
+
+.command-palette-results {
+    max-height: 400px;
+    overflow-y: auto;
+    padding: 8px 0;
+}
+
+.command-palette-category {
+    padding: 8px 16px 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.command-palette-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: background-color 0.1s;
+}
+
+.command-palette-item:hover,
+.command-palette-item.selected {
+    background: var(--color-bg-hover);
+}
+
+.command-palette-item .command-label {
+    font-size: 14px;
+    color: var(--color-text-primary);
+}
+
+.command-palette-item .command-shortcut {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    padding: 2px 6px;
+    background: var(--color-bg-tertiary);
+    border-radius: 4px;
+    font-family: var(--font-family-mono);
+}
