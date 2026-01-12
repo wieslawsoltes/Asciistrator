@@ -10,6 +10,21 @@
 import { EventEmitter } from '../utils/events.js';
 import { uuid, deepClone } from '../utils/helpers.js';
 
+// UI Component imports (optional - loaded dynamically if available)
+let UIControls = null;
+let UIComponent = null;
+
+// Attempt to load UI components
+try {
+    const controlsModule = await import('./controls/index.js');
+    UIControls = controlsModule.default || controlsModule;
+    
+    const uiModule = await import('./UIComponent.js');
+    UIComponent = uiModule.default || uiModule.UIComponent;
+} catch (e) {
+    console.log('UI Components not yet available:', e.message);
+}
+
 // ==========================================
 // COMPONENT CLASS
 // ==========================================
@@ -354,6 +369,7 @@ export class ComponentLibraryManager extends EventEmitter {
         this.libraries = new Map();
         this.activeLibraryId = null;
         this._storageKey = 'asciistrator_component_libraries';
+        this._uiComponentsLoaded = false;
     }
     
     /**
@@ -366,7 +382,178 @@ export class ComponentLibraryManager extends EventEmitter {
         // Add built-in libraries
         this._addBuiltInLibraries();
         
+        // Add UI Components library
+        this._addUIComponentsLibrary();
+        
         this.emit('initialized');
+    }
+    
+    /**
+     * Add UI Components Library
+     * This registers all the framework-agnostic UI control components
+     */
+    _addUIComponentsLibrary() {
+        if (!UIControls || this._uiComponentsLoaded) return;
+        
+        try {
+            const { ControlCategories, ControlRegistry } = UIControls;
+            
+            // Create the main UI Controls library
+            const uiLib = new ComponentLibrary({
+                id: 'builtin-ui-controls',
+                name: 'UI Controls',
+                description: 'Framework-agnostic UI control components',
+                icon: '🎨',
+                isBuiltIn: true
+            });
+            
+            // Register each control from the registry
+            for (const controlName in ControlRegistry) {
+                const ControlClass = ControlRegistry[controlName];
+                
+                // Create a component wrapper for the UI control
+                const component = this._createUIComponentWrapper(ControlClass);
+                if (component) {
+                    uiLib.addComponent(component);
+                }
+            }
+            
+            this.addLibrary(uiLib);
+            this._uiComponentsLoaded = true;
+            
+            console.log(`Loaded ${Object.keys(ControlRegistry).length} UI components`);
+        } catch (error) {
+            console.warn('Failed to load UI components library:', error);
+        }
+    }
+    
+    /**
+     * Create a Component wrapper for a UIComponent class
+     * @param {Function} ControlClass - The UIComponent class
+     * @returns {Component} A Component instance wrapping the UIComponent
+     */
+    _createUIComponentWrapper(ControlClass) {
+        try {
+            // Get static metadata from the class
+            const componentType = ControlClass.componentType;
+            const displayName = ControlClass.displayName || componentType;
+            const description = ControlClass.description || '';
+            const category = ControlClass.category || 'General';
+            const icon = ControlClass.icon || '□';
+            const tags = ControlClass.tags || [];
+            const defaultWidth = ControlClass.defaultWidth || 20;
+            const defaultHeight = ControlClass.defaultHeight || 5;
+            
+            // Create an instance to generate the preview
+            const instance = new ControlClass();
+            const preview = instance.render({ width: defaultWidth, height: defaultHeight });
+            
+            return new Component({
+                id: `ui-${componentType.toLowerCase()}`,
+                name: displayName,
+                description: description,
+                category: `UI: ${category}`,
+                icon: icon,
+                tags: [...tags, 'ui', 'control', componentType.toLowerCase()],
+                isBuiltIn: true,
+                width: defaultWidth,
+                height: defaultHeight,
+                preview: preview,
+                objects: [{
+                    type: 'ui-component',
+                    componentType: componentType, // Framework-agnostic component type
+                    x: 0,
+                    y: 0,
+                    width: defaultWidth,
+                    height: defaultHeight,
+                    properties: {} // Empty - only store explicitly set properties
+                }]
+            });
+        } catch (error) {
+            console.warn(`Failed to create wrapper for ${ControlClass.componentType}:`, error);
+            return null;
+        }
+    }
+    
+    /**
+     * Get a UI component class by type
+     * @param {string} componentType - The component type name
+     * @returns {Function|null} The UIComponent class or null
+     */
+    getUIComponentClass(componentType) {
+        if (!UIControls) return null;
+        return UIControls.getControlByType?.(componentType) || UIControls.ControlRegistry?.[componentType] || null;
+    }
+    
+    /**
+     * Create a new UI component instance
+     * @param {string} componentType - The component type name
+     * @param {Object} properties - Initial properties
+     * @returns {Object|null} The component instance or null
+     */
+    createUIComponent(componentType, properties = {}) {
+        const ControlClass = this.getUIComponentClass(componentType);
+        if (!ControlClass) return null;
+        
+        const instance = new ControlClass();
+        for (const [key, value] of Object.entries(properties)) {
+            instance.set(key, value);
+        }
+        return instance;
+    }
+    
+    /**
+     * Get all available UI component metadata
+     * @returns {Array} Array of component metadata
+     */
+    getUIComponentMetadata() {
+        if (!UIControls) return [];
+        return UIControls.getAllControlMetadata?.() || [];
+    }
+    
+    /**
+     * Search UI components
+     * @param {string} query - Search query
+     * @returns {Array} Matching UI component classes
+     */
+    searchUIComponents(query) {
+        if (!UIControls) return [];
+        return UIControls.searchControls?.(query) || [];
+    }
+    
+    /**
+     * Get property definitions for a UI component type
+     * @param {string} componentType - The component type name
+     * @returns {Array} Array of property definitions with defaults
+     */
+    getUIComponentPropertyDefinitions(componentType) {
+        const ControlClass = this.getUIComponentClass(componentType);
+        if (!ControlClass) return [];
+        
+        const propDefs = ControlClass.propertyDefinitions || [];
+        return propDefs.map(def => ({
+            name: def.name,
+            displayName: def.displayName || def.name,
+            type: def.type,
+            defaultValue: def.defaultValue,
+            category: def.category,
+            description: def.description
+        }));
+    }
+    
+    /**
+     * Get the default value for a specific property of a UI component
+     * @param {string} componentType - The component type name
+     * @param {string} propertyName - The property name
+     * @returns {*} The default value or undefined
+     */
+    getUIComponentPropertyDefault(componentType, propertyName) {
+        const ControlClass = this.getUIComponentClass(componentType);
+        if (!ControlClass) return undefined;
+        
+        const propDefs = ControlClass.propertyDefinitions || [];
+        const propDef = propDefs.find(def => def.name === propertyName);
+        return propDef?.defaultValue;
     }
     
     /**
