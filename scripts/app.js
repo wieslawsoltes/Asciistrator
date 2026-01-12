@@ -6924,9 +6924,239 @@ class Asciistrator extends EventEmitter {
     _setupRulers() {
         this.rulerH = $('#ruler-horizontal');
         this.rulerV = $('#ruler-vertical');
+        this.rulerCorner = $('#ruler-corner');
+        
+        // Create position indicators
+        if (this.rulerH) {
+            this.rulerHIndicator = document.createElement('div');
+            this.rulerHIndicator.className = 'ruler-position-indicator';
+            this.rulerH.appendChild(this.rulerHIndicator);
+            
+            // Create selection range indicator
+            this.rulerHSelection = document.createElement('div');
+            this.rulerHSelection.className = 'ruler-selection-range';
+            this.rulerH.appendChild(this.rulerHSelection);
+            
+            // Create canvas bounds indicator
+            this.rulerHCanvasBounds = document.createElement('div');
+            this.rulerHCanvasBounds.className = 'ruler-canvas-bounds';
+            this.rulerH.appendChild(this.rulerHCanvasBounds);
+        }
+        
+        if (this.rulerV) {
+            this.rulerVIndicator = document.createElement('div');
+            this.rulerVIndicator.className = 'ruler-position-indicator';
+            this.rulerV.appendChild(this.rulerVIndicator);
+            
+            // Create selection range indicator
+            this.rulerVSelection = document.createElement('div');
+            this.rulerVSelection.className = 'ruler-selection-range';
+            this.rulerV.appendChild(this.rulerVSelection);
+            
+            // Create canvas bounds indicator
+            this.rulerVCanvasBounds = document.createElement('div');
+            this.rulerVCanvasBounds.className = 'ruler-canvas-bounds';
+            this.rulerV.appendChild(this.rulerVCanvasBounds);
+        }
+        
+        // Ruler corner button to toggle rulers
+        if (this.rulerCorner) {
+            this.rulerCorner.title = 'Click to toggle rulers';
+            this.rulerCorner.style.cursor = 'pointer';
+            this.rulerCorner.addEventListener('click', () => this.toggleRulers());
+        }
+        
+        // Guides array to store user-created guides
+        if (!AppState.guides) {
+            AppState.guides = [];
+        }
+        
+        // Setup guide creation from rulers
+        this._setupRulerGuideCreation();
+        
+        // Track mouse position for ruler indicators
+        const viewport = $('#viewport');
+        if (viewport) {
+            viewport.addEventListener('pointermove', (e) => {
+                this._updateRulerIndicators(e);
+            });
+            viewport.addEventListener('pointerleave', () => {
+                this._hideRulerIndicators();
+            });
+        }
         
         // Initial render
         this._updateRulers();
+    }
+    
+    /**
+     * Toggle ruler visibility
+     */
+    toggleRulers() {
+        const container = $('#canvas-container');
+        if (container) {
+            container.classList.toggle('rulers-hidden');
+            this._updateStatus(container.classList.contains('rulers-hidden') ? 'Rulers hidden' : 'Rulers visible');
+        }
+    }
+    
+    /**
+     * Setup guide creation by dragging from rulers
+     */
+    _setupRulerGuideCreation() {
+        let isDraggingGuide = false;
+        let guideType = null; // 'horizontal' or 'vertical'
+        let guideElement = null;
+        
+        const startGuideDrag = (e, type) => {
+            isDraggingGuide = true;
+            guideType = type;
+            
+            // Create temporary guide line
+            guideElement = document.createElement('div');
+            guideElement.className = `guide-line guide-${type}`;
+            guideElement.style.position = 'fixed';
+            guideElement.style.zIndex = '1000';
+            guideElement.style.pointerEvents = 'none';
+            
+            if (type === 'horizontal') {
+                guideElement.style.width = '100%';
+                guideElement.style.height = '1px';
+                guideElement.style.left = '0';
+                guideElement.style.top = `${e.clientY}px`;
+            } else {
+                guideElement.style.width = '1px';
+                guideElement.style.height = '100%';
+                guideElement.style.top = '0';
+                guideElement.style.left = `${e.clientX}px`;
+            }
+            
+            document.body.appendChild(guideElement);
+            document.body.style.cursor = type === 'horizontal' ? 'row-resize' : 'col-resize';
+        };
+        
+        // Horizontal ruler - creates vertical guides
+        if (this.rulerH) {
+            this.rulerH.addEventListener('pointerdown', (e) => {
+                e.preventDefault();
+                startGuideDrag(e, 'vertical');
+            });
+        }
+        
+        // Vertical ruler - creates horizontal guides
+        if (this.rulerV) {
+            this.rulerV.addEventListener('pointerdown', (e) => {
+                e.preventDefault();
+                startGuideDrag(e, 'horizontal');
+            });
+        }
+        
+        // Track guide position during drag
+        document.addEventListener('pointermove', (e) => {
+            if (!isDraggingGuide || !guideElement) return;
+            
+            if (guideType === 'horizontal') {
+                guideElement.style.top = `${e.clientY}px`;
+            } else {
+                guideElement.style.left = `${e.clientX}px`;
+            }
+        });
+        
+        // Finish guide creation
+        document.addEventListener('pointerup', (e) => {
+            if (!isDraggingGuide) return;
+            
+            // Convert screen position to canvas coordinates
+            const viewport = $('#viewport');
+            if (viewport && this.renderer) {
+                const viewportRect = viewport.getBoundingClientRect();
+                const charWidth = this.renderer.charWidth;
+                const charHeight = this.renderer.charHeight;
+                const panX = this.renderer.panX;
+                const panY = this.renderer.panY;
+                
+                let canvasPos;
+                if (guideType === 'horizontal') {
+                    const viewportY = e.clientY - viewportRect.top;
+                    canvasPos = Math.round((viewportY - panY) / charHeight);
+                } else {
+                    const viewportX = e.clientX - viewportRect.left;
+                    canvasPos = Math.round((viewportX - panX) / charWidth);
+                }
+                
+                // Only create guide if dropped inside viewport
+                if (e.clientX >= viewportRect.left && e.clientX <= viewportRect.right &&
+                    e.clientY >= viewportRect.top && e.clientY <= viewportRect.bottom) {
+                    // Add guide to state
+                    AppState.guides.push({
+                        type: guideType,
+                        position: canvasPos,
+                        id: Date.now()
+                    });
+                    this.renderAllObjects();
+                    this._updateStatus(`Created ${guideType} guide at ${canvasPos}`);
+                }
+            }
+            
+            // Cleanup
+            if (guideElement) {
+                guideElement.remove();
+                guideElement = null;
+            }
+            isDraggingGuide = false;
+            guideType = null;
+            document.body.style.cursor = '';
+        });
+    }
+    
+    /**
+     * Update ruler position indicators based on mouse position
+     */
+    _updateRulerIndicators(e) {
+        if (!this.renderer) return;
+        
+        const viewport = $('#viewport');
+        if (!viewport) return;
+        
+        const viewportRect = viewport.getBoundingClientRect();
+        const charWidth = this.renderer.charWidth;
+        const charHeight = this.renderer.charHeight;
+        const panX = this.renderer.panX;
+        const panY = this.renderer.panY;
+        
+        // Calculate canvas coordinates
+        const viewportX = e.clientX - viewportRect.left;
+        const viewportY = e.clientY - viewportRect.top;
+        const canvasX = Math.floor((viewportX - panX) / charWidth);
+        const canvasY = Math.floor((viewportY - panY) / charHeight);
+        
+        // Update horizontal ruler indicator
+        if (this.rulerHIndicator) {
+            const pixelX = canvasX * charWidth + panX;
+            this.rulerHIndicator.style.left = `${pixelX}px`;
+            this.rulerHIndicator.style.display = 'block';
+            this.rulerHIndicator.dataset.value = canvasX;
+        }
+        
+        // Update vertical ruler indicator
+        if (this.rulerVIndicator) {
+            const pixelY = canvasY * charHeight + panY;
+            this.rulerVIndicator.style.top = `${pixelY}px`;
+            this.rulerVIndicator.style.display = 'block';
+            this.rulerVIndicator.dataset.value = canvasY;
+        }
+    }
+    
+    /**
+     * Hide ruler position indicators
+     */
+    _hideRulerIndicators() {
+        if (this.rulerHIndicator) {
+            this.rulerHIndicator.style.display = 'none';
+        }
+        if (this.rulerVIndicator) {
+            this.rulerVIndicator.style.display = 'none';
+        }
     }
     
     /**
@@ -6940,6 +7170,12 @@ class Asciistrator extends EventEmitter {
         if (this.rulerV) {
             this._renderVerticalRuler(this.rulerV);
         }
+        
+        // Update canvas bounds indicators
+        this._updateCanvasBoundsIndicators();
+        
+        // Update selection indicators on rulers
+        this._updateRulerSelectionIndicators();
     }
     
     _renderHorizontalRuler(element) {
@@ -6947,51 +7183,61 @@ class Asciistrator extends EventEmitter {
         const panX = this.renderer ? this.renderer.panX : 0;
         const charWidth = this.renderer ? this.renderer.charWidth : 8;
         
-        // Calculate the scaled character width
-        const scaledCharWidth = charWidth * zoom;
-        
         // Calculate visible range based on ruler width and pan
         const rulerWidth = element.offsetWidth || 800;
         
-        // Determine tick interval based on zoom level
-        let tickInterval = 10;
-        let majorInterval = 50;
-        if (zoom < 0.5) {
-            tickInterval = 20;
-            majorInterval = 100;
-        } else if (zoom > 2) {
-            tickInterval = 5;
-            majorInterval = 25;
-        }
+        // Determine tick intervals based on zoom level for better readability
+        const { tickInterval, majorInterval, minorInterval } = this._calculateTickIntervals(zoom);
         
         // Calculate start and end positions in canvas coordinates
-        const startX = Math.floor(-panX / scaledCharWidth);
-        const endX = Math.ceil((rulerWidth - panX) / scaledCharWidth);
+        const startX = Math.floor(-panX / charWidth);
+        const endX = Math.ceil((rulerWidth - panX) / charWidth);
         
         // Align to tick interval
-        const alignedStart = Math.floor(startX / tickInterval) * tickInterval;
-        const alignedEnd = Math.ceil(endX / tickInterval) * tickInterval + tickInterval;
+        const alignedStart = Math.floor(startX / minorInterval) * minorInterval;
+        const alignedEnd = Math.ceil(endX / minorInterval) * minorInterval + minorInterval;
         
-        let html = '<div class="ruler-ticks" style="position: relative; width: 100%; height: 100%;">';
+        let html = '<div class="ruler-ticks">';
         
-        for (let i = alignedStart; i <= alignedEnd; i += tickInterval) {
-            if (i < 0) continue; // Don't show negative numbers
-            
+        for (let i = alignedStart; i <= alignedEnd; i += minorInterval) {
             const isMajor = i % majorInterval === 0;
-            // Calculate pixel position: canvas coord * charWidth * zoom + panX
-            const pixelPos = i * scaledCharWidth + panX;
+            const isMedium = !isMajor && i % tickInterval === 0;
+            
+            // Calculate pixel position
+            const pixelPos = i * charWidth + panX;
             
             // Skip ticks outside visible area
             if (pixelPos < -50 || pixelPos > rulerWidth + 50) continue;
             
-            html += `<div class="ruler-tick${isMajor ? ' major' : ''}" style="position: absolute; left: ${pixelPos}px;">`;
+            let tickClass = 'ruler-tick';
+            if (isMajor) tickClass += ' major';
+            else if (isMedium) tickClass += ' medium';
+            else tickClass += ' minor';
+            
+            html += `<div class="${tickClass}" style="left: ${pixelPos}px;">`;
             if (isMajor) {
                 html += `<span class="ruler-label">${i}</span>`;
             }
             html += '</div>';
         }
         html += '</div>';
-        element.innerHTML = html;
+        
+        // Keep existing indicators and bounds elements
+        const indicator = element.querySelector('.ruler-position-indicator');
+        const selection = element.querySelector('.ruler-selection-range');
+        const canvasBounds = element.querySelector('.ruler-canvas-bounds');
+        
+        const ticksContainer = element.querySelector('.ruler-ticks');
+        if (ticksContainer) {
+            ticksContainer.outerHTML = html;
+        } else {
+            element.insertAdjacentHTML('afterbegin', html);
+        }
+        
+        // Re-append indicators if they were removed
+        if (indicator && !element.contains(indicator)) element.appendChild(indicator);
+        if (selection && !element.contains(selection)) element.appendChild(selection);
+        if (canvasBounds && !element.contains(canvasBounds)) element.appendChild(canvasBounds);
     }
     
     _renderVerticalRuler(element) {
@@ -6999,51 +7245,156 @@ class Asciistrator extends EventEmitter {
         const panY = this.renderer ? this.renderer.panY : 0;
         const charHeight = this.renderer ? this.renderer.charHeight : 16;
         
-        // Calculate the scaled character height
-        const scaledCharHeight = charHeight * zoom;
-        
         // Calculate visible range based on ruler height and pan
         const rulerHeight = element.offsetHeight || 600;
         
-        // Determine tick interval based on zoom level
-        let tickInterval = 10;
-        let majorInterval = 50;
-        if (zoom < 0.5) {
-            tickInterval = 20;
-            majorInterval = 100;
-        } else if (zoom > 2) {
-            tickInterval = 5;
-            majorInterval = 25;
-        }
+        // Determine tick intervals based on zoom level
+        const { tickInterval, majorInterval, minorInterval } = this._calculateTickIntervals(zoom);
         
         // Calculate start and end positions in canvas coordinates
-        const startY = Math.floor(-panY / scaledCharHeight);
-        const endY = Math.ceil((rulerHeight - panY) / scaledCharHeight);
+        const startY = Math.floor(-panY / charHeight);
+        const endY = Math.ceil((rulerHeight - panY) / charHeight);
         
         // Align to tick interval
-        const alignedStart = Math.floor(startY / tickInterval) * tickInterval;
-        const alignedEnd = Math.ceil(endY / tickInterval) * tickInterval + tickInterval;
+        const alignedStart = Math.floor(startY / minorInterval) * minorInterval;
+        const alignedEnd = Math.ceil(endY / minorInterval) * minorInterval + minorInterval;
         
-        let html = '<div class="ruler-ticks" style="position: relative; width: 100%; height: 100%;">';
+        let html = '<div class="ruler-ticks">';
         
-        for (let i = alignedStart; i <= alignedEnd; i += tickInterval) {
-            if (i < 0) continue; // Don't show negative numbers
-            
+        for (let i = alignedStart; i <= alignedEnd; i += minorInterval) {
             const isMajor = i % majorInterval === 0;
-            // Calculate pixel position: canvas coord * charHeight * zoom + panY
-            const pixelPos = i * scaledCharHeight + panY;
+            const isMedium = !isMajor && i % tickInterval === 0;
+            
+            // Calculate pixel position
+            const pixelPos = i * charHeight + panY;
             
             // Skip ticks outside visible area
             if (pixelPos < -50 || pixelPos > rulerHeight + 50) continue;
             
-            html += `<div class="ruler-tick${isMajor ? ' major' : ''}" style="position: absolute; top: ${pixelPos}px;">`;
+            let tickClass = 'ruler-tick';
+            if (isMajor) tickClass += ' major';
+            else if (isMedium) tickClass += ' medium';
+            else tickClass += ' minor';
+            
+            html += `<div class="${tickClass}" style="top: ${pixelPos}px;">`;
             if (isMajor) {
                 html += `<span class="ruler-label">${i}</span>`;
             }
             html += '</div>';
         }
         html += '</div>';
-        element.innerHTML = html;
+        
+        // Keep existing indicators
+        const indicator = element.querySelector('.ruler-position-indicator');
+        const selection = element.querySelector('.ruler-selection-range');
+        const canvasBounds = element.querySelector('.ruler-canvas-bounds');
+        
+        const ticksContainer = element.querySelector('.ruler-ticks');
+        if (ticksContainer) {
+            ticksContainer.outerHTML = html;
+        } else {
+            element.insertAdjacentHTML('afterbegin', html);
+        }
+        
+        // Re-append indicators if they were removed
+        if (indicator && !element.contains(indicator)) element.appendChild(indicator);
+        if (selection && !element.contains(selection)) element.appendChild(selection);
+        if (canvasBounds && !element.contains(canvasBounds)) element.appendChild(canvasBounds);
+    }
+    
+    /**
+     * Calculate tick intervals based on zoom level
+     */
+    _calculateTickIntervals(zoom) {
+        // Adaptive intervals for different zoom levels
+        if (zoom < 0.3) {
+            return { minorInterval: 20, tickInterval: 50, majorInterval: 100 };
+        } else if (zoom < 0.5) {
+            return { minorInterval: 10, tickInterval: 25, majorInterval: 50 };
+        } else if (zoom < 1) {
+            return { minorInterval: 5, tickInterval: 10, majorInterval: 50 };
+        } else if (zoom < 2) {
+            return { minorInterval: 2, tickInterval: 5, majorInterval: 10 };
+        } else if (zoom < 3) {
+            return { minorInterval: 1, tickInterval: 5, majorInterval: 10 };
+        } else {
+            return { minorInterval: 1, tickInterval: 2, majorInterval: 5 };
+        }
+    }
+    
+    /**
+     * Update canvas bounds indicators on rulers
+     */
+    _updateCanvasBoundsIndicators() {
+        if (!this.renderer) return;
+        
+        const charWidth = this.renderer.charWidth;
+        const charHeight = this.renderer.charHeight;
+        const panX = this.renderer.panX;
+        const panY = this.renderer.panY;
+        
+        // Calculate canvas bounds in pixels
+        const canvasStartX = panX;
+        const canvasEndX = AppState.canvasWidth * charWidth + panX;
+        const canvasStartY = panY;
+        const canvasEndY = AppState.canvasHeight * charHeight + panY;
+        
+        // Update horizontal ruler canvas bounds
+        if (this.rulerHCanvasBounds) {
+            this.rulerHCanvasBounds.style.left = `${Math.max(0, canvasStartX)}px`;
+            this.rulerHCanvasBounds.style.width = `${canvasEndX - Math.max(0, canvasStartX)}px`;
+        }
+        
+        // Update vertical ruler canvas bounds
+        if (this.rulerVCanvasBounds) {
+            this.rulerVCanvasBounds.style.top = `${Math.max(0, canvasStartY)}px`;
+            this.rulerVCanvasBounds.style.height = `${canvasEndY - Math.max(0, canvasStartY)}px`;
+        }
+    }
+    
+    /**
+     * Update selection indicators on rulers
+     */
+    _updateRulerSelectionIndicators() {
+        if (!this.renderer || AppState.selectedObjects.length === 0) {
+            // Hide selection indicators
+            if (this.rulerHSelection) this.rulerHSelection.style.display = 'none';
+            if (this.rulerVSelection) this.rulerVSelection.style.display = 'none';
+            return;
+        }
+        
+        // Calculate combined bounds of all selected objects
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const obj of AppState.selectedObjects) {
+            const bounds = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y, width: obj.width || 1, height: obj.height || 1 };
+            minX = Math.min(minX, bounds.x);
+            minY = Math.min(minY, bounds.y);
+            maxX = Math.max(maxX, bounds.x + bounds.width);
+            maxY = Math.max(maxY, bounds.y + bounds.height);
+        }
+        
+        const charWidth = this.renderer.charWidth;
+        const charHeight = this.renderer.charHeight;
+        const panX = this.renderer.panX;
+        const panY = this.renderer.panY;
+        
+        // Update horizontal ruler selection
+        if (this.rulerHSelection) {
+            const startPx = minX * charWidth + panX;
+            const endPx = maxX * charWidth + panX;
+            this.rulerHSelection.style.left = `${startPx}px`;
+            this.rulerHSelection.style.width = `${endPx - startPx}px`;
+            this.rulerHSelection.style.display = 'block';
+        }
+        
+        // Update vertical ruler selection
+        if (this.rulerVSelection) {
+            const startPx = minY * charHeight + panY;
+            const endPx = maxY * charHeight + panY;
+            this.rulerVSelection.style.top = `${startPx}px`;
+            this.rulerVSelection.style.height = `${endPx - startPx}px`;
+            this.rulerVSelection.style.display = 'block';
+        }
     }
     
     /**
@@ -7688,6 +8039,9 @@ class Asciistrator extends EventEmitter {
                 { label: 'Toggle Grid', action: 'grid-toggle' },
                 { label: 'Grid Spacing...', action: 'grid-spacing' },
                 { type: 'separator' },
+                { label: 'Toggle Rulers', action: 'rulers-toggle' },
+                { label: 'Clear All Guides', action: 'clear-guides' },
+                { type: 'separator' },
                 { label: 'Toggle Snapping', action: 'snap-toggle', shortcut: 'Ctrl+;' },
                 { 
                     label: 'Snapping Options',
@@ -7946,6 +8300,13 @@ class Asciistrator extends EventEmitter {
                 break;
             case 'grid-spacing':
                 this.showGridSpacingDialog();
+                break;
+            // View - Rulers & Guides
+            case 'rulers-toggle':
+                this.toggleRulers();
+                break;
+            case 'clear-guides':
+                this.clearGuides();
                 break;
             // View - Snapping
             case 'snap-toggle':
@@ -8683,9 +9044,49 @@ class Asciistrator extends EventEmitter {
         // Render selection indicators for selected objects
         this._renderSelectionIndicators();
         
+        // Update ruler selection indicators
+        this._updateRulerSelectionIndicators();
+        
+        // Render guides on canvas
+        this._renderGuides();
+        
         // Mark full redraw needed and render
         this.renderer.markFullDirty();
         this.renderer.render();
+    }
+    
+    /**
+     * Render user-created guides on the canvas
+     */
+    _renderGuides() {
+        if (!AppState.guides || AppState.guides.length === 0) return;
+        
+        const buffer = this.renderer.previewBuffer;
+        const width = buffer.width;
+        const height = buffer.height;
+        const guideColor = '#ff00ff'; // Magenta for guides
+        
+        for (const guide of AppState.guides) {
+            if (guide.type === 'horizontal') {
+                const y = guide.position;
+                if (y >= 0 && y < height) {
+                    for (let x = 0; x < width; x++) {
+                        if (x % 2 === 0) { // Dashed line
+                            buffer.setChar(x, y, '·', guideColor);
+                        }
+                    }
+                }
+            } else if (guide.type === 'vertical') {
+                const x = guide.position;
+                if (x >= 0 && x < width) {
+                    for (let y = 0; y < height; y++) {
+                        if (y % 2 === 0) { // Dashed line
+                            buffer.setChar(x, y, '·', guideColor);
+                        }
+                    }
+                }
+            }
+        }
     }
     
     // Draw selection handles around selected objects
@@ -11041,6 +11442,17 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         AppState.showGrid = !AppState.showGrid;
         this.renderer.render();
         this._updateStatus(AppState.showGrid ? 'Grid enabled' : 'Grid disabled');
+    }
+    
+    /**
+     * Clear all user-created guides
+     */
+    clearGuides() {
+        if (AppState.guides) {
+            AppState.guides = [];
+            this.renderAllObjects();
+            this._updateStatus('All guides cleared');
+        }
     }
     
     // Page size dialog
