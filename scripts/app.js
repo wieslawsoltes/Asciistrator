@@ -8215,6 +8215,9 @@ class Asciistrator extends EventEmitter {
                         { label: 'All Components', action: 'select-type-component' },
                     ]
                 },
+                { label: 'Selection Filters...', action: 'selection-filters' },
+                { type: 'separator' },
+                { label: 'Edit Multiple Objects...', action: 'multi-select-edit' },
                 { type: 'separator' },
                 { label: 'Copy as Text', action: 'copy-as-text' },
                 { label: 'Copy as HTML', action: 'copy-as-html' },
@@ -8347,6 +8350,10 @@ class Asciistrator extends EventEmitter {
                 { label: 'Properties Panel', action: 'panel-properties' },
                 { label: 'Components Panel', action: 'panel-components' },
                 { label: 'Characters Panel', action: 'panel-chars' },
+                { type: 'separator' },
+                { label: 'Version History...', action: 'version-history' },
+                { label: 'Dev Mode...', action: 'dev-mode' },
+                { label: 'Asset Library...', action: 'asset-library' },
             ],
             help: [
                 { label: 'Keyboard Shortcuts', action: 'shortcuts' },
@@ -8828,6 +8835,22 @@ class Asciistrator extends EventEmitter {
                 break;
             case 'panel-chars':
                 this.togglePanel('chars');
+                break;
+            // Nice to Have Features
+            case 'version-history':
+                this.showVersionHistory();
+                break;
+            case 'dev-mode':
+                this.showDevModePanel();
+                break;
+            case 'asset-library':
+                this.showAssetLibrary();
+                break;
+            case 'multi-select-edit':
+                this.showMultiSelectEditor();
+                break;
+            case 'selection-filters':
+                this.showSelectionFilters();
                 break;
             // Help
             case 'shortcuts':
@@ -12892,6 +12915,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             { label: 'Select All Paths', action: () => this.selectByType('path'), category: 'Select' },
             { label: 'Select All Groups', action: () => this.selectByType('group'), category: 'Select' },
             { label: 'Select All Components', action: () => this.selectByType('component'), category: 'Select' },
+            { label: 'Selection Filters...', action: () => this.showSelectionFilters(), category: 'Select' },
             // View
             { label: 'Zoom In', action: () => this.zoomIn(), category: 'View', shortcut: 'Ctrl++' },
             { label: 'Zoom Out', action: () => this.zoomOut(), category: 'View', shortcut: 'Ctrl+-' },
@@ -12905,6 +12929,11 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             { label: 'Show Properties Panel', action: () => this.togglePanel('properties'), category: 'Panels' },
             { label: 'Show Components Panel', action: () => this.togglePanel('components'), category: 'Panels' },
             { label: 'Show Characters Panel', action: () => this.togglePanel('chars'), category: 'Panels' },
+            // Nice to Have Features
+            { label: 'Version History...', action: () => this.showVersionHistory(), category: 'Window' },
+            { label: 'Dev Mode (Code Export)', action: () => this.showDevModePanel(), category: 'Window' },
+            { label: 'Asset Library...', action: () => this.showAssetLibrary(), category: 'Window' },
+            { label: 'Edit Multiple Objects...', action: () => this.showMultiSelectEditor(), category: 'Edit' },
             // Help
             { label: 'Keyboard Shortcuts', action: () => this.showShortcuts(), category: 'Help' },
             { label: 'About', action: () => this.showAbout(), category: 'Help' },
@@ -14158,6 +14187,845 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             buffer.setChar(bounds.x, y, char);
             buffer.setChar(bounds.x + bounds.width - 1, y, char);
         }
+    }
+
+    // ==========================================
+    // VERSION HISTORY BROWSER
+    // ==========================================
+    
+    showVersionHistory() {
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-overlay';
+        
+        const formatTime = (index) => {
+            const total = AppState.undoStack.length;
+            if (index === total) return 'Current State';
+            const stepsBack = total - index;
+            return `${stepsBack} step${stepsBack > 1 ? 's' : ''} ago`;
+        };
+        
+        const renderHistoryList = () => {
+            const items = [];
+            // Add current state
+            items.push(`
+                <div class="history-item current" data-index="${AppState.undoStack.length}" style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 6px; cursor: pointer; border: 2px solid var(--color-accent); background: var(--color-bg-tertiary);">
+                    <div style="width: 8px; height: 8px; border-radius: 50%; background: var(--color-accent);"></div>
+                    <div style="flex: 1;">
+                        <div style="font-weight: 500;">Current State</div>
+                        <div style="font-size: 11px; color: var(--color-text-muted);">${this._getStateDescription()}</div>
+                    </div>
+                    <span style="font-size: 11px; color: var(--color-accent);">Now</span>
+                </div>
+            `);
+            
+            // Add undo stack items (most recent first)
+            for (let i = AppState.undoStack.length - 1; i >= 0; i--) {
+                const state = AppState.undoStack[i];
+                const objectCount = state.layers.reduce((sum, l) => sum + (l.objects?.length || 0), 0);
+                items.push(`
+                    <div class="history-item" data-index="${i}" style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; transition: all 0.15s;">
+                        <div style="width: 8px; height: 8px; border-radius: 50%; background: var(--color-text-muted);"></div>
+                        <div style="flex: 1;">
+                            <div style="font-weight: 500;">State #${i + 1}</div>
+                            <div style="font-size: 11px; color: var(--color-text-muted);">${objectCount} object${objectCount !== 1 ? 's' : ''}</div>
+                        </div>
+                        <span style="font-size: 11px; color: var(--color-text-muted);">${formatTime(i)}</span>
+                    </div>
+                `);
+            }
+            
+            return items.join('');
+        };
+        
+        dialog.innerHTML = `
+            <div class="modal-dialog" style="max-width: 400px;">
+                <div class="modal-header">
+                    <h3>🕐 Version History</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body" style="max-height: 400px; overflow-y: auto; padding: 0;">
+                    <div style="padding: 12px;">
+                        <div style="font-size: 12px; color: var(--color-text-muted); margin-bottom: 10px;">
+                            ${AppState.undoStack.length} saved state${AppState.undoStack.length !== 1 ? 's' : ''} • Click to restore
+                        </div>
+                        <div id="history-list" style="display: flex; flex-direction: column; gap: 6px;">
+                            ${renderHistoryList()}
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer" style="justify-content: space-between;">
+                    <button class="btn btn-secondary" id="btn-clear-history">Clear History</button>
+                    <button class="btn btn-primary modal-close-btn">Close</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        
+        const historyList = dialog.querySelector('#history-list');
+        
+        // Restore state on click
+        historyList.addEventListener('click', (e) => {
+            const item = e.target.closest('.history-item');
+            if (!item || item.classList.contains('current')) return;
+            
+            const index = parseInt(item.dataset.index);
+            this._restoreToHistoryIndex(index);
+            dialog.remove();
+        });
+        
+        // Hover effects
+        historyList.addEventListener('mouseover', (e) => {
+            const item = e.target.closest('.history-item');
+            if (item && !item.classList.contains('current')) {
+                item.style.background = 'var(--color-bg-tertiary)';
+                item.style.borderColor = 'var(--color-border)';
+            }
+        });
+        historyList.addEventListener('mouseout', (e) => {
+            const item = e.target.closest('.history-item');
+            if (item && !item.classList.contains('current')) {
+                item.style.background = '';
+                item.style.borderColor = 'transparent';
+            }
+        });
+        
+        // Clear history
+        dialog.querySelector('#btn-clear-history').addEventListener('click', () => {
+            if (confirm('Clear all history? This cannot be undone.')) {
+                AppState.undoStack = [];
+                AppState.redoStack = [];
+                this._updateUndoRedoButtons();
+                this._updateStatus('History cleared');
+                dialog.remove();
+            }
+        });
+        
+        const closeDialog = () => dialog.remove();
+        dialog.querySelector('.modal-close').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-close-btn').addEventListener('click', closeDialog);
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) closeDialog();
+        });
+    }
+    
+    _restoreToHistoryIndex(index) {
+        // Save current state to end of redo stack
+        const currentState = this._captureState();
+        
+        // Get the target state
+        const targetState = AppState.undoStack[index];
+        
+        // Move all states after index to redo stack
+        const statesToRedo = AppState.undoStack.splice(index);
+        AppState.redoStack = [...statesToRedo, currentState, ...AppState.redoStack];
+        
+        // Restore target state
+        this._restoreState(targetState);
+        this._updateUndoRedoButtons();
+        this._updateStatus(`Restored to state #${index + 1}`);
+    }
+    
+    _getStateDescription() {
+        const objectCount = AppState.layers.reduce((sum, l) => sum + (l.objects?.length || 0), 0);
+        const selectedCount = AppState.selectedObjects.length;
+        return `${objectCount} object${objectCount !== 1 ? 's' : ''}${selectedCount > 0 ? `, ${selectedCount} selected` : ''}`;
+    }
+
+    // ==========================================
+    // DEV MODE PANEL
+    // ==========================================
+    
+    showDevModePanel() {
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-overlay';
+        
+        const generateASCII = () => {
+            if (!this.renderer) return '';
+            const buffer = this.renderer.buffer;
+            const lines = [];
+            for (let y = 0; y < buffer.height; y++) {
+                let line = '';
+                for (let x = 0; x < buffer.width; x++) {
+                    line += buffer.getChar(x, y) || ' ';
+                }
+                lines.push(line.trimEnd());
+            }
+            // Remove trailing empty lines
+            while (lines.length > 0 && lines[lines.length - 1] === '') {
+                lines.pop();
+            }
+            return lines.join('\n');
+        };
+        
+        const generateJSON = () => {
+            const data = {
+                canvas: { width: AppState.canvasWidth, height: AppState.canvasHeight },
+                layers: AppState.layers.map(l => ({
+                    name: l.name,
+                    objects: l.objects?.map(o => o.toJSON()) || []
+                }))
+            };
+            return JSON.stringify(data, null, 2);
+        };
+        
+        const generateHTML = () => {
+            const ascii = generateASCII();
+            return `<pre style="font-family: monospace; line-height: 1.2;">\n${ascii}\n</pre>`;
+        };
+        
+        const generateSVG = () => {
+            const ascii = generateASCII();
+            const lines = ascii.split('\n');
+            const charWidth = 8;
+            const charHeight = 16;
+            const width = AppState.canvasWidth * charWidth;
+            const height = lines.length * charHeight;
+            
+            let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" style="font-family: monospace; font-size: 14px;">\n`;
+            svg += `  <rect width="100%" height="100%" fill="#1a1a2e"/>\n`;
+            lines.forEach((line, y) => {
+                if (line.trim()) {
+                    svg += `  <text x="0" y="${(y + 1) * charHeight - 4}" fill="#e0e0e0">${this._escapeXml(line)}</text>\n`;
+                }
+            });
+            svg += `</svg>`;
+            return svg;
+        };
+        
+        dialog.innerHTML = `
+            <div class="modal-dialog" style="max-width: 700px; max-height: 85vh;">
+                <div class="modal-header">
+                    <h3>🛠️ Dev Mode</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body" style="padding: 0;">
+                    <div style="display: flex; border-bottom: 1px solid var(--color-border);">
+                        <button class="dev-tab active" data-format="ascii" style="flex: 1; padding: 10px; border: none; background: var(--color-bg-tertiary); color: var(--color-text-primary); cursor: pointer; font-size: 13px; font-weight: 500;">ASCII</button>
+                        <button class="dev-tab" data-format="html" style="flex: 1; padding: 10px; border: none; background: var(--color-bg-secondary); color: var(--color-text-muted); cursor: pointer; font-size: 13px;">HTML</button>
+                        <button class="dev-tab" data-format="svg" style="flex: 1; padding: 10px; border: none; background: var(--color-bg-secondary); color: var(--color-text-muted); cursor: pointer; font-size: 13px;">SVG</button>
+                        <button class="dev-tab" data-format="json" style="flex: 1; padding: 10px; border: none; background: var(--color-bg-secondary); color: var(--color-text-muted); cursor: pointer; font-size: 13px;">JSON</button>
+                    </div>
+                    <div style="padding: 12px;">
+                        <textarea id="dev-code" readonly style="width: 100%; height: 350px; font-family: var(--font-family-mono); font-size: 12px; line-height: 1.4; padding: 12px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-primary); color: var(--color-text-primary); resize: none;">${generateASCII()}</textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <div style="font-size: 12px; color: var(--color-text-muted);" id="dev-stats"></div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-secondary" id="btn-dev-download">Download</button>
+                        <button class="btn btn-primary" id="btn-dev-copy">Copy to Clipboard</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        
+        const codeArea = dialog.querySelector('#dev-code');
+        const statsDiv = dialog.querySelector('#dev-stats');
+        let currentFormat = 'ascii';
+        
+        const updateStats = () => {
+            const text = codeArea.value;
+            const bytes = new Blob([text]).size;
+            const lines = text.split('\n').length;
+            statsDiv.textContent = `${lines} lines • ${bytes.toLocaleString()} bytes`;
+        };
+        
+        const updateCode = (format) => {
+            currentFormat = format;
+            switch (format) {
+                case 'ascii': codeArea.value = generateASCII(); break;
+                case 'html': codeArea.value = generateHTML(); break;
+                case 'svg': codeArea.value = generateSVG(); break;
+                case 'json': codeArea.value = generateJSON(); break;
+            }
+            updateStats();
+        };
+        
+        updateStats();
+        
+        // Tab switching
+        dialog.querySelectorAll('.dev-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                dialog.querySelectorAll('.dev-tab').forEach(t => {
+                    t.classList.remove('active');
+                    t.style.background = 'var(--color-bg-secondary)';
+                    t.style.color = 'var(--color-text-muted)';
+                });
+                tab.classList.add('active');
+                tab.style.background = 'var(--color-bg-tertiary)';
+                tab.style.color = 'var(--color-text-primary)';
+                updateCode(tab.dataset.format);
+            });
+        });
+        
+        // Copy button
+        dialog.querySelector('#btn-dev-copy').addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(codeArea.value);
+                this._updateStatus(`${currentFormat.toUpperCase()} copied to clipboard`);
+            } catch (e) {
+                codeArea.select();
+                document.execCommand('copy');
+                this._updateStatus('Copied to clipboard');
+            }
+        });
+        
+        // Download button
+        dialog.querySelector('#btn-dev-download').addEventListener('click', () => {
+            const extensions = { ascii: 'txt', html: 'html', svg: 'svg', json: 'json' };
+            const mimeTypes = { ascii: 'text/plain', html: 'text/html', svg: 'image/svg+xml', json: 'application/json' };
+            const blob = new Blob([codeArea.value], { type: mimeTypes[currentFormat] });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `asciistrator-export.${extensions[currentFormat]}`;
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+        
+        const closeDialog = () => dialog.remove();
+        dialog.querySelector('.modal-close').addEventListener('click', closeDialog);
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) closeDialog();
+        });
+    }
+    
+    _escapeXml(str) {
+        return str.replace(/[<>&'"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
+    }
+
+    // ==========================================
+    // ASSET LIBRARY
+    // ==========================================
+    
+    showAssetLibrary() {
+        // Initialize asset library
+        if (!AppState.assetLibrary) {
+            AppState.assetLibrary = this._getDefaultAssets();
+        }
+        
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-overlay';
+        
+        const renderAssets = () => {
+            if (AppState.assetLibrary.length === 0) {
+                return '<div style="text-align: center; padding: 40px; color: var(--color-text-muted);">No assets saved yet.<br>Select objects and click "Save Selection".</div>';
+            }
+            
+            return AppState.assetLibrary.map((asset, idx) => `
+                <div class="asset-item" data-index="${idx}" style="display: flex; gap: 12px; padding: 12px; border: 1px solid var(--color-border); border-radius: 6px; cursor: pointer; transition: all 0.15s;">
+                    <div style="width: 80px; height: 60px; background: var(--color-bg-primary); border: 1px solid var(--color-border); border-radius: 4px; overflow: hidden; display: flex; align-items: center; justify-content: center; font-family: monospace; font-size: 8px; line-height: 1; white-space: pre;">${this._getAssetPreview(asset)}</div>
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="font-weight: 500; margin-bottom: 4px;">${asset.name}</div>
+                        <div style="font-size: 11px; color: var(--color-text-muted);">${asset.objects.length} object${asset.objects.length !== 1 ? 's' : ''}</div>
+                        <div style="font-size: 11px; color: var(--color-text-muted);">${asset.width}×${asset.height} chars</div>
+                    </div>
+                    <button class="btn-delete-asset" data-index="${idx}" style="background: none; border: none; color: var(--color-text-muted); cursor: pointer; padding: 4px; font-size: 16px; align-self: flex-start;" title="Delete asset">&times;</button>
+                </div>
+            `).join('');
+        };
+        
+        dialog.innerHTML = `
+            <div class="modal-dialog" style="max-width: 500px;">
+                <div class="modal-header">
+                    <h3>📦 Asset Library</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body" style="max-height: 400px; overflow-y: auto;">
+                    <div id="asset-list" style="display: flex; flex-direction: column; gap: 8px;">
+                        ${renderAssets()}
+                    </div>
+                </div>
+                <div class="modal-footer" style="justify-content: space-between;">
+                    <button class="btn btn-secondary" id="btn-save-asset" ${AppState.selectedObjects.length === 0 ? 'disabled' : ''}>Save Selection as Asset</button>
+                    <button class="btn btn-primary modal-close-btn">Close</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        
+        const assetList = dialog.querySelector('#asset-list');
+        
+        // Insert asset on click
+        assetList.addEventListener('click', (e) => {
+            if (e.target.classList.contains('btn-delete-asset')) {
+                const idx = parseInt(e.target.dataset.index);
+                AppState.assetLibrary.splice(idx, 1);
+                this._saveAssetLibrary();
+                assetList.innerHTML = renderAssets();
+                return;
+            }
+            
+            const item = e.target.closest('.asset-item');
+            if (item) {
+                const idx = parseInt(item.dataset.index);
+                this._insertAsset(AppState.assetLibrary[idx]);
+                dialog.remove();
+            }
+        });
+        
+        // Hover effects
+        assetList.addEventListener('mouseover', (e) => {
+            const item = e.target.closest('.asset-item');
+            if (item) item.style.borderColor = 'var(--color-accent)';
+        });
+        assetList.addEventListener('mouseout', (e) => {
+            const item = e.target.closest('.asset-item');
+            if (item) item.style.borderColor = 'var(--color-border)';
+        });
+        
+        // Save selection as asset
+        dialog.querySelector('#btn-save-asset').addEventListener('click', () => {
+            if (AppState.selectedObjects.length === 0) return;
+            
+            const name = prompt('Asset name:', `Asset ${AppState.assetLibrary.length + 1}`);
+            if (!name) return;
+            
+            this._saveSelectionAsAsset(name);
+            assetList.innerHTML = renderAssets();
+            this._updateStatus(`Saved asset: ${name}`);
+        });
+        
+        const closeDialog = () => dialog.remove();
+        dialog.querySelector('.modal-close').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-close-btn').addEventListener('click', closeDialog);
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) closeDialog();
+        });
+    }
+    
+    _getDefaultAssets() {
+        return [
+            {
+                name: 'Simple Box',
+                width: 10, height: 5,
+                objects: [{ type: 'rectangle', x: 0, y: 0, width: 10, height: 5, strokeChar: '│', lineStyle: 'single' }]
+            },
+            {
+                name: 'Arrow Right',
+                width: 5, height: 3,
+                objects: [{ type: 'text', x: 0, y: 0, text: '──►' }]
+            },
+            {
+                name: 'Arrow Down',
+                width: 1, height: 3,
+                objects: [{ type: 'text', x: 0, y: 0, text: '│\n│\n▼' }]
+            },
+            {
+                name: 'Checkbox',
+                width: 3, height: 1,
+                objects: [{ type: 'text', x: 0, y: 0, text: '[ ]' }]
+            },
+            {
+                name: 'Checkbox Checked',
+                width: 3, height: 1,
+                objects: [{ type: 'text', x: 0, y: 0, text: '[✓]' }]
+            }
+        ];
+    }
+    
+    _getAssetPreview(asset) {
+        // Generate a small preview of the asset
+        const maxW = 12, maxH = 6;
+        const lines = [];
+        for (let y = 0; y < Math.min(asset.height, maxH); y++) {
+            lines.push(' '.repeat(Math.min(asset.width, maxW)));
+        }
+        
+        // Simple preview - just show first few chars of text objects
+        for (const obj of asset.objects) {
+            if (obj.type === 'text' && obj.text) {
+                const textLines = obj.text.split('\n');
+                for (let i = 0; i < textLines.length && i < maxH; i++) {
+                    const y = (obj.y || 0) + i;
+                    if (y >= 0 && y < lines.length) {
+                        const lineArr = lines[y].split('');
+                        for (let j = 0; j < textLines[i].length && (obj.x || 0) + j < maxW; j++) {
+                            const x = (obj.x || 0) + j;
+                            if (x >= 0 && x < lineArr.length) {
+                                lineArr[x] = textLines[i][j];
+                            }
+                        }
+                        lines[y] = lineArr.join('');
+                    }
+                }
+            }
+        }
+        
+        return lines.join('\n');
+    }
+    
+    _saveSelectionAsAsset(name) {
+        // Calculate bounds of selection
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const obj of AppState.selectedObjects) {
+            const bounds = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y, width: obj.width || 1, height: obj.height || 1 };
+            minX = Math.min(minX, bounds.x);
+            minY = Math.min(minY, bounds.y);
+            maxX = Math.max(maxX, bounds.x + bounds.width);
+            maxY = Math.max(maxY, bounds.y + bounds.height);
+        }
+        
+        // Save objects with relative positions
+        const objects = AppState.selectedObjects.map(obj => {
+            const json = obj.toJSON();
+            json.x = (json.x || 0) - minX;
+            json.y = (json.y || 0) - minY;
+            if (json.x1 !== undefined) {
+                json.x1 -= minX;
+                json.x2 -= minX;
+                json.y1 -= minY;
+                json.y2 -= minY;
+            }
+            return json;
+        });
+        
+        AppState.assetLibrary.push({
+            name,
+            width: maxX - minX,
+            height: maxY - minY,
+            objects
+        });
+        
+        this._saveAssetLibrary();
+    }
+    
+    _insertAsset(asset) {
+        this.saveStateForUndo();
+        
+        // Insert at center of viewport or at a default position
+        const insertX = 10;
+        const insertY = 10;
+        
+        const newObjects = [];
+        for (const objData of asset.objects) {
+            const obj = this._createObjectFromJSON({
+                ...objData,
+                x: (objData.x || 0) + insertX,
+                y: (objData.y || 0) + insertY,
+                x1: objData.x1 !== undefined ? objData.x1 + insertX : undefined,
+                x2: objData.x2 !== undefined ? objData.x2 + insertX : undefined,
+                y1: objData.y1 !== undefined ? objData.y1 + insertY : undefined,
+                y2: objData.y2 !== undefined ? objData.y2 + insertY : undefined,
+            });
+            if (obj) {
+                this.addObject(obj);
+                newObjects.push(obj);
+            }
+        }
+        
+        AppState.selectedObjects = newObjects;
+        this.renderAllObjects();
+        this._updateLayerList();
+        this._updateStatus(`Inserted asset: ${asset.name}`);
+    }
+    
+    _saveAssetLibrary() {
+        try {
+            localStorage.setItem('asciistrator-assets', JSON.stringify(AppState.assetLibrary));
+        } catch (e) {
+            console.warn('Failed to save asset library:', e);
+        }
+    }
+    
+    _loadAssetLibrary() {
+        try {
+            const saved = localStorage.getItem('asciistrator-assets');
+            if (saved) {
+                AppState.assetLibrary = JSON.parse(saved);
+            }
+        } catch (e) {
+            console.warn('Failed to load asset library:', e);
+        }
+    }
+
+    // ==========================================
+    // MULTI-SELECT EDITING
+    // ==========================================
+    
+    showMultiSelectEditor() {
+        if (AppState.selectedObjects.length < 2) {
+            this._updateStatus('Select multiple objects to edit shared properties');
+            return;
+        }
+        
+        // Find common properties
+        const objects = AppState.selectedObjects;
+        const common = {
+            strokeChar: this._getCommonValue(objects, 'strokeChar'),
+            fillChar: this._getCommonValue(objects, 'fillChar'),
+            lineStyle: this._getCommonValue(objects, 'lineStyle'),
+            filled: this._getCommonValue(objects, 'filled'),
+            visible: this._getCommonValue(objects, 'visible'),
+            locked: this._getCommonValue(objects, 'locked'),
+        };
+        
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-overlay';
+        dialog.innerHTML = `
+            <div class="modal-dialog" style="max-width: 380px;">
+                <div class="modal-header">
+                    <h3>Edit ${objects.length} Objects</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="font-size: 12px; color: var(--color-text-muted); margin-bottom: 15px;">
+                        Changes apply to all selected objects. Mixed values shown as "—".
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 100px 1fr; gap: 12px; align-items: center;">
+                        <label style="font-size: 13px;">Stroke Char:</label>
+                        <input type="text" id="multi-stroke-char" value="${common.strokeChar ?? ''}" placeholder="${common.strokeChar === null ? 'Mixed' : ''}" maxlength="1" style="width: 50px; padding: 6px 10px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary); font-family: monospace; text-align: center;">
+                        
+                        <label style="font-size: 13px;">Fill Char:</label>
+                        <input type="text" id="multi-fill-char" value="${common.fillChar ?? ''}" placeholder="${common.fillChar === null ? 'Mixed' : ''}" maxlength="1" style="width: 50px; padding: 6px 10px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary); font-family: monospace; text-align: center;">
+                        
+                        <label style="font-size: 13px;">Line Style:</label>
+                        <select id="multi-line-style" style="padding: 6px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                            <option value="" ${common.lineStyle === null ? 'selected' : ''}>— Mixed —</option>
+                            <option value="single" ${common.lineStyle === 'single' ? 'selected' : ''}>Single</option>
+                            <option value="double" ${common.lineStyle === 'double' ? 'selected' : ''}>Double</option>
+                            <option value="dotted" ${common.lineStyle === 'dotted' ? 'selected' : ''}>Dotted</option>
+                            <option value="dashed" ${common.lineStyle === 'dashed' ? 'selected' : ''}>Dashed</option>
+                            <option value="rounded" ${common.lineStyle === 'rounded' ? 'selected' : ''}>Rounded</option>
+                        </select>
+                        
+                        <label style="font-size: 13px;">Filled:</label>
+                        <select id="multi-filled" style="padding: 6px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                            <option value="" ${common.filled === null ? 'selected' : ''}>— Mixed —</option>
+                            <option value="true" ${common.filled === true ? 'selected' : ''}>Yes</option>
+                            <option value="false" ${common.filled === false ? 'selected' : ''}>No</option>
+                        </select>
+                    </div>
+                    
+                    <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--color-border);">
+                        <div style="font-size: 13px; font-weight: 500; margin-bottom: 10px;">Visibility & Locking</div>
+                        <div style="display: flex; gap: 20px;">
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" id="multi-visible" ${common.visible === true ? 'checked' : ''} ${common.visible === null ? 'class="indeterminate"' : ''}>
+                                <span style="font-size: 13px;">Visible</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" id="multi-locked" ${common.locked === true ? 'checked' : ''} ${common.locked === null ? 'class="indeterminate"' : ''}>
+                                <span style="font-size: 13px;">Locked</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary modal-cancel">Cancel</button>
+                    <button class="btn btn-primary modal-ok">Apply Changes</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        
+        // Set indeterminate state for mixed checkboxes
+        const visibleCheck = dialog.querySelector('#multi-visible');
+        const lockedCheck = dialog.querySelector('#multi-locked');
+        if (common.visible === null) visibleCheck.indeterminate = true;
+        if (common.locked === null) lockedCheck.indeterminate = true;
+        
+        const closeDialog = () => dialog.remove();
+        
+        dialog.querySelector('.modal-close').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-cancel').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-ok').addEventListener('click', () => {
+            this.saveStateForUndo();
+            
+            const strokeChar = dialog.querySelector('#multi-stroke-char').value;
+            const fillChar = dialog.querySelector('#multi-fill-char').value;
+            const lineStyle = dialog.querySelector('#multi-line-style').value;
+            const filled = dialog.querySelector('#multi-filled').value;
+            const visible = dialog.querySelector('#multi-visible');
+            const locked = dialog.querySelector('#multi-locked');
+            
+            for (const obj of objects) {
+                if (strokeChar) obj.strokeChar = strokeChar;
+                if (fillChar) obj.fillChar = fillChar;
+                if (lineStyle) obj.lineStyle = lineStyle;
+                if (filled !== '') obj.filled = filled === 'true';
+                if (!visible.indeterminate) obj.visible = visible.checked;
+                if (!locked.indeterminate) obj.locked = locked.checked;
+            }
+            
+            this.renderAllObjects();
+            this._updateLayerList();
+            this._updateStatus(`Updated ${objects.length} objects`);
+            closeDialog();
+        });
+        
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) closeDialog();
+        });
+    }
+    
+    _getCommonValue(objects, prop) {
+        const values = objects.map(o => o[prop]);
+        const first = values[0];
+        return values.every(v => v === first) ? first : null;
+    }
+
+    // ==========================================
+    // SELECTION FILTERS
+    // ==========================================
+    
+    showSelectionFilters() {
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-overlay';
+        
+        // Count objects by type
+        const counts = { total: 0, locked: 0, hidden: 0, types: {} };
+        for (const layer of AppState.layers) {
+            if (!layer.objects) continue;
+            for (const obj of layer.objects) {
+                counts.total++;
+                if (obj.locked) counts.locked++;
+                if (!obj.visible) counts.hidden++;
+                const type = obj.type || 'unknown';
+                counts.types[type] = (counts.types[type] || 0) + 1;
+            }
+        }
+        
+        const typeOptions = Object.entries(counts.types)
+            .sort((a, b) => b[1] - a[1])
+            .map(([type, count]) => `<option value="${type}">${type} (${count})</option>`)
+            .join('');
+        
+        dialog.innerHTML = `
+            <div class="modal-dialog" style="max-width: 350px;">
+                <div class="modal-header">
+                    <h3>🔍 Selection Filters</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div style="font-size: 12px; color: var(--color-text-muted); margin-bottom: 15px;">
+                        ${counts.total} total objects • ${counts.locked} locked • ${counts.hidden} hidden
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 8px; font-size: 13px; font-weight: 500;">Filter by Status:</label>
+                        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                            <button class="filter-btn" data-filter="all" style="padding: 6px 12px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary); cursor: pointer;">All (${counts.total})</button>
+                            <button class="filter-btn" data-filter="locked" style="padding: 6px 12px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-secondary); color: var(--color-text-muted); cursor: pointer;">🔒 Locked (${counts.locked})</button>
+                            <button class="filter-btn" data-filter="hidden" style="padding: 6px 12px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-secondary); color: var(--color-text-muted); cursor: pointer;">👁 Hidden (${counts.hidden})</button>
+                            <button class="filter-btn" data-filter="unlocked" style="padding: 6px 12px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-secondary); color: var(--color-text-muted); cursor: pointer;">🔓 Unlocked</button>
+                            <button class="filter-btn" data-filter="visible" style="padding: 6px 12px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-secondary); color: var(--color-text-muted); cursor: pointer;">👁 Visible</button>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 8px; font-size: 13px; font-weight: 500;">Filter by Type:</label>
+                        <select id="filter-type" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                            <option value="">— Select type —</option>
+                            ${typeOptions}
+                        </select>
+                    </div>
+                    
+                    <div style="padding: 10px; background: var(--color-bg-secondary); border-radius: 4px;">
+                        <div style="font-size: 12px; color: var(--color-text-muted);">Selected: <span id="filter-count" style="font-weight: 500; color: var(--color-text-primary);">0</span> objects</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" id="btn-filter-invert">Invert Selection</button>
+                    <button class="btn btn-primary modal-close-btn">Done</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        
+        const countEl = dialog.querySelector('#filter-count');
+        const typeSelect = dialog.querySelector('#filter-type');
+        
+        const updateCount = () => {
+            countEl.textContent = AppState.selectedObjects.length;
+        };
+        
+        // Filter buttons
+        dialog.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const filter = btn.dataset.filter;
+                AppState.selectedObjects = [];
+                
+                for (const layer of AppState.layers) {
+                    if (!layer.objects) continue;
+                    for (const obj of layer.objects) {
+                        let match = false;
+                        switch (filter) {
+                            case 'all': match = true; break;
+                            case 'locked': match = obj.locked === true; break;
+                            case 'hidden': match = obj.visible === false; break;
+                            case 'unlocked': match = obj.locked !== true; break;
+                            case 'visible': match = obj.visible !== false; break;
+                        }
+                        if (match) AppState.selectedObjects.push(obj);
+                    }
+                }
+                
+                // Update button styles
+                dialog.querySelectorAll('.filter-btn').forEach(b => {
+                    b.style.background = 'var(--color-bg-secondary)';
+                    b.style.color = 'var(--color-text-muted)';
+                });
+                btn.style.background = 'var(--color-bg-tertiary)';
+                btn.style.color = 'var(--color-text-primary)';
+                
+                this.renderAllObjects();
+                updateCount();
+            });
+        });
+        
+        // Type filter
+        typeSelect.addEventListener('change', () => {
+            const type = typeSelect.value;
+            if (!type) return;
+            
+            AppState.selectedObjects = [];
+            for (const layer of AppState.layers) {
+                if (!layer.objects) continue;
+                for (const obj of layer.objects) {
+                    if (obj.type === type) {
+                        AppState.selectedObjects.push(obj);
+                    }
+                }
+            }
+            
+            this.renderAllObjects();
+            updateCount();
+        });
+        
+        // Invert selection
+        dialog.querySelector('#btn-filter-invert').addEventListener('click', () => {
+            const currentIds = new Set(AppState.selectedObjects.map(o => o.id));
+            AppState.selectedObjects = [];
+            
+            for (const layer of AppState.layers) {
+                if (!layer.objects) continue;
+                for (const obj of layer.objects) {
+                    if (!currentIds.has(obj.id)) {
+                        AppState.selectedObjects.push(obj);
+                    }
+                }
+            }
+            
+            this.renderAllObjects();
+            updateCount();
+        });
+        
+        updateCount();
+        
+        const closeDialog = () => dialog.remove();
+        dialog.querySelector('.modal-close').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-close-btn').addEventListener('click', closeDialog);
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) closeDialog();
+        });
     }
 
     // Chart insertion
