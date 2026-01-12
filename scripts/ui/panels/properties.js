@@ -668,11 +668,21 @@ export class PropertiesPanel extends Panel {
         if (!object) {
             this._updateHeader('▢', 'No Selection');
             this._showTextSection(false);
+            this._showUIComponentSection(false);
             return;
         }
 
-        // Determine object type
-        const type = object.type || object.constructor?.name || 'Object';
+        // Check if this is a UI component (avaloniaType kept for backward compatibility)
+        const isUIComponent = object.uiComponentType || object.avaloniaType;
+        
+        // Determine object type for display
+        let type = object.type || object.constructor?.name || 'Object';
+        let displayType = type;
+        
+        if (isUIComponent) {
+            displayType = object.uiComponentType || object.avaloniaType;
+        }
+        
         const icons = {
             Rectangle: '□',
             Ellipse: '○',
@@ -684,8 +694,10 @@ export class PropertiesPanel extends Panel {
             Group: '📦',
             default: '▢'
         };
-
-        this._updateHeader(icons[type] || icons.default, type);
+        
+        // Use Avalonia icon for UI components
+        const icon = isUIComponent ? '◇' : (icons[type] || icons.default);
+        this._updateHeader(icon, displayType);
 
         // Update transform
         this.transformSection.setValues({
@@ -700,18 +712,206 @@ export class PropertiesPanel extends Panel {
             this.styleSection.setValues(object.style);
         }
 
-        // Update text section if applicable
-        const isText = type === 'Text' || type === 'TextOnPath';
-        this._showTextSection(isText);
+        // Handle UI component properties
+        if (isUIComponent) {
+            this._showTextSection(false);
+            this._showUIComponentSection(true);
+            this._updateUIComponentProperties(object);
+        } else {
+            this._showUIComponentSection(false);
+            
+            // Update text section if applicable
+            const isText = type === 'Text' || type === 'TextOnPath' || type === 'text';
+            this._showTextSection(isText);
+            
+            if (isText) {
+                this.textSection.setValues({
+                    content: object.content ?? object.text ?? '',
+                    fontFamily: object.fontFamily ?? 'default',
+                    fontSize: object.fontSize ?? 1,
+                    textAlign: object.textAlign ?? 'left'
+                });
+            }
+        }
+    }
+    
+    /**
+     * Show/hide UI component section
+     * @private
+     */
+    _showUIComponentSection(show) {
+        let section = this.content?.querySelector('.ui-component-section');
         
-        if (isText) {
-            this.textSection.setValues({
-                content: object.content ?? '',
-                fontFamily: object.fontFamily ?? 'default',
-                fontSize: object.fontSize ?? 1,
-                textAlign: object.textAlign ?? 'left'
+        if (show && !section) {
+            // Create the section if it doesn't exist
+            section = document.createElement('div');
+            section.className = 'ui-component-section';
+            section.innerHTML = `
+                <div class="accordion-header ui-component-section-header">
+                    <span class="accordion-icon">▼</span>
+                    <span>UI Properties</span>
+                </div>
+                <div class="accordion-content ui-component-section-content"></div>
+            `;
+            this.content?.appendChild(section);
+            
+            // Add toggle behavior
+            const header = section.querySelector('.ui-component-section-header');
+            const content = section.querySelector('.ui-component-section-content');
+            header?.addEventListener('click', () => {
+                const isExpanded = content.style.display !== 'none';
+                content.style.display = isExpanded ? 'none' : '';
+                header.querySelector('.accordion-icon').textContent = isExpanded ? '▶' : '▼';
             });
         }
+        
+        if (section) {
+            section.style.display = show ? '' : 'none';
+        }
+    }
+    
+    /**
+     * Update UI component properties display
+     * @private
+     */
+    _updateUIComponentProperties(object) {
+        const content = this.content?.querySelector('.ui-component-section-content');
+        if (!content) return;
+        
+        content.innerHTML = '';
+        
+        const props = object.uiProperties || {};
+        
+        // Define editable properties for UI components
+        const editableProps = [
+            { key: 'text', label: 'Text', type: 'text' },
+            { key: 'content', label: 'Content', type: 'text' },
+            { key: 'header', label: 'Header', type: 'text' },
+            { key: 'title', label: 'Title', type: 'text' },
+            { key: 'placeholder', label: 'Placeholder', type: 'text' },
+            { key: 'isChecked', label: 'Checked', type: 'checkbox' },
+            { key: 'isEnabled', label: 'Enabled', type: 'checkbox' },
+            { key: 'isDefault', label: 'Default', type: 'checkbox' },
+            { key: 'isCancel', label: 'Cancel', type: 'checkbox' },
+            { key: 'minimum', label: 'Minimum', type: 'number' },
+            { key: 'maximum', label: 'Maximum', type: 'number' },
+            { key: 'value', label: 'Value', type: 'number' }
+        ];
+        
+        for (const prop of editableProps) {
+            // Only show if property exists or is relevant to this component type
+            if (props[prop.key] !== undefined || this._isPropertyRelevant(object, prop.key)) {
+                const row = this._createPropertyRow(prop, props[prop.key], object);
+                content.appendChild(row);
+            }
+        }
+        
+        // If no properties to show, display a message
+        if (content.children.length === 0) {
+            content.innerHTML = '<div class="property-row"><span class="property-label" style="opacity: 0.5">No editable properties</span></div>';
+        }
+    }
+    
+    /**
+     * Check if a property is relevant to the component type
+     * @private
+     */
+    _isPropertyRelevant(object, propKey) {
+        const type = object.uiComponentType || object.avaloniaType || '';
+        const typeLC = type.toLowerCase();
+        
+        const relevantProps = {
+            'text': ['button', 'textblock', 'label', 'textbox', 'hyperlinkbutton'],
+            'content': ['button', 'label', 'contentcontrol', 'headeredcontentcontrol'],
+            'header': ['expander', 'groupbox', 'headeredcontentcontrol', 'tabitem'],
+            'title': ['window'],
+            'placeholder': ['textbox', 'combobox', 'autocomplete'],
+            'isChecked': ['checkbox', 'radiobutton', 'togglebutton', 'toggleswitch'],
+            'isEnabled': true, // Always relevant
+            'isDefault': ['button'],
+            'isCancel': ['button'],
+            'minimum': ['slider', 'numericupdown', 'progressbar'],
+            'maximum': ['slider', 'numericupdown', 'progressbar'],
+            'value': ['slider', 'numericupdown', 'progressbar']
+        };
+        
+        const relevant = relevantProps[propKey];
+        if (relevant === true) return true;
+        if (Array.isArray(relevant)) {
+            return relevant.some(t => typeLC.includes(t));
+        }
+        return false;
+    }
+    
+    /**
+     * Create a property row for UI component editing
+     * @private
+     */
+    _createPropertyRow(prop, value, object) {
+        const row = document.createElement('div');
+        row.className = 'property-row';
+        
+        const label = document.createElement('label');
+        label.className = 'property-label';
+        label.textContent = prop.label;
+        row.appendChild(label);
+        
+        const inputContainer = document.createElement('div');
+        inputContainer.className = 'property-input-container';
+        
+        let input;
+        switch (prop.type) {
+            case 'checkbox':
+                input = document.createElement('input');
+                input.type = 'checkbox';
+                input.checked = value === true;
+                input.addEventListener('change', () => {
+                    this._setUIProperty(object, prop.key, input.checked);
+                });
+                break;
+            case 'number':
+                input = document.createElement('input');
+                input.type = 'number';
+                input.value = value ?? '';
+                input.className = 'property-input';
+                input.addEventListener('change', () => {
+                    const numVal = input.value === '' ? undefined : parseFloat(input.value);
+                    this._setUIProperty(object, prop.key, numVal);
+                });
+                break;
+            default:
+                input = document.createElement('input');
+                input.type = 'text';
+                input.value = value ?? '';
+                input.className = 'property-input';
+                input.addEventListener('change', () => {
+                    const strVal = input.value === '' ? undefined : input.value;
+                    this._setUIProperty(object, prop.key, strVal);
+                });
+        }
+        
+        inputContainer.appendChild(input);
+        row.appendChild(inputContainer);
+        
+        return row;
+    }
+    
+    /**
+     * Set a UI property on the object
+     * @private
+     */
+    _setUIProperty(object, key, value) {
+        if (!object.uiProperties) {
+            object.uiProperties = {};
+        }
+        
+        if (value === undefined || value === null || value === '') {
+            delete object.uiProperties[key];
+        } else {
+            object.uiProperties[key] = value;
+        }
+        
+        this.emit('propertyChange', { object, property: key, value });
     }
 
     /**
