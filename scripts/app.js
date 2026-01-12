@@ -12246,42 +12246,109 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
     
     // Help dialogs
     showShortcuts() {
-        const shortcuts = `
-╔══════════════════════════════════════════╗
-║         KEYBOARD SHORTCUTS               ║
-╠══════════════════════════════════════════╣
-║  TOOLS                                   ║
-║  V - Select Tool                         ║
-║  A - Direct Select                       ║
-║  P - Pen Tool                            ║
-║  N - Pencil Tool                         ║
-║  B - Brush Tool                          ║
-║  R - Rectangle Tool                      ║
-║  O - Ellipse Tool                        ║
-║  L or \\ - Line Tool                      ║
-║  T - Text Tool                           ║
-║  E - Eraser Tool                         ║
-╠══════════════════════════════════════════╣
-║  FILE                                    ║
-║  Ctrl+N - New Document                   ║
-║  Ctrl+S - Save                           ║
-║  Ctrl+E - Export                         ║
-╠══════════════════════════════════════════╣
-║  EDIT                                    ║
-║  Ctrl+Z - Undo                           ║
-║  Ctrl+Y / Ctrl+Shift+Z - Redo            ║
-║  Ctrl+X - Cut                            ║
-║  Ctrl+C - Copy                           ║
-║  Ctrl+V - Paste                          ║
-║  Ctrl+A - Select All                     ║
-║  Ctrl+D - Duplicate                      ║
-║  Delete - Delete Selection               ║
-╠══════════════════════════════════════════╣
-║  OBJECT                                  ║
-║  Ctrl+G - Group                          ║
-║  Ctrl+Shift+G - Ungroup                  ║
-╚══════════════════════════════════════════╝`;
-        alert(shortcuts);
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-overlay';
+        dialog.innerHTML = `
+            <div class="modal-dialog" style="max-width: 600px;">
+                <div class="modal-header">
+                    <h3>Keyboard Shortcuts</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body" style="padding: 20px; max-height: 70vh; overflow-y: auto;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <div>
+                            <h4 style="margin: 0 0 12px 0; color: var(--color-accent); border-bottom: 1px solid var(--color-border); padding-bottom: 6px;">Tools</h4>
+                            <div style="display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13px;">
+                                <kbd>V</kbd><span>Select Tool</span>
+                                <kbd>A</kbd><span>Direct Select</span>
+                                <kbd>P</kbd><span>Pen Tool</span>
+                                <kbd>N</kbd><span>Pencil Tool</span>
+                                <kbd>B</kbd><span>Brush Tool</span>
+                                <kbd>R</kbd><span>Rectangle Tool</span>
+                                <kbd>O</kbd><span>Ellipse Tool</span>
+                                <kbd>L</kbd><span>Line Tool</span>
+                                <kbd>T</kbd><span>Text Tool</span>
+                                <kbd>E</kbd><span>Eraser Tool</span>
+                                <kbd>G</kbd><span>Fill Tool</span>
+                                <kbd>I</kbd><span>Eyedropper</span>
+                            </div>
+                            
+                            <h4 style="margin: 20px 0 12px 0; color: var(--color-accent); border-bottom: 1px solid var(--color-border); padding-bottom: 6px;">File</h4>
+                            <div style="display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13px;">
+                                <kbd>Ctrl+N</kbd><span>New Document</span>
+                                <kbd>Ctrl+O</kbd><span>Open File</span>
+                                <kbd>Ctrl+S</kbd><span>Save</span>
+                                <kbd>Ctrl+Shift+S</kbd><span>Save As</span>
+                                <kbd>Ctrl+E</kbd><span>Export</span>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <h4 style="margin: 0 0 12px 0; color: var(--color-accent); border-bottom: 1px solid var(--color-border); padding-bottom: 6px;">Edit</h4>
+                            <div style="display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13px;">
+                                <kbd>Ctrl+Z</kbd><span>Undo</span>
+                                <kbd>Ctrl+Y</kbd><span>Redo</span>
+                                <kbd>Ctrl+X</kbd><span>Cut</span>
+                                <kbd>Ctrl+C</kbd><span>Copy</span>
+                                <kbd>Ctrl+V</kbd><span>Paste</span>
+                                <kbd>Ctrl+A</kbd><span>Select All</span>
+                                <kbd>Ctrl+D</kbd><span>Duplicate</span>
+                                <kbd>Delete</kbd><span>Delete Selection</span>
+                                <kbd>Escape</kbd><span>Deselect / Cancel</span>
+                            </div>
+                            
+                            <h4 style="margin: 20px 0 12px 0; color: var(--color-accent); border-bottom: 1px solid var(--color-border); padding-bottom: 6px;">Object</h4>
+                            <div style="display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13px;">
+                                <kbd>Ctrl+G</kbd><span>Group</span>
+                                <kbd>Ctrl+Shift+G</kbd><span>Ungroup</span>
+                                <kbd>Ctrl+]</kbd><span>Bring Forward</span>
+                                <kbd>Ctrl+[</kbd><span>Send Backward</span>
+                            </div>
+                            
+                            <h4 style="margin: 20px 0 12px 0; color: var(--color-accent); border-bottom: 1px solid var(--color-border); padding-bottom: 6px;">View</h4>
+                            <div style="display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13px;">
+                                <kbd>Ctrl++</kbd><span>Zoom In</span>
+                                <kbd>Ctrl+-</kbd><span>Zoom Out</span>
+                                <kbd>Ctrl+0</kbd><span>Reset Zoom</span>
+                                <kbd>Space+Drag</kbd><span>Pan Canvas</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-primary modal-ok">OK</button>
+                </div>
+            </div>
+        `;
+        
+        // Style kbd elements
+        const style = document.createElement('style');
+        style.textContent = `
+            .modal-dialog kbd {
+                display: inline-block;
+                padding: 3px 8px;
+                font-family: var(--font-family-mono);
+                font-size: 11px;
+                background: var(--color-bg-tertiary);
+                border: 1px solid var(--color-border);
+                border-radius: 4px;
+                box-shadow: 0 1px 0 var(--color-border);
+                white-space: nowrap;
+            }
+        `;
+        dialog.appendChild(style);
+        
+        document.body.appendChild(dialog);
+        
+        const closeDialog = () => {
+            dialog.remove();
+        };
+        
+        dialog.querySelector('.modal-close').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-ok').addEventListener('click', closeDialog);
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) closeDialog();
+        });
     }
     
     showDocumentation() {
