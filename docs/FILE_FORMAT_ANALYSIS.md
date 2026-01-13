@@ -859,71 +859,78 @@ async function loadDocument(input) {
 
 ### 6.1 Phase 1: Core Format Changes
 
-- [ ] **Create v2 document schema**
-  - [ ] Define PAGE type node
-  - [ ] Update document structure to nested tree
-  - [ ] Add `absoluteBoundingBox` to all objects
+- [x] **Create v2 document schema**
+  - [x] Define PAGE type node
+  - [x] Update document structure to nested tree
+  - [x] Add `absoluteBoundingBox` to all objects
   - [ ] Add `relativeTransform` matrix support
 
-- [ ] **Update NativeDocument class**
-  - [ ] Add version detection
-  - [ ] Implement v1 → v2 migration
-  - [ ] Update `serializeObject()` for v2 format
-  - [ ] Update `fromJSON()` to handle both versions
+- [x] **Update NativeDocument class**
+  - [x] Add version detection
+  - [x] Implement v1 → v2 migration (v1 removed, v2 only)
+  - [x] Update `serializeObject()` for v2 format
+  - [x] Update `fromJSON()` to handle v2 format
 
-- [ ] **Update SceneObject serialization**
-  - [ ] Rename constraints to Figma values
-  - [ ] Convert colors to Figma format
-  - [ ] Add `ascii` namespace for ASCII-specific properties
-  - [ ] Remove private properties from output
+- [x] **Update SceneObject serialization**
+  - [x] Rename constraints to Figma values (MIN, MAX, STRETCH, CENTER, SCALE)
+  - [x] Convert colors to Figma format (0-1 RGBA)
+  - [x] Add `ascii` namespace for ASCII-specific properties
+  - [x] Remove private properties from output
 
 ### 6.2 Phase 2: Layout & Constraints
 
-- [ ] **Flatten auto layout properties**
-  - [ ] `layoutMode` instead of `autoLayout.enabled/direction`
-  - [ ] Individual padding properties
-  - [ ] `itemSpacing` instead of `spacing`
-  - [ ] `layoutWrap` enum
+- [x] **Flatten auto layout properties**
+  - [x] `layoutMode` instead of `autoLayout.enabled/direction`
+  - [x] Individual padding properties (paddingLeft, paddingRight, paddingTop, paddingBottom)
+  - [x] `itemSpacing` instead of `spacing`
+  - [x] `layoutWrap` enum (NO_WRAP, WRAP)
 
-- [ ] **Update sizing properties**
-  - [ ] `primaryAxisSizingMode` / `counterAxisSizingMode`
-  - [ ] `layoutAlign` for children
-  - [ ] `layoutGrow` for fill behavior
-  - [ ] `layoutPositioning` for absolute positioning
+- [x] **Update sizing properties**
+  - [x] `primaryAxisSizingMode` / `counterAxisSizingMode` (FIXED, AUTO)
+  - [x] `layoutAlign` for children (INHERIT, MIN, MAX, CENTER, STRETCH, BASELINE)
+  - [x] `layoutGrow` for fill behavior (0 or 1)
+  - [x] `layoutPositioning` for absolute positioning
 
-- [ ] **Constraint value migration**
-  - [ ] Map old constraint names to Figma equivalents
-  - [ ] Update UI to show Figma-style names
+- [x] **Constraint value migration**
+  - [x] Map old constraint names to Figma equivalents (left→MIN, right→MAX, etc.)
+  - [x] Update UI to show Figma-style names
 
 ### 6.3 Phase 3: Components
 
-- [ ] **Inline component storage**
-  - [ ] Add `components` object to document
-  - [ ] Convert ComponentLibrary to document components
-  - [ ] Support external library references
+- [x] **Inline component storage**
+  - [x] Add `components` object to document
+  - [x] Convert ComponentLibrary to document components
+  - [x] Support external library references
 
-- [ ] **Component instances**
-  - [ ] Add INSTANCE type
-  - [ ] Implement `componentId` reference
-  - [ ] Support property overrides
-  - [ ] Handle instance detach
+- [x] **Component instances**
+  - [x] Add INSTANCE type
+  - [x] Implement `componentId` reference
+  - [x] Support property overrides
+  - [x] Handle instance detach
 
 ### 6.4 Phase 4: Styles
 
-- [ ] **Shared styles**
-  - [ ] Add `styles` object to document
-  - [ ] Implement fill styles
-  - [ ] Implement stroke styles
-  - [ ] Implement text styles
-  - [ ] Add style references to objects
+- [x] **Shared styles**
+  - [x] Add `styles` object to document
+  - [x] Implement fill styles
+  - [x] Implement stroke styles
+  - [x] Implement text styles
+  - [x] Implement effect styles
+  - [x] Add style references to objects
+  - [x] Add style application helper methods
+  - [x] Save/load styles with documents
 
 ### 6.5 Phase 5: Testing & Migration
 
-- [ ] **Migration tests**
-  - [ ] Test v1 → v2 migration
-  - [ ] Verify all object types convert correctly
-  - [ ] Test component migration
-  - [ ] Test round-trip (save → load → save)
+- [x] **Unit tests**
+  - [x] Styles system tests (tests/unit/styles.test.js)
+  - [x] Object type serialization tests (tests/unit/serialization.test.js)
+  - [x] Component serialization tests
+  - [x] Round-trip tests (save → load → save)
+  - [x] Double round-trip tests (multiple cycles)
+  - [x] Constraint value tests
+  - [x] Color conversion tests
+  - [x] Type mapping tests
 
 - [ ] **Figma import/export tests**
   - [ ] Import Figma JSON, save as v2

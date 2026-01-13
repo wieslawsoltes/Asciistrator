@@ -45,6 +45,8 @@ export const TypeMapping = {
         'star': 'STAR',
         'group': 'GROUP',
         'frame': 'FRAME',
+        'component': 'COMPONENT',
+        'instance': 'INSTANCE',
         'table': 'TABLE',
         'chart': 'CHART',
         'process': 'FLOWCHART_PROCESS',
@@ -67,6 +69,8 @@ export const TypeMapping = {
         'STAR': 'star',
         'GROUP': 'group',
         'FRAME': 'frame',
+        'COMPONENT': 'component',
+        'INSTANCE': 'instance',
         'TABLE': 'table',
         'CHART': 'chart',
         'FLOWCHART_PROCESS': 'process',
@@ -184,15 +188,57 @@ export class NativeDocument {
      * Create from app state (v2 format)
      * @param {object} appState - Application state
      * @param {object[]} layers - Layer data with objects
+     * @param {object} options - Additional options (styles, etc.)
      * @returns {NativeDocument}
      */
-    static fromAppState(appState, layers) {
+    static fromAppState(appState, layers, options = {}) {
         const doc = new NativeDocument();
         
         doc.name = appState.filename || 'Untitled';
         doc.lastModified = new Date().toISOString();
         doc.metadata.modified = doc.lastModified;
         doc.metadata.title = doc.name;
+        
+        // Import styles if provided
+        if (options.styles) {
+            doc.styles = options.styles;
+        }
+        
+        // Extract component definitions from all layers
+        const componentDefs = new Map();
+        
+        /**
+         * Recursively find and register component definitions
+         */
+        function extractComponents(objects) {
+            for (const obj of objects) {
+                if (obj.type === 'component' && obj.componentKey) {
+                    // Store component definition
+                    componentDefs.set(obj.componentKey, {
+                        key: obj.componentKey,
+                        name: obj.name || 'Component',
+                        description: obj.description || '',
+                        documentationLinks: obj.documentationLinks || []
+                    });
+                }
+                // Recursively check children
+                if (obj.children && obj.children.length > 0) {
+                    extractComponents(obj.children);
+                }
+            }
+        }
+        
+        // Extract components from all layers
+        for (const layer of layers) {
+            if (layer.objects) {
+                extractComponents(layer.objects);
+            }
+        }
+        
+        // Store component definitions in document
+        for (const [key, def] of componentDefs) {
+            doc.components[key] = def;
+        }
         
         // Convert each layer to a PAGE node
         doc.document.children = layers.map((layer, index) => {
@@ -294,11 +340,22 @@ export class NativeDocument {
             
             // ASCII-specific properties (namespaced to preserve)
             ascii: {
+                // Core ASCII rendering
                 strokeChar: obj.strokeChar || '*',
                 fillChar: obj.fillChar || '',
                 lineStyle: obj.lineStyle || 'single',
                 strokeColor: obj.strokeColor,
-                fillColor: obj.fillColor
+                fillColor: obj.fillColor,
+                
+                // Box/border styles (ASCII-specific)
+                boxStyle: obj.boxStyle,
+                borderStyle: obj.borderStyle,
+                backgroundChar: obj.backgroundChar,
+                
+                // Frame title (ASCII-specific rendering)
+                title: obj.title,
+                showBorder: obj.showBorder,
+                autoSize: obj.autoSize
             }
         };
         
@@ -337,6 +394,12 @@ export class NativeDocument {
             node.avaloniaType = obj.avaloniaType;
             node.avaloniaProperties = obj.avaloniaProperties || {};
         }
+        
+        // Style references (Figma-style)
+        if (obj.fillStyleId) node.fillStyleId = obj.fillStyleId;
+        if (obj.strokeStyleId) node.strokeStyleId = obj.strokeStyleId;
+        if (obj.textStyleId) node.textStyleId = obj.textStyleId;
+        if (obj.effectStyleId) node.effectStyleId = obj.effectStyleId;
         
         return node;
     }
@@ -415,72 +478,35 @@ export class NativeDocument {
     
     /**
      * Serialize layout properties to v2 format (Figma-style flat properties)
+     * Now uses flat properties directly since internal format matches Figma
      */
     static _serializeLayoutPropertiesV2(obj) {
-        const al = obj.autoLayout || {};
-        const padding = al.padding || obj.padding || { top: 0, right: 0, bottom: 0, left: 0 };
-        
         return {
             // Layout mode
-            layoutMode: al.enabled ? (al.direction === 'horizontal' ? 'HORIZONTAL' : 'VERTICAL') : 'NONE',
+            layoutMode: obj.layoutMode || 'NONE',
             
             // Alignment on primary axis
-            primaryAxisAlignItems: NativeDocument._mapAlignmentToFigma(al.alignment, al.distribution),
+            primaryAxisAlignItems: obj.primaryAxisAlignItems || 'MIN',
             
             // Alignment on counter axis
-            counterAxisAlignItems: NativeDocument._mapCounterAlignmentToFigma(al.alignment),
+            counterAxisAlignItems: obj.counterAxisAlignItems || 'MIN',
             
             // Padding (individual properties)
-            paddingLeft: padding.left || 0,
-            paddingRight: padding.right || 0,
-            paddingTop: padding.top || 0,
-            paddingBottom: padding.bottom || 0,
+            paddingLeft: obj.paddingLeft || 0,
+            paddingRight: obj.paddingRight || 0,
+            paddingTop: obj.paddingTop || 0,
+            paddingBottom: obj.paddingBottom || 0,
             
             // Spacing
-            itemSpacing: al.spacing || 0,
-            counterAxisSpacing: al.counterSpacing || al.wrapSpacing || 0,
+            itemSpacing: obj.itemSpacing || 0,
+            counterAxisSpacing: obj.counterAxisSpacing || 0,
             
             // Wrap
-            layoutWrap: al.wrap ? 'WRAP' : 'NO_WRAP',
+            layoutWrap: obj.layoutWrap || 'NO_WRAP',
             
             // Reverse
-            itemReverseZIndex: al.reversed || false,
-            
-            // Distribution (stored for round-trip)
-            _distribution: al.distribution || 'packed'
+            itemReverseZIndex: obj.itemReverseZIndex || false
         };
-    }
-    
-    /**
-     * Map alignment to Figma primary axis value
-     */
-    static _mapAlignmentToFigma(alignment, distribution) {
-        if (distribution === 'space-between') return 'SPACE_BETWEEN';
-        if (distribution === 'space-around') return 'SPACE_AROUND';
-        if (distribution === 'space-evenly') return 'SPACE_EVENLY';
-        
-        switch (alignment) {
-            case 'start': return 'MIN';
-            case 'center': return 'CENTER';
-            case 'end': return 'MAX';
-            case 'stretch': return 'MIN';  // Stretch is handled differently
-            case 'baseline': return 'BASELINE';
-            default: return 'MIN';
-        }
-    }
-    
-    /**
-     * Map alignment to Figma counter axis value
-     */
-    static _mapCounterAlignmentToFigma(alignment) {
-        switch (alignment) {
-            case 'start': return 'MIN';
-            case 'center': return 'CENTER';
-            case 'end': return 'MAX';
-            case 'stretch': return 'STRETCH';
-            case 'baseline': return 'BASELINE';
-            default: return 'MIN';
-        }
     }
     
     /**
@@ -544,26 +570,43 @@ export class NativeDocument {
                 break;
                 
             case 'frame':
-                node.showBorder = obj.showBorder;
-                node.borderStyle = obj.borderStyle;
+                // Standard Figma properties
                 node.backgroundColor = obj.backgroundColor ? ColorUtils.hexToFigma(obj.backgroundColor) : null;
-                node.backgroundChar = obj.backgroundChar;
-                node.title = obj.title;
-                node.autoSize = obj.autoSize;
+                // ASCII-specific properties are already in node.ascii from base serialization
+                break;
+                
+            case 'component':
+                // Standard Figma properties
+                node.backgroundColor = obj.backgroundColor ? ColorUtils.hexToFigma(obj.backgroundColor) : null;
+                // Component-specific properties
+                node.componentKey = obj.componentKey;
+                node.description = obj.description || '';
+                node.documentationLinks = obj.documentationLinks || [];
+                // ASCII-specific properties are already in node.ascii from base serialization
+                break;
+                
+            case 'instance':
+                // Instance references a component
+                node.componentId = obj.componentId;
+                node.overrides = obj.overrides || {};
+                node.exposedInstances = obj.exposedInstances || [];
+                node.scaleFactor = obj.scaleFactor ?? 1;
                 break;
                 
             case 'table':
                 node.cols = obj.cols;
                 node.rows = obj.rows;
-                node.cellData = obj.cellData;
-                node.columnWidths = obj.columnWidths;
-                node.rowHeights = obj.rowHeights;
+                // Move ASCII-specific table data to ascii namespace
+                node.ascii.cellData = obj.cellData;
+                node.ascii.columnWidths = obj.columnWidths;
+                node.ascii.rowHeights = obj.rowHeights;
                 break;
                 
             case 'chart':
                 node.chartType = obj.chartType;
-                node.chartData = obj.chartData;
-                node.chartOptions = obj.chartOptions;
+                // Move ASCII-specific chart data to ascii namespace
+                node.ascii.chartData = obj.chartData;
+                node.ascii.chartOptions = obj.chartOptions;
                 break;
                 
             // Flowchart shapes
@@ -575,12 +618,14 @@ export class NativeDocument {
             case 'database':
             case 'subprocess':
             case 'connector-circle':
-                node.label = obj.label;
-                node.labelColor = obj.labelColor;
                 node.flowchartType = obj.type;  // Preserve original type
+                // Move ASCII-specific label to ascii namespace
+                node.ascii.label = obj.label;
+                node.ascii.labelColor = obj.labelColor;
                 break;
                 
             case 'connector':
+                // Connection endpoint references (Figma-compatible)
                 node.fromShapeId = obj.fromShapeId;
                 node.fromSnapPoint = obj.fromSnapPoint;
                 node.toShapeId = obj.toShapeId;
@@ -589,11 +634,12 @@ export class NativeDocument {
                 node.startY = obj.startY;
                 node.endX = obj.endX;
                 node.endY = obj.endY;
-                node.connectorStyle = obj.connectorStyle;
-                node.lineType = obj.lineType;
-                node.arrowStart = obj.arrowStart;
-                node.arrowEnd = obj.arrowEnd;
-                node.waypoints = obj.waypoints;
+                // Move ASCII-specific connector properties to ascii namespace
+                node.ascii.connectorStyle = obj.connectorStyle;
+                node.ascii.lineType = obj.lineType;
+                node.ascii.arrowStart = obj.arrowStart;
+                node.ascii.arrowEnd = obj.arrowEnd;
+                node.ascii.waypoints = obj.waypoints;
                 break;
         }
     }
@@ -680,9 +726,10 @@ export class NativeDocument {
  * @param {object[]} layers - Layers with objects
  * @param {string} filename - Filename
  * @param {object[]} componentLibraries - Optional component libraries data
+ * @param {object} styles - Optional shared styles data
  */
-export function saveNativeDocument(appState, layers, filename = 'document.ascii', componentLibraries = null) {
-    const doc = NativeDocument.fromAppState(appState, layers);
+export function saveNativeDocument(appState, layers, filename = 'document.ascii', componentLibraries = null, styles = null) {
+    const doc = NativeDocument.fromAppState(appState, layers, { styles });
     
     // Include component libraries if provided
     if (componentLibraries) {

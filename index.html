@@ -178,6 +178,7 @@
                 <div class="panel-tabs">
                     <button class="panel-tab active" data-panel="layers">Layers</button>
                     <button class="panel-tab" data-panel="properties">Props</button>
+                    <button class="panel-tab" data-panel="styles">Styles</button>
                     <button class="panel-tab" data-panel="components">Comps</button>
                     <button class="panel-tab" data-panel="chars">Chars</button>
                 </div>
@@ -207,7 +208,12 @@
                     </div>
                     <div class="properties-content">
                         <div class="property-group" id="prop-text-group" style="display:none;">
-                            <label>Text</label>
+                            <div class="property-group-header">
+                                <label>Text</label>
+                                <button class="style-picker-btn" id="btn-text-style" title="Apply text style">
+                                    <span class="style-dots">⁘</span>
+                                </button>
+                            </div>
                             <div class="property-row">
                                 <input type="text" id="prop-text" placeholder="Enter text...">
                             </div>
@@ -232,13 +238,27 @@
                         </div>
                         <div class="property-group">
                             <label>Colors</label>
-                            <div class="property-row">
+                            <div class="property-row style-row">
                                 <label>Stroke:</label>
                                 <input type="color" id="prop-stroke-color" value="#ffffff">
+                                <span class="style-name-badge" id="stroke-style-name" title="Click to detach">
+                                    <span class="style-badge-text"></span>
+                                    <span class="style-badge-detach">✕</span>
+                                </span>
+                                <button class="style-picker-btn" id="btn-stroke-style" title="Apply stroke style">
+                                    <span class="style-dots">⁘</span>
+                                </button>
                             </div>
-                            <div class="property-row">
+                            <div class="property-row style-row">
                                 <label>Fill:</label>
                                 <input type="color" id="prop-fill-color" value="#ffffff">
+                                <span class="style-name-badge" id="fill-style-name" title="Click to detach">
+                                    <span class="style-badge-text"></span>
+                                    <span class="style-badge-detach">✕</span>
+                                </span>
+                                <button class="style-picker-btn" id="btn-fill-style" title="Apply fill style">
+                                    <span class="style-dots">⁘</span>
+                                </button>
                             </div>
                         </div>
                         <div class="property-group">
@@ -428,7 +448,12 @@
                         </div>
                         <!-- Effects Section (Figma-style) -->
                         <div class="property-group" id="prop-effects-group">
-                            <label>✨ Effects</label>
+                            <div class="property-group-header">
+                                <label>✨ Effects</label>
+                                <button class="style-picker-btn" id="btn-effect-style" title="Apply effect style">
+                                    <span class="style-dots">⁘</span>
+                                </button>
+                            </div>
                             <div id="prop-effects-list"></div>
                             <button class="btn btn-small" id="btn-add-effect" style="margin-top: 4px; width: 100%;">+ Add Effect</button>
                         </div>
@@ -436,6 +461,93 @@
                         <div class="property-group" id="prop-ui-component-group" style="display:none;">
                             <label>UI Component: <span id="prop-ui-type"></span></label>
                             <div id="prop-ui-properties"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Styles Panel -->
+                <div id="panel-styles" class="panel-content">
+                    <div class="panel-header">
+                        <span>Local Styles</span>
+                        <div class="panel-actions">
+                            <button class="icon-btn small" title="Create style from selection" id="btn-create-style-from-selection">✚</button>
+                            <button class="icon-btn small" title="Import Styles" id="btn-import-styles">📥</button>
+                            <button class="icon-btn small" title="Export Styles" id="btn-export-styles">📤</button>
+                        </div>
+                    </div>
+                    <div class="styles-toolbar">
+                        <input type="text" id="styles-search" class="styles-search" placeholder="Search styles...">
+                        <button class="icon-btn small view-toggle" id="btn-styles-view" title="Toggle grid/list view">☰</button>
+                    </div>
+                    <div class="styles-content" id="styles-content">
+                        <!-- Fill Styles -->
+                        <div class="style-category" data-style-type="FILL">
+                            <div class="style-category-header" data-collapsed="false">
+                                <span class="style-category-expand">▼</span>
+                                <span class="style-category-icon">🎨</span>
+                                <span class="style-category-name">Fill styles</span>
+                                <span class="style-category-count" id="fill-styles-count">0</span>
+                                <button class="icon-btn small style-add-btn" title="Create fill style (Alt+Shift+F)" data-style-type="FILL">+</button>
+                            </div>
+                            <div class="style-list" id="fill-styles-list">
+                                <!-- Fill styles will be populated by JavaScript -->
+                            </div>
+                        </div>
+                        
+                        <!-- Stroke Styles -->
+                        <div class="style-category" data-style-type="STROKE">
+                            <div class="style-category-header" data-collapsed="false">
+                                <span class="style-category-expand">▼</span>
+                                <span class="style-category-icon">✏️</span>
+                                <span class="style-category-name">Stroke styles</span>
+                                <span class="style-category-count" id="stroke-styles-count">0</span>
+                                <button class="icon-btn small style-add-btn" title="Create stroke style (Alt+Shift+S)" data-style-type="STROKE">+</button>
+                            </div>
+                            <div class="style-list" id="stroke-styles-list">
+                                <!-- Stroke styles will be populated by JavaScript -->
+                            </div>
+                        </div>
+                        
+                        <!-- Text Styles -->
+                        <div class="style-category" data-style-type="TEXT">
+                            <div class="style-category-header" data-collapsed="false">
+                                <span class="style-category-expand">▼</span>
+                                <span class="style-category-icon">📝</span>
+                                <span class="style-category-name">Text styles</span>
+                                <span class="style-category-count" id="text-styles-count">0</span>
+                                <button class="icon-btn small style-add-btn" title="Create text style (Alt+Shift+T)" data-style-type="TEXT">+</button>
+                            </div>
+                            <div class="style-list" id="text-styles-list">
+                                <!-- Text styles will be populated by JavaScript -->
+                            </div>
+                        </div>
+                        
+                        <!-- Effect Styles -->
+                        <div class="style-category" data-style-type="EFFECT">
+                            <div class="style-category-header" data-collapsed="false">
+                                <span class="style-category-expand">▼</span>
+                                <span class="style-category-icon">✨</span>
+                                <span class="style-category-name">Effect styles</span>
+                                <span class="style-category-count" id="effect-styles-count">0</span>
+                                <button class="icon-btn small style-add-btn" title="Create effect style (Alt+Shift+E)" data-style-type="EFFECT">+</button>
+                            </div>
+                            <div class="style-list" id="effect-styles-list">
+                                <!-- Effect styles will be populated by JavaScript -->
+                            </div>
+                        </div>
+
+                        <!-- Grid Styles -->
+                        <div class="style-category" data-style-type="GRID">
+                            <div class="style-category-header" data-collapsed="false">
+                                <span class="style-category-expand">▼</span>
+                                <span class="style-category-icon">⊞</span>
+                                <span class="style-category-name">Grid styles</span>
+                                <span class="style-category-count" id="grid-styles-count">0</span>
+                                <button class="icon-btn small style-add-btn" title="Create grid style" data-style-type="GRID">+</button>
+                            </div>
+                            <div class="style-list" id="grid-styles-list">
+                                <!-- Grid styles will be populated by JavaScript -->
+                            </div>
                         </div>
                     </div>
                 </div>

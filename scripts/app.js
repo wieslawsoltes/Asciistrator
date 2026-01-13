@@ -346,6 +346,357 @@ const EffectType = {
     BACKGROUND_BLUR: 'backgroundBlur'
 };
 
+// ==========================================
+// SHARED STYLES SYSTEM (Figma-compatible)
+// ==========================================
+
+/**
+ * Style types (Figma-compatible)
+ */
+const StyleType = {
+    FILL: 'FILL',
+    STROKE: 'STROKE', 
+    TEXT: 'TEXT',
+    EFFECT: 'EFFECT',
+    GRID: 'GRID'
+};
+
+/**
+ * Create a unique style key
+ */
+function createStyleKey() {
+    return `S:${uuid().slice(0, 8)}`;
+}
+
+/**
+ * Shared style definition (Figma-compatible)
+ */
+class SharedStyle {
+    constructor(options = {}) {
+        this.key = options.key || createStyleKey();
+        this.name = options.name || 'Untitled Style';
+        this.styleType = options.styleType || StyleType.FILL;
+        this.description = options.description || '';
+        
+        // Style data depends on type
+        this.data = options.data || this._createDefaultData();
+        
+        // Remote style reference (for team libraries)
+        this.remote = options.remote || false;
+        
+        // Timestamps
+        this.createdAt = options.createdAt || Date.now();
+        this.modifiedAt = options.modifiedAt || Date.now();
+    }
+    
+    _createDefaultData() {
+        switch (this.styleType) {
+            case StyleType.FILL:
+                return {
+                    fills: [{
+                        type: 'SOLID',
+                        visible: true,
+                        opacity: 1,
+                        blendMode: 'NORMAL',
+                        color: { r: 0.5, g: 0.5, b: 0.5, a: 1 }
+                    }]
+                };
+            case StyleType.STROKE:
+                return {
+                    strokes: [{
+                        type: 'SOLID',
+                        visible: true,
+                        opacity: 1,
+                        color: { r: 0, g: 0, b: 0, a: 1 }
+                    }],
+                    strokeWeight: 1,
+                    strokeAlign: 'CENTER',
+                    strokeCap: 'NONE',
+                    strokeJoin: 'MITER',
+                    strokeDashes: [],
+                    strokeMiterAngle: 28.96
+                };
+            case StyleType.TEXT:
+                return {
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                    fontWeight: 'normal',
+                    fontStyle: 'normal',
+                    letterSpacing: 0,
+                    lineHeight: { value: 100, unit: 'PERCENT' },
+                    textAlignHorizontal: 'LEFT',
+                    textAlignVertical: 'TOP',
+                    textDecoration: 'NONE',
+                    textCase: 'ORIGINAL'
+                };
+            case StyleType.EFFECT:
+                return {
+                    effects: []
+                };
+            case StyleType.GRID:
+                return {
+                    layoutGrids: []
+                };
+            default:
+                return {};
+        }
+    }
+    
+    /**
+     * Update style data
+     */
+    update(data) {
+        Object.assign(this.data, data);
+        this.modifiedAt = Date.now();
+    }
+    
+    /**
+     * Clone this style with a new key
+     */
+    clone(newName) {
+        return new SharedStyle({
+            name: newName || `${this.name} Copy`,
+            styleType: this.styleType,
+            description: this.description,
+            data: JSON.parse(JSON.stringify(this.data))
+        });
+    }
+    
+    /**
+     * Serialize to JSON (Figma-compatible format)
+     */
+    toJSON() {
+        return {
+            key: this.key,
+            name: this.name,
+            styleType: this.styleType,
+            description: this.description,
+            ...this.data,
+            remote: this.remote
+        };
+    }
+    
+    /**
+     * Create from JSON
+     */
+    static fromJSON(json) {
+        const { key, name, styleType, description, remote, ...data } = json;
+        return new SharedStyle({
+            key,
+            name,
+            styleType,
+            description,
+            remote,
+            data
+        });
+    }
+}
+
+/**
+ * Style Manager - manages shared styles for a document
+ */
+class StyleManager {
+    constructor() {
+        this.styles = new Map();  // key -> SharedStyle
+        this._subscribers = new Set();
+    }
+    
+    /**
+     * Subscribe to style changes
+     */
+    subscribe(callback) {
+        this._subscribers.add(callback);
+        return () => this._subscribers.delete(callback);
+    }
+    
+    /**
+     * Notify subscribers of changes
+     */
+    _notify(event, style) {
+        for (const callback of this._subscribers) {
+            callback(event, style);
+        }
+    }
+    
+    /**
+     * Create a new style
+     * @param {string|object} typeOrOptions - StyleType or options object
+     * @param {string} [name] - Style name (if first param is type)
+     * @param {object} [data] - Style data (if first param is type)
+     * @param {object} [extra] - Extra options (if first param is type)
+     */
+    createStyle(typeOrOptions = {}, name, data, extra = {}) {
+        let options;
+        if (typeof typeOrOptions === 'string') {
+            // Called as createStyle(type, name, data, extra)
+            options = {
+                styleType: typeOrOptions,
+                name: name || 'Untitled Style',
+                data: data || {},
+                ...extra
+            };
+        } else {
+            // Called as createStyle(options)
+            options = typeOrOptions;
+        }
+        const style = new SharedStyle(options);
+        this.styles.set(style.key, style);
+        this._notify('create', style);
+        return style;
+    }
+    
+    /**
+     * Get a style by key
+     */
+    getStyle(key) {
+        return this.styles.get(key);
+    }
+    
+    /**
+     * Update a style
+     */
+    updateStyle(key, data) {
+        const style = this.styles.get(key);
+        if (style) {
+            style.update(data);
+            this._notify('update', style);
+        }
+        return style;
+    }
+    
+    /**
+     * Delete a style
+     */
+    deleteStyle(key) {
+        const style = this.styles.get(key);
+        if (style) {
+            this.styles.delete(key);
+            this._notify('delete', style);
+            return true;
+        }
+        return false;
+    }
+    
+    /**
+     * Get all styles of a specific type
+     */
+    getStylesByType(styleType) {
+        return [...this.styles.values()].filter(s => s.styleType === styleType);
+    }
+    
+    /**
+     * Get all fill styles
+     */
+    getFillStyles() {
+        return this.getStylesByType(StyleType.FILL);
+    }
+    
+    /**
+     * Get all stroke styles
+     */
+    getStrokeStyles() {
+        return this.getStylesByType(StyleType.STROKE);
+    }
+    
+    /**
+     * Get all text styles
+     */
+    getTextStyles() {
+        return this.getStylesByType(StyleType.TEXT);
+    }
+    
+    /**
+     * Get all effect styles
+     */
+    getEffectStyles() {
+        return this.getStylesByType(StyleType.EFFECT);
+    }
+    
+    /**
+     * Import styles from document data
+     */
+    importFromDocument(stylesObj) {
+        for (const [key, styleData] of Object.entries(stylesObj || {})) {
+            const style = SharedStyle.fromJSON({ key, ...styleData });
+            this.styles.set(key, style);
+        }
+    }
+    
+    /**
+     * Export styles to document format
+     */
+    exportToDocument() {
+        const result = {};
+        for (const [key, style] of this.styles) {
+            result[key] = style.toJSON();
+        }
+        return result;
+    }
+    
+    /**
+     * Import styles from array (for file import)
+     */
+    importStyles(stylesArray) {
+        let count = 0;
+        for (const styleData of stylesArray) {
+            try {
+                const style = SharedStyle.fromJSON(styleData);
+                // Generate new key to avoid conflicts
+                style.key = `S:${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${count}`;
+                this.styles.set(style.key, style);
+                count++;
+            } catch (e) {
+                console.warn('Failed to import style:', e);
+            }
+        }
+        this._notify('import', null);
+        return count;
+    }
+    
+    /**
+     * Export styles to array (for file export)
+     */
+    exportStyles() {
+        return [...this.styles.values()].map(s => s.toJSON());
+    }
+    
+    /**
+     * Reorder a style (move before another style)
+     */
+    reorderStyle(draggedKey, targetKey) {
+        const entries = [...this.styles.entries()];
+        const draggedIndex = entries.findIndex(([k]) => k === draggedKey);
+        const targetIndex = entries.findIndex(([k]) => k === targetKey);
+        
+        if (draggedIndex === -1 || targetIndex === -1) return;
+        
+        const [draggedEntry] = entries.splice(draggedIndex, 1);
+        const insertIndex = draggedIndex < targetIndex ? targetIndex : targetIndex;
+        entries.splice(insertIndex, 0, draggedEntry);
+        
+        this.styles = new Map(entries);
+        this._notify('reorder', null);
+    }
+    
+    /**
+     * Clear all styles
+     */
+    clear() {
+        this.styles.clear();
+        this._notify('clear', null);
+    }
+    
+    /**
+     * Get style count
+     */
+    get count() {
+        return this.styles.size;
+    }
+}
+
+// Global style manager instance
+const styleManager = new StyleManager();
+
 /**
  * Create a default effect configuration
  */
@@ -948,10 +1299,30 @@ class SceneObject {
     static _layoutBatchRAF = null;
     
     /**
+     * Convert Figma color object to hex string
+     * @param {object} color - Figma color {r, g, b, a}
+     * @returns {string} Hex color string
+     */
+    static figmaColorToHex(color) {
+        if (!color) return '#ffffff';
+        const r = Math.round((color.r || 0) * 255);
+        const g = Math.round((color.g || 0) * 255);
+        const b = Math.round((color.b || 0) * 255);
+        return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    }
+    
+    /**
+     * Check if an object has auto layout enabled
+     */
+    static hasAutoLayout(obj) {
+        return obj && obj.layoutMode && obj.layoutMode !== 'NONE';
+    }
+    
+    /**
      * Request layout for an object (batched)
      */
     static requestLayout(obj) {
-        if (!obj || !obj.autoLayout?.enabled) return;
+        if (!SceneObject.hasAutoLayout(obj)) return;
         
         SceneObject._layoutQueue.add(obj);
         
@@ -987,7 +1358,7 @@ class SceneObject {
             // Skip if a parent was already processed (it will have laid out this child)
             if (SceneObject._hasProcessedAncestor(obj, processed)) continue;
             
-            if (obj.autoLayout?.enabled && obj._performLayout) {
+            if (SceneObject.hasAutoLayout(obj) && obj._performLayout) {
                 obj._performLayout();
             }
             processed.add(obj);
@@ -1100,18 +1471,18 @@ class SceneObject {
         this.parentId = null;
         this.children = [];
         
-        // Auto Layout settings (Figma-style)
-        this.autoLayout = {
-            enabled: false,
-            direction: LayoutDirection.VERTICAL,
-            spacing: 1,
-            padding: { top: 1, right: 1, bottom: 1, left: 1 },
-            alignment: LayoutAlignment.START,
-            distribution: LayoutDistribution.PACKED,
-            wrap: false,
-            wrapSpacing: 1,
-            reversed: false
-        };
+        // Auto Layout settings (Figma-style flat properties)
+        this.layoutMode = 'NONE';                    // 'NONE' | 'HORIZONTAL' | 'VERTICAL'
+        this.primaryAxisAlignItems = 'MIN';          // 'MIN' | 'CENTER' | 'MAX' | 'SPACE_BETWEEN' | 'BASELINE'
+        this.counterAxisAlignItems = 'MIN';          // 'MIN' | 'CENTER' | 'MAX' | 'BASELINE'
+        this.paddingLeft = 1;
+        this.paddingRight = 1;
+        this.paddingTop = 1;
+        this.paddingBottom = 1;
+        this.itemSpacing = 1;                        // Gap between items on primary axis
+        this.counterAxisSpacing = 1;                 // Gap between wrapped rows/columns
+        this.layoutWrap = 'NO_WRAP';                 // 'NO_WRAP' | 'WRAP'
+        this.itemReverseZIndex = false;              // Reverse item order
         
         // Sizing behavior
         this.sizing = {
@@ -1134,6 +1505,13 @@ class SceneObject {
             horizontal: HorizontalConstraint.MIN,   // MIN, MAX, STRETCH, CENTER, SCALE
             vertical: VerticalConstraint.MIN        // MIN, MAX, STRETCH, CENTER, SCALE
         };
+        
+        // Shared style references (Figma-style)
+        // When set, these override the local style properties
+        this.fillStyleId = null;      // Reference to shared fill style
+        this.strokeStyleId = null;    // Reference to shared stroke style
+        this.textStyleId = null;      // Reference to shared text style (for text objects)
+        this.effectStyleId = null;    // Reference to shared effect style
         
         // Clipping and rendering
         this.clipContent = false;
@@ -1164,7 +1542,7 @@ class SceneObject {
     canContainChildren() {
         // Frame-type objects can always contain children
         // Other objects with autoLayout enabled can contain children
-        return this.type === 'frame' || this.type === 'group' || this.autoLayout.enabled;
+        return this.type === 'frame' || this.type === 'group' || SceneObject.hasAutoLayout(this);
     }
     
     /**
@@ -1188,7 +1566,7 @@ class SceneObject {
                 }
             }
             // Request batched layout instead of immediate
-            if (this.autoLayout.enabled) {
+            if (SceneObject.hasAutoLayout(this)) {
                 SceneObject.requestLayout(this);
             }
             return;
@@ -1223,7 +1601,7 @@ class SceneObject {
         this.invalidateBounds();
         
         // Request batched layout instead of immediate
-        if (this.autoLayout.enabled) {
+        if (SceneObject.hasAutoLayout(this)) {
             SceneObject.requestLayout(this);
         }
         
@@ -1246,7 +1624,7 @@ class SceneObject {
             this.invalidateBounds();
             
             // Request batched layout instead of immediate
-            if (this.autoLayout.enabled) {
+            if (SceneObject.hasAutoLayout(this)) {
                 SceneObject.requestLayout(this);
             }
             
@@ -1271,7 +1649,7 @@ class SceneObject {
         }
         
         // Request batched layout instead of immediate
-        if (this.autoLayout.enabled) {
+        if (SceneObject.hasAutoLayout(this)) {
             SceneObject.requestLayout(this);
         }
     }
@@ -1295,12 +1673,11 @@ class SceneObject {
      * Get content bounds (inside padding)
      */
     getContentBounds() {
-        const p = this.autoLayout.padding || { top: 0, right: 0, bottom: 0, left: 0 };
         return {
-            x: this.x + p.left,
-            y: this.y + p.top,
-            width: Math.max(0, this.width - p.left - p.right),
-            height: Math.max(0, this.height - p.top - p.bottom)
+            x: this.x + this.paddingLeft,
+            y: this.y + this.paddingTop,
+            width: Math.max(0, this.width - this.paddingLeft - this.paddingRight),
+            height: Math.max(0, this.height - this.paddingTop - this.paddingBottom)
         };
     }
     
@@ -1308,7 +1685,7 @@ class SceneObject {
      * Apply auto layout to children (schedules batched layout)
      */
     layoutChildren() {
-        if (!this.autoLayout.enabled || this.children.length === 0) return;
+        if (!SceneObject.hasAutoLayout(this) || this.children.length === 0) return;
         // Schedule batched layout
         SceneObject.requestLayout(this);
     }
@@ -1317,14 +1694,13 @@ class SceneObject {
      * Perform layout immediately (called by batch processor)
      */
     _performLayout() {
-        if (!this.autoLayout.enabled || this.children.length === 0) return;
+        if (!SceneObject.hasAutoLayout(this) || this.children.length === 0) return;
         
-        const al = this.autoLayout;
         const content = this.getContentBounds();
-        const isHorizontal = al.direction === LayoutDirection.HORIZONTAL;
+        const isHorizontal = this.layoutMode === 'HORIZONTAL';
         
         // Reuse array if children haven't changed
-        const items = al.reversed ? this.children.slice().reverse() : this.children;
+        const items = this.itemReverseZIndex ? this.children.slice().reverse() : this.children;
         const itemCount = items.length;
         
         // Pre-allocate itemSizes array and collect sizing info
@@ -1358,8 +1734,8 @@ class SceneObject {
         }
         
         // Handle wrapping
-        if (al.wrap) {
-            this._layoutWithWrap(content, itemSizes, al, isHorizontal);
+        if (this.layoutWrap === 'WRAP') {
+            this._layoutWithWrap(content, itemSizes, isHorizontal);
             return;
         }
         
@@ -1377,7 +1753,7 @@ class SceneObject {
             }
         }
         
-        const totalSpacing = al.spacing * Math.max(0, itemCount - 1);
+        const totalSpacing = this.itemSpacing * Math.max(0, itemCount - 1);
         const mainAxisSize = isHorizontal ? content.width : content.height;
         const crossAxisSize = isHorizontal ? content.height : content.width;
         const availableForFill = mainAxisSize - totalFixedSize - totalSpacing;
@@ -1385,9 +1761,14 @@ class SceneObject {
         
         // Calculate positions based on distribution
         let mainPos = 0;
-        let gap = al.spacing;
+        let gap = this.itemSpacing;
         
-        if (al.distribution !== LayoutDistribution.PACKED) {
+        // Check for space distribution modes
+        const isSpaceDistribution = this.primaryAxisAlignItems === 'SPACE_BETWEEN' || 
+                                    this.primaryAxisAlignItems === 'SPACE_AROUND' ||
+                                    this.primaryAxisAlignItems === 'SPACE_EVENLY';
+        
+        if (isSpaceDistribution) {
             let totalItemSize = 0;
             for (let i = 0; i < itemCount; i++) {
                 const item = itemSizes[i];
@@ -1396,15 +1777,15 @@ class SceneObject {
             }
             const remainingSpace = mainAxisSize - totalItemSize;
             
-            switch (al.distribution) {
-                case LayoutDistribution.SPACE_BETWEEN:
+            switch (this.primaryAxisAlignItems) {
+                case 'SPACE_BETWEEN':
                     gap = itemCount > 1 ? remainingSpace / (itemCount - 1) : 0;
                     break;
-                case LayoutDistribution.SPACE_AROUND:
+                case 'SPACE_AROUND':
                     gap = remainingSpace / itemCount;
                     mainPos = gap / 2;
                     break;
-                case LayoutDistribution.SPACE_EVENLY:
+                case 'SPACE_EVENLY':
                     gap = remainingSpace / (itemCount + 1);
                     mainPos = gap;
                     break;
@@ -1412,11 +1793,11 @@ class SceneObject {
         } else {
             // Packed alignment
             const totalSize = totalFixedSize + (fillCount * fillSize) + totalSpacing;
-            switch (al.alignment) {
-                case LayoutAlignment.CENTER:
+            switch (this.primaryAxisAlignItems) {
+                case 'CENTER':
                     mainPos = ((mainAxisSize - totalSize) / 2) | 0;
                     break;
-                case LayoutAlignment.END:
+                case 'MAX':
                     mainPos = mainAxisSize - totalSize;
                     break;
             }
@@ -1455,9 +1836,11 @@ class SceneObject {
                 if (item.maxW !== null && item.maxW !== undefined) itemCrossSize = Math.min(item.maxW, itemCrossSize);
             }
             
-            // Cross axis positioning
+            // Cross axis positioning (using counterAxisAlignItems)
             let crossPos = 0;
-            if (al.alignment === LayoutAlignment.STRETCH || isFillCross) {
+            const isStretchCross = this.counterAxisAlignItems === 'STRETCH' || isFillCross;
+            
+            if (isStretchCross) {
                 itemCrossSize = crossAxisSize;
                 // Apply max constraint even when stretching
                 if (isHorizontal && item.maxH !== null && item.maxH !== undefined) {
@@ -1465,16 +1848,16 @@ class SceneObject {
                 } else if (!isHorizontal && item.maxW !== null && item.maxW !== undefined) {
                     itemCrossSize = Math.min(item.maxW, itemCrossSize);
                 }
-            } else if (al.alignment === LayoutAlignment.BASELINE && isHorizontal) {
+            } else if (this.counterAxisAlignItems === 'BASELINE' && isHorizontal) {
                 // Baseline alignment - align items by their text baseline
                 // Only meaningful for horizontal layouts
                 crossPos = maxBaseline - item.baseline;
             } else {
-                switch (al.alignment) {
-                    case LayoutAlignment.CENTER:
+                switch (this.counterAxisAlignItems) {
+                    case 'CENTER':
                         crossPos = ((crossAxisSize - itemCrossSize) / 2) | 0;
                         break;
-                    case LayoutAlignment.END:
+                    case 'MAX':
                         crossPos = crossAxisSize - itemCrossSize;
                         break;
                 }
@@ -1488,9 +1871,9 @@ class SceneObject {
             }
             
             // Apply cross axis fill/stretch
-            if (isHorizontal && (item.fillV || al.alignment === LayoutAlignment.STRETCH) && obj.height !== undefined) {
+            if (isHorizontal && (item.fillV || isStretchCross) && obj.height !== undefined) {
                 obj.height = itemCrossSize;
-            } else if (!isHorizontal && (item.fillH || al.alignment === LayoutAlignment.STRETCH) && obj.width !== undefined) {
+            } else if (!isHorizontal && (item.fillH || isStretchCross) && obj.width !== undefined) {
                 obj.width = itemCrossSize;
             }
             
@@ -1515,7 +1898,7 @@ class SceneObject {
             }
             
             // Schedule nested layout (don't call directly to avoid deep recursion)
-            if (obj.autoLayout?.enabled && obj.children?.length > 0) {
+            if (SceneObject.hasAutoLayout(obj) && obj.children?.length > 0) {
                 SceneObject.requestLayout(obj);
             }
             
@@ -1539,14 +1922,13 @@ class SceneObject {
     /**
      * Layout with wrapping support (optimized)
      */
-    _layoutWithWrap(content, itemSizes, al, isHorizontal) {
+    _layoutWithWrap(content, itemSizes, isHorizontal) {
         const mainAxisSize = isHorizontal ? content.width : content.height;
         const lines = [];
         let currentLine = [];
         let currentLineSize = 0;
-        const spacing = al.spacing;
-        const wrapSpacing = al.wrapSpacing;
-        const alignment = al.alignment;
+        const spacing = this.itemSpacing;
+        const wrapSpacing = this.counterAxisSpacing;
         const contentX = content.x;
         const contentY = content.y;
         const parentX = this.x;
@@ -1609,11 +1991,11 @@ class SceneObject {
             }
             
             let mainPos = 0;
-            switch (alignment) {
-                case LayoutAlignment.CENTER:
+            switch (this.primaryAxisAlignItems) {
+                case 'CENTER':
                     mainPos = ((mainAxisSize - line.size) / 2) | 0;
                     break;
-                case LayoutAlignment.END:
+                case 'MAX':
                     mainPos = mainAxisSize - line.size;
                     break;
             }
@@ -1639,14 +2021,14 @@ class SceneObject {
                 }
                 
                 let itemCrossPos = crossPos;
-                switch (alignment) {
-                    case LayoutAlignment.CENTER:
+                switch (this.counterAxisAlignItems) {
+                    case 'CENTER':
                         itemCrossPos = crossPos + ((lineMaxCross - itemCrossSize) / 2) | 0;
                         break;
-                    case LayoutAlignment.END:
+                    case 'MAX':
                         itemCrossPos = crossPos + lineMaxCross - itemCrossSize;
                         break;
-                    case LayoutAlignment.STRETCH:
+                    case 'STRETCH':
                         // Stretch with max constraint
                         let stretchSize = lineMaxCross;
                         if (isHorizontal && item.maxH != null) {
@@ -1687,7 +2069,7 @@ class SceneObject {
                 }
                 
                 // Schedule nested layout
-                if (obj.autoLayout?.enabled && obj.children?.length > 0) {
+                if (SceneObject.hasAutoLayout(obj) && obj.children?.length > 0) {
                     SceneObject.requestLayout(obj);
                 }
                 
@@ -1715,11 +2097,12 @@ class SceneObject {
         const childCount = this.children.length;
         if (childCount === 0) return;
         
-        const p = this.autoLayout.padding || { top: 0, right: 0, bottom: 0, left: 0 };
+        const pLeft = this.paddingLeft;
+        const pRight = this.paddingRight;
+        const pTop = this.paddingTop;
+        const pBottom = this.paddingBottom;
         const thisX = this.x;
         const thisY = this.y;
-        const pLeft = p.left;
-        const pTop = p.top;
         let maxX = 0, maxY = 0;
         
         for (let i = 0; i < childCount; i++) {
@@ -1734,7 +2117,7 @@ class SceneObject {
         }
         
         if (this.sizing.horizontal === SizingMode.HUG) {
-            let newWidth = Math.max(3, maxX + p.left + p.right);
+            let newWidth = Math.max(3, maxX + pLeft + pRight);
             // Apply min/max constraints
             const sizing = this.sizing;
             if (sizing.minWidth != null) newWidth = Math.max(sizing.minWidth, newWidth);
@@ -1742,7 +2125,7 @@ class SceneObject {
             this.width = newWidth;
         }
         if (this.sizing.vertical === SizingMode.HUG) {
-            let newHeight = Math.max(3, maxY + p.top + p.bottom);
+            let newHeight = Math.max(3, maxY + pTop + pBottom);
             // Apply min/max constraints
             const sizing = this.sizing;
             if (sizing.minHeight != null) newHeight = Math.max(sizing.minHeight, newHeight);
@@ -1900,6 +2283,217 @@ class SceneObject {
         }
     }
     
+    // ==========================================
+    // SHARED STYLE METHODS (Figma-compatible)
+    // ==========================================
+    
+    /**
+     * Apply a fill style to this object
+     * @param {string} styleKey - Key of the shared style
+     * @returns {boolean} True if style was applied
+     */
+    applyFillStyle(styleKey) {
+        const style = styleManager.getStyle(styleKey);
+        if (style && style.styleType === StyleType.FILL) {
+            this.fillStyleId = styleKey;
+            // Apply the style data to fills
+            if (style.data.fills) {
+                this.fills = JSON.parse(JSON.stringify(style.data.fills));
+                // Also update fillColor for rendering compatibility
+                const firstFill = style.data.fills[0];
+                if (firstFill && firstFill.type === 'SOLID' && firstFill.color) {
+                    this.fillColor = SceneObject.figmaColorToHex(firstFill.color);
+                }
+            }
+            return true;
+        }
+        return false;
+    }
+    
+    /**
+     * Apply a stroke style to this object
+     * @param {string} styleKey - Key of the shared style
+     * @returns {boolean} True if style was applied
+     */
+    applyStrokeStyle(styleKey) {
+        const style = styleManager.getStyle(styleKey);
+        if (style && style.styleType === StyleType.STROKE) {
+            this.strokeStyleId = styleKey;
+            // Apply the style data to stroke
+            if (style.data.strokes) {
+                this.stroke = {
+                    ...this.stroke,
+                    strokes: JSON.parse(JSON.stringify(style.data.strokes)),
+                    weight: style.data.strokeWeight ?? this.stroke.weight,
+                    align: style.data.strokeAlign ?? this.stroke.align,
+                    cap: style.data.strokeCap ?? this.stroke.cap,
+                    join: style.data.strokeJoin ?? this.stroke.join,
+                    dashes: style.data.strokeDashes ?? this.stroke.dashes,
+                    miterAngle: style.data.strokeMiterAngle ?? this.stroke.miterAngle
+                };
+                // Also update strokeColor for rendering compatibility
+                const firstStroke = style.data.strokes[0];
+                if (firstStroke && firstStroke.type === 'SOLID' && firstStroke.color) {
+                    this.strokeColor = SceneObject.figmaColorToHex(firstStroke.color);
+                }
+            }
+            return true;
+        }
+        return false;
+    }
+    
+    /**
+     * Apply a text style to this object (for text objects)
+     * @param {string} styleKey - Key of the shared style
+     * @returns {boolean} True if style was applied
+     */
+    applyTextStyle(styleKey) {
+        const style = styleManager.getStyle(styleKey);
+        if (style && style.styleType === StyleType.TEXT) {
+            this.textStyleId = styleKey;
+            // Text styles are stored in data, apply to text properties if they exist
+            if (this.fontFamily !== undefined) this.fontFamily = style.data.fontFamily;
+            if (this.fontSize !== undefined) this.fontSize = style.data.fontSize;
+            if (this.fontWeight !== undefined) this.fontWeight = style.data.fontWeight;
+            if (this.fontStyle !== undefined) this.fontStyle = style.data.fontStyle;
+            if (this.letterSpacing !== undefined) this.letterSpacing = style.data.letterSpacing;
+            if (this.lineHeight !== undefined) this.lineHeight = style.data.lineHeight;
+            if (this.textAlignHorizontal !== undefined) this.textAlignHorizontal = style.data.textAlignHorizontal;
+            if (this.textAlignVertical !== undefined) this.textAlignVertical = style.data.textAlignVertical;
+            if (this.textDecoration !== undefined) this.textDecoration = style.data.textDecoration;
+            if (this.textCase !== undefined) this.textCase = style.data.textCase;
+            return true;
+        }
+        return false;
+    }
+    
+    /**
+     * Apply an effect style to this object
+     * @param {string} styleKey - Key of the shared style
+     * @returns {boolean} True if style was applied
+     */
+    applyEffectStyle(styleKey) {
+        const style = styleManager.getStyle(styleKey);
+        if (style && style.styleType === StyleType.EFFECT) {
+            this.effectStyleId = styleKey;
+            if (style.data.effects) {
+                this.effects = JSON.parse(JSON.stringify(style.data.effects));
+            }
+            return true;
+        }
+        return false;
+    }
+    
+    /**
+     * Detach fill style (keep current values, remove reference)
+     */
+    detachFillStyle() {
+        this.fillStyleId = null;
+    }
+    
+    /**
+     * Detach stroke style (keep current values, remove reference)
+     */
+    detachStrokeStyle() {
+        this.strokeStyleId = null;
+    }
+    
+    /**
+     * Detach text style (keep current values, remove reference)
+     */
+    detachTextStyle() {
+        this.textStyleId = null;
+    }
+    
+    /**
+     * Detach effect style (keep current values, remove reference)
+     */
+    detachEffectStyle() {
+        this.effectStyleId = null;
+    }
+    
+    /**
+     * Detach all styles from this object
+     */
+    detachAllStyles() {
+        this.fillStyleId = null;
+        this.strokeStyleId = null;
+        this.textStyleId = null;
+        this.effectStyleId = null;
+    }
+    
+    /**
+     * Get effective fills (from style if linked, or local)
+     * @returns {Array} Array of fill definitions
+     */
+    getEffectiveFills() {
+        if (this.fillStyleId) {
+            const style = styleManager.getStyle(this.fillStyleId);
+            if (style && style.data.fills) {
+                return style.data.fills;
+            }
+        }
+        return this.fills || [];
+    }
+    
+    /**
+     * Get effective stroke (from style if linked, or local)
+     * @returns {Object} Stroke definition
+     */
+    getEffectiveStroke() {
+        if (this.strokeStyleId) {
+            const style = styleManager.getStyle(this.strokeStyleId);
+            if (style && style.data) {
+                return {
+                    ...this.stroke,
+                    strokes: style.data.strokes || [],
+                    weight: style.data.strokeWeight ?? this.stroke.weight,
+                    align: style.data.strokeAlign ?? this.stroke.align,
+                    cap: style.data.strokeCap ?? this.stroke.cap,
+                    join: style.data.strokeJoin ?? this.stroke.join,
+                    dashes: style.data.strokeDashes ?? this.stroke.dashes,
+                    miterAngle: style.data.strokeMiterAngle ?? this.stroke.miterAngle
+                };
+            }
+        }
+        return this.stroke || createStroke();
+    }
+    
+    /**
+     * Get effective effects (from style if linked, or local)
+     * @returns {Array} Array of effect definitions
+     */
+    getEffectiveEffects() {
+        if (this.effectStyleId) {
+            const style = styleManager.getStyle(this.effectStyleId);
+            if (style && style.data.effects) {
+                return style.data.effects;
+            }
+        }
+        return this.effects || [];
+    }
+    
+    /**
+     * Check if this object has any linked styles
+     * @returns {boolean}
+     */
+    hasLinkedStyles() {
+        return !!(this.fillStyleId || this.strokeStyleId || this.textStyleId || this.effectStyleId);
+    }
+    
+    /**
+     * Get all linked style keys
+     * @returns {Array<string>}
+     */
+    getLinkedStyleKeys() {
+        const keys = [];
+        if (this.fillStyleId) keys.push(this.fillStyleId);
+        if (this.strokeStyleId) keys.push(this.strokeStyleId);
+        if (this.textStyleId) keys.push(this.textStyleId);
+        if (this.effectStyleId) keys.push(this.effectStyleId);
+        return keys;
+    }
+    
     /**
      * Clone this object
      */
@@ -1956,13 +2550,30 @@ class SceneObject {
             exportSettings: this.exportSettings,
             layerId: this.layerId,
             parentId: this.parentId,
-            autoLayout: this.autoLayout,
+            // Layout properties (Figma-style flat)
+            layoutMode: this.layoutMode,
+            primaryAxisAlignItems: this.primaryAxisAlignItems,
+            counterAxisAlignItems: this.counterAxisAlignItems,
+            paddingLeft: this.paddingLeft,
+            paddingRight: this.paddingRight,
+            paddingTop: this.paddingTop,
+            paddingBottom: this.paddingBottom,
+            itemSpacing: this.itemSpacing,
+            counterAxisSpacing: this.counterAxisSpacing,
+            layoutWrap: this.layoutWrap,
+            itemReverseZIndex: this.itemReverseZIndex,
             sizing: this.sizing,
             clipContent: this.clipContent,
             constraints: this.constraints,
             _layoutSizing: this._layoutSizing,
             children: this.children.map(c => c.toJSON())
         };
+        
+        // Include style references if set
+        if (this.fillStyleId) json.fillStyleId = this.fillStyleId;
+        if (this.strokeStyleId) json.strokeStyleId = this.strokeStyleId;
+        if (this.textStyleId) json.textStyleId = this.textStyleId;
+        if (this.effectStyleId) json.effectStyleId = this.effectStyleId;
         
         // Include UI component properties if present
         if (this.uiComponentType) {
@@ -3269,17 +3880,15 @@ class FrameObject extends SceneObject {
         this.padding = { top: 1, right: 1, bottom: 1, left: 1 };
         this.autoSize = false;       // Auto-resize to fit content
         
-        // Auto Layout properties (Figma-style)
-        this.autoLayout = {
-            enabled: false,
-            direction: 'vertical',    // 'horizontal' | 'vertical'
-            spacing: 1,               // Gap between items
-            alignment: 'start',       // 'start' | 'center' | 'end' | 'stretch' | 'baseline'
-            distribution: 'packed',   // 'packed' | 'space-between' | 'space-around' | 'space-evenly'
-            wrap: false,              // Wrap items to next line/column
-            counterSpacing: 1,        // Spacing between wrapped rows/columns
-            reversed: false           // Reverse item order
-        };
+        // Auto Layout properties (Figma-style flat properties)
+        // These override SceneObject defaults for Frame
+        this.layoutMode = 'NONE';                    // 'NONE' | 'HORIZONTAL' | 'VERTICAL'
+        this.primaryAxisAlignItems = 'MIN';          // 'MIN' | 'CENTER' | 'MAX' | 'SPACE_BETWEEN' | 'BASELINE'
+        this.counterAxisAlignItems = 'MIN';          // 'MIN' | 'CENTER' | 'MAX' | 'BASELINE'
+        this.itemSpacing = 1;                        // Gap between items on primary axis
+        this.counterAxisSpacing = 1;                 // Gap between wrapped rows/columns
+        this.layoutWrap = 'NO_WRAP';                 // 'NO_WRAP' | 'WRAP'
+        this.itemReverseZIndex = false;              // Reverse item order
         
         // Sizing behavior
         this.sizing = {
@@ -3329,7 +3938,7 @@ class FrameObject extends SceneObject {
         // Invalidate bounds cache
         this.invalidateBounds();
         
-        if (this.autoLayout.enabled) {
+        if (SceneObject.hasAutoLayout(this)) {
             SceneObject.requestLayout(this);
         } else if (this.autoSize) {
             this._autoResize();
@@ -3352,7 +3961,7 @@ class FrameObject extends SceneObject {
             // Invalidate bounds cache
             this.invalidateBounds();
             
-            if (this.autoLayout.enabled) {
+            if (SceneObject.hasAutoLayout(this)) {
                 SceneObject.requestLayout(this);
             } else if (this.autoSize) {
                 this._autoResize();
@@ -3374,7 +3983,7 @@ class FrameObject extends SceneObject {
             this.children.splice(newIndex, 0, obj);
         }
         
-        if (this.autoLayout.enabled) {
+        if (SceneObject.hasAutoLayout(this)) {
             SceneObject.requestLayout(this);
         }
     }
@@ -3398,7 +4007,7 @@ class FrameObject extends SceneObject {
      * Apply auto layout to children (Figma-style)
      */
     layoutChildren() {
-        if (!this.autoLayout.enabled || this.children.length === 0) return;
+        if (!SceneObject.hasAutoLayout(this) || this.children.length === 0) return;
         // Schedule batched layout
         SceneObject.requestLayout(this);
     }
@@ -3407,12 +4016,12 @@ class FrameObject extends SceneObject {
      * Perform layout immediately (called by batch processor)
      */
     _performLayout() {
-        if (!this.autoLayout.enabled || this.children.length === 0) return;
+        if (!SceneObject.hasAutoLayout(this) || this.children.length === 0) return;
         
         const content = this.getContentBounds();
-        const items = this.autoLayout.reversed ? this.children.slice().reverse() : this.children;
+        const items = this.itemReverseZIndex ? this.children.slice().reverse() : this.children;
         const itemCount = items.length;
-        const isHorizontal = this.autoLayout.direction === 'horizontal';
+        const isHorizontal = this.layoutMode === 'HORIZONTAL';
         
         // Pre-allocate and calculate sizes with min/max and baseline
         const itemSizes = new Array(itemCount);
@@ -3444,7 +4053,7 @@ class FrameObject extends SceneObject {
         }
         
         // Handle wrapping
-        if (this.autoLayout.wrap) {
+        if (this.layoutWrap === 'WRAP') {
             this._layoutWithWrap(content, itemSizes, isHorizontal);
             return;
         }
@@ -3464,27 +4073,32 @@ class FrameObject extends SceneObject {
         }
         
         // Add spacing to total
-        const totalSpacing = this.autoLayout.spacing * (itemCount - 1);
+        const totalSpacing = this.itemSpacing * (itemCount - 1);
         const containerAxisSize = isHorizontal ? content.width : content.height;
         const availableSpace = containerAxisSize - totalFixedSize - totalSpacing;
         const fillSize = fillCount > 0 ? (availableSpace / fillCount) | 0 : 0;
         
         // Calculate positions based on distribution
         let currentPos = 0;
-        let gap = this.autoLayout.spacing;
+        let gap = this.itemSpacing;
         
-        if (this.autoLayout.distribution === 'packed') {
+        // Check for space distribution modes
+        const isSpaceDistribution = this.primaryAxisAlignItems === 'SPACE_BETWEEN' || 
+                                    this.primaryAxisAlignItems === 'SPACE_AROUND' ||
+                                    this.primaryAxisAlignItems === 'SPACE_EVENLY';
+        
+        if (!isSpaceDistribution) {
             // Align at start, center, or end
             const totalSize = totalFixedSize + (fillCount * fillSize) + totalSpacing;
             
-            switch (this.autoLayout.alignment) {
-                case 'center':
+            switch (this.primaryAxisAlignItems) {
+                case 'CENTER':
                     currentPos = ((containerAxisSize - totalSize) / 2) | 0;
                     break;
-                case 'end':
+                case 'MAX':
                     currentPos = containerAxisSize - totalSize;
                     break;
-                default: // 'start' or 'stretch'
+                default: // 'MIN' or others
                     currentPos = 0;
             }
         } else {
@@ -3497,15 +4111,15 @@ class FrameObject extends SceneObject {
             }
             const remainingSpace = containerAxisSize - totalItemSize;
             
-            switch (this.autoLayout.distribution) {
-                case 'space-between':
+            switch (this.primaryAxisAlignItems) {
+                case 'SPACE_BETWEEN':
                     gap = itemCount > 1 ? remainingSpace / (itemCount - 1) : 0;
                     break;
-                case 'space-around':
+                case 'SPACE_AROUND':
                     gap = remainingSpace / itemCount;
                     currentPos = gap / 2;
                     break;
-                case 'space-evenly':
+                case 'SPACE_EVENLY':
                     gap = remainingSpace / (itemCount + 1);
                     currentPos = gap;
                     break;
@@ -3518,7 +4132,6 @@ class FrameObject extends SceneObject {
         const contentY = content.y;
         const frameX = this.x;
         const frameY = this.y;
-        const alignment = this.autoLayout.alignment;
         
         for (let i = 0; i < itemCount; i++) {
             const item = itemSizes[i];
@@ -3549,15 +4162,15 @@ class FrameObject extends SceneObject {
             
             let crossPos = 0;
             
-            // Cross-axis alignment
-            switch (alignment) {
-                case 'center':
+            // Cross-axis alignment (using counterAxisAlignItems)
+            switch (this.counterAxisAlignItems) {
+                case 'CENTER':
                     crossPos = ((crossSize - itemCrossSize) / 2) | 0;
                     break;
-                case 'end':
+                case 'MAX':
                     crossPos = crossSize - itemCrossSize;
                     break;
-                case 'stretch':
+                case 'STRETCH':
                     crossPos = 0;
                     // Apply stretch to cross dimension with max constraint
                     let stretchSize = crossSize;
@@ -3574,13 +4187,13 @@ class FrameObject extends SceneObject {
                         itemCrossSize = stretchSize;
                     }
                     break;
-                case 'baseline':
+                case 'BASELINE':
                     // Baseline alignment - only for horizontal layouts
                     if (isHorizontal) {
                         crossPos = maxBaseline - item.baseline;
                     }
                     break;
-                default: // 'start'
+                default: // 'MIN'
                     crossPos = 0;
             }
             
@@ -3612,7 +4225,7 @@ class FrameObject extends SceneObject {
             }
             
             // Schedule nested layout (don't call directly)
-            if (obj.autoLayout?.enabled && obj.children?.length > 0) {
+            if (SceneObject.hasAutoLayout(obj) && obj.children?.length > 0) {
                 SceneObject.requestLayout(obj);
             }
             
@@ -3643,9 +4256,8 @@ class FrameObject extends SceneObject {
         const lines = [];
         let currentLine = [];
         let currentLineSize = 0;
-        const spacing = this.autoLayout.spacing;
-        const counterSpacing = this.autoLayout.counterSpacing || spacing;
-        const alignment = this.autoLayout.alignment;
+        const spacing = this.itemSpacing;
+        const counterSpacing = this.counterAxisSpacing;
         const contentX = content.x;
         const contentY = content.y;
         const frameX = this.x;
@@ -3713,11 +4325,11 @@ class FrameObject extends SceneObject {
             lineMainSize += spacing * (lineLen - 1);
             
             let mainPos = 0;
-            switch (alignment) {
-                case 'center':
+            switch (this.primaryAxisAlignItems) {
+                case 'CENTER':
                     mainPos = ((mainAxisSize - lineMainSize) / 2) | 0;
                     break;
-                case 'end':
+                case 'MAX':
                     mainPos = mainAxisSize - lineMainSize;
                     break;
             }
@@ -3744,15 +4356,15 @@ class FrameObject extends SceneObject {
                 
                 let itemCrossPos = crossPos;
                 
-                // Cross-axis alignment within line
-                switch (alignment) {
-                    case 'center':
+                // Cross-axis alignment within line (using counterAxisAlignItems)
+                switch (this.counterAxisAlignItems) {
+                    case 'CENTER':
                         itemCrossPos = crossPos + ((lineMaxCross - itemCrossSize) / 2) | 0;
                         break;
-                    case 'end':
+                    case 'MAX':
                         itemCrossPos = crossPos + lineMaxCross - itemCrossSize;
                         break;
-                    case 'stretch':
+                    case 'STRETCH':
                         // Stretch with max constraint
                         let stretchSize = lineMaxCross;
                         if (isHorizontal && item.maxH != null) {
@@ -3766,7 +4378,7 @@ class FrameObject extends SceneObject {
                             obj.width = stretchSize;
                         }
                         break;
-                    case 'baseline':
+                    case 'BASELINE':
                         // Baseline alignment for horizontal layouts
                         if (isHorizontal) {
                             itemCrossPos = crossPos + lineMaxBaseline - item.baseline;
@@ -3793,7 +4405,7 @@ class FrameObject extends SceneObject {
                 }
                 
                 // Schedule nested layout
-                if (obj.autoLayout?.enabled && obj.children?.length > 0) {
+                if (SceneObject.hasAutoLayout(obj) && obj.children?.length > 0) {
                     SceneObject.requestLayout(obj);
                 }
                 
@@ -4066,7 +4678,7 @@ class FrameObject extends SceneObject {
             title: this.title,
             padding: this.padding,
             autoSize: this.autoSize,
-            autoLayout: this.autoLayout,
+            // Layout properties are already in super.toJSON()
             sizing: this.sizing
         };
     }
@@ -4087,19 +4699,18 @@ class FrameObject extends SceneObject {
         frame.autoSize = data.autoSize || false;
         frame.strokeColor = data.strokeColor;
         
-        // Auto Layout properties
-        if (data.autoLayout) {
-            frame.autoLayout = {
-                enabled: data.autoLayout.enabled || false,
-                direction: data.autoLayout.direction || 'vertical',
-                spacing: data.autoLayout.spacing ?? 1,
-                alignment: data.autoLayout.alignment || 'start',
-                distribution: data.autoLayout.distribution || 'packed',
-                wrap: data.autoLayout.wrap || false,
-                counterSpacing: data.autoLayout.counterSpacing ?? 1,
-                reversed: data.autoLayout.reversed || false
-            };
-        }
+        // Layout properties (Figma-style flat)
+        frame.layoutMode = data.layoutMode || 'NONE';
+        frame.primaryAxisAlignItems = data.primaryAxisAlignItems || 'MIN';
+        frame.counterAxisAlignItems = data.counterAxisAlignItems || 'MIN';
+        frame.paddingLeft = data.paddingLeft ?? 1;
+        frame.paddingRight = data.paddingRight ?? 1;
+        frame.paddingTop = data.paddingTop ?? 1;
+        frame.paddingBottom = data.paddingBottom ?? 1;
+        frame.itemSpacing = data.itemSpacing ?? 1;
+        frame.counterAxisSpacing = data.counterAxisSpacing ?? 1;
+        frame.layoutWrap = data.layoutWrap || 'NO_WRAP';
+        frame.itemReverseZIndex = data.itemReverseZIndex || false;
         
         // Sizing behavior
         if (data.sizing) {
@@ -4111,6 +4722,230 @@ class FrameObject extends SceneObject {
         
         // Children will be reconstructed by the scene loader
         return frame;
+    }
+}
+
+// ==========================================
+// COMPONENT OBJECT (Figma-style component definition)
+// ==========================================
+
+/**
+ * Component object - defines a reusable component
+ * Similar to Figma COMPONENT - a frame that serves as the master definition
+ */
+class ComponentObject extends FrameObject {
+    constructor(x = 0, y = 0, width = 20, height = 10) {
+        super(x, y, width, height);
+        this.type = 'component';
+        this.componentKey = uuid();  // Unique key for this component definition
+        this.description = '';       // Component description
+        this.documentationLinks = []; // Array of {uri, title}
+    }
+    
+    /**
+     * Create an instance of this component
+     * @param {number} x - X position for the instance
+     * @param {number} y - Y position for the instance
+     * @returns {InstanceObject}
+     */
+    createInstance(x, y) {
+        const instance = new InstanceObject(x, y, this.width, this.height);
+        instance.componentId = this.componentKey;
+        instance.name = this.name + ' Instance';
+        return instance;
+    }
+    
+    toJSON() {
+        return {
+            ...super.toJSON(),
+            componentKey: this.componentKey,
+            description: this.description,
+            documentationLinks: this.documentationLinks
+        };
+    }
+    
+    static fromJSON(data) {
+        const comp = new ComponentObject(data.x, data.y, data.width, data.height);
+        comp.id = data.id;
+        comp.name = data.name;
+        comp.componentKey = data.componentKey || comp.componentKey;
+        comp.description = data.description || '';
+        comp.documentationLinks = data.documentationLinks || [];
+        comp.visible = data.visible !== false;
+        comp.locked = data.locked || false;
+        comp.clipContent = data.clipContent !== false;
+        comp.showBorder = data.showBorder !== false;
+        comp.borderStyle = data.borderStyle || 'single';
+        comp.backgroundColor = data.backgroundColor;
+        comp.backgroundChar = data.backgroundChar || ' ';
+        comp.title = data.title || '';
+        comp.padding = data.padding || { top: 1, right: 1, bottom: 1, left: 1 };
+        comp.autoSize = data.autoSize || false;
+        comp.strokeColor = data.strokeColor;
+        
+        // Layout properties
+        comp.layoutMode = data.layoutMode || 'NONE';
+        comp.primaryAxisAlignItems = data.primaryAxisAlignItems || 'MIN';
+        comp.counterAxisAlignItems = data.counterAxisAlignItems || 'MIN';
+        comp.paddingLeft = data.paddingLeft ?? 1;
+        comp.paddingRight = data.paddingRight ?? 1;
+        comp.paddingTop = data.paddingTop ?? 1;
+        comp.paddingBottom = data.paddingBottom ?? 1;
+        comp.itemSpacing = data.itemSpacing ?? 1;
+        comp.counterAxisSpacing = data.counterAxisSpacing ?? 1;
+        comp.layoutWrap = data.layoutWrap || 'NO_WRAP';
+        comp.itemReverseZIndex = data.itemReverseZIndex || false;
+        
+        if (data.sizing) {
+            comp.sizing = {
+                horizontal: data.sizing.horizontal || 'fixed',
+                vertical: data.sizing.vertical || 'fixed'
+            };
+        }
+        
+        return comp;
+    }
+}
+
+// ==========================================
+// INSTANCE OBJECT (Figma-style component instance)
+// ==========================================
+
+/**
+ * Instance object - an instance of a component
+ * Similar to Figma INSTANCE - references a COMPONENT and can override properties
+ */
+class InstanceObject extends SceneObject {
+    constructor(x = 0, y = 0, width = 20, height = 10) {
+        super('instance');
+        this.x = x;
+        this.y = y;
+        this.width = width;
+        this.height = height;
+        
+        // Reference to the component this is an instance of
+        this.componentId = null;     // Points to ComponentObject.componentKey
+        
+        // Property overrides (only store differences from master)
+        this.overrides = {};         // Map of property paths to override values
+        
+        // Exposed instances (nested component instances that are exposed)
+        this.exposedInstances = [];  // Array of {id, name, componentId}
+        
+        // Whether to scale content when resizing
+        this.scaleFactor = 1;
+    }
+    
+    /**
+     * Set an override value for a property
+     * @param {string} propertyPath - Dot-notation path to property (e.g., 'children.0.text')
+     * @param {*} value - Override value
+     */
+    setOverride(propertyPath, value) {
+        this.overrides[propertyPath] = value;
+    }
+    
+    /**
+     * Remove an override, reverting to master value
+     * @param {string} propertyPath - Property path to reset
+     */
+    resetOverride(propertyPath) {
+        delete this.overrides[propertyPath];
+    }
+    
+    /**
+     * Reset all overrides to master
+     */
+    resetAllOverrides() {
+        this.overrides = {};
+    }
+    
+    /**
+     * Check if a property is overridden
+     * @param {string} propertyPath - Property path to check
+     * @returns {boolean}
+     */
+    hasOverride(propertyPath) {
+        return propertyPath in this.overrides;
+    }
+    
+    /**
+     * Get the effective value of a property (override or master)
+     * @param {string} propertyPath - Property path
+     * @param {*} masterValue - Value from master component
+     * @returns {*}
+     */
+    getEffectiveValue(propertyPath, masterValue) {
+        return this.hasOverride(propertyPath) ? this.overrides[propertyPath] : masterValue;
+    }
+    
+    getBounds() {
+        return {
+            x: this.x,
+            y: this.y,
+            width: this.width,
+            height: this.height
+        };
+    }
+    
+    containsPoint(px, py) {
+        return px >= this.x && px < this.x + this.width &&
+               py >= this.y && py < this.y + this.height;
+    }
+    
+    render(buffer) {
+        if (!this.visible) return;
+        
+        // Instance rendering depends on having the component definition
+        // For now, render a placeholder box with instance indicator
+        const char = '◇';  // Diamond indicates instance
+        
+        // Draw border
+        for (let dx = 0; dx < this.width; dx++) {
+            buffer.setChar(this.x + dx, this.y, dx === 0 || dx === this.width - 1 ? char : '─');
+            buffer.setChar(this.x + dx, this.y + this.height - 1, dx === 0 || dx === this.width - 1 ? char : '─');
+        }
+        for (let dy = 1; dy < this.height - 1; dy++) {
+            buffer.setChar(this.x, this.y + dy, '│');
+            buffer.setChar(this.x + this.width - 1, this.y + dy, '│');
+        }
+        
+        // Show instance indicator in center
+        const label = '⟨⟩';
+        const labelX = this.x + Math.floor((this.width - label.length) / 2);
+        const labelY = this.y + Math.floor(this.height / 2);
+        if (labelX >= this.x && labelY >= this.y) {
+            for (let i = 0; i < label.length && labelX + i < this.x + this.width - 1; i++) {
+                buffer.setChar(labelX + i, labelY, label[i]);
+            }
+        }
+    }
+    
+    toJSON() {
+        return {
+            ...super.toJSON(),
+            componentId: this.componentId,
+            overrides: this.overrides,
+            exposedInstances: this.exposedInstances,
+            scaleFactor: this.scaleFactor
+        };
+    }
+    
+    static fromJSON(data) {
+        const instance = new InstanceObject(data.x, data.y, data.width, data.height);
+        instance.id = data.id;
+        instance.name = data.name;
+        instance.componentId = data.componentId;
+        instance.overrides = data.overrides || {};
+        instance.exposedInstances = data.exposedInstances || [];
+        instance.scaleFactor = data.scaleFactor ?? 1;
+        instance.visible = data.visible !== false;
+        instance.locked = data.locked || false;
+        instance.rotation = data.rotation || 0;
+        instance.opacity = data.opacity ?? 1;
+        instance.strokeColor = data.strokeColor;
+        instance.constraints = data.constraints || { horizontal: 'MIN', vertical: 'MIN' };
+        return instance;
     }
 }
 
@@ -9045,9 +9880,9 @@ class SelectTool extends Tool {
      */
     _calculateInsertionIndex(container, x, y) {
         if (!container || !container.children || container.children.length === 0) return 0;
-        if (!container.autoLayout?.enabled) return container.children.length;
+        if (!SceneObject.hasAutoLayout(container)) return container.children.length;
         
-        const isHorizontal = container.autoLayout.direction === LayoutDirection.HORIZONTAL;
+        const isHorizontal = container.layoutMode === 'HORIZONTAL';
         const pos = isHorizontal ? x : y;
         
         for (let i = 0; i < container.children.length; i++) {
@@ -9739,7 +10574,7 @@ class SelectTool extends Tool {
                 this.potentialDropTarget = this._findDropTarget(x, y, app, AppState.selectedObjects);
                 
                 // Calculate drop index for auto-layout containers
-                if (this.potentialDropTarget && this.potentialDropTarget.autoLayout?.enabled) {
+                if (this.potentialDropTarget && SceneObject.hasAutoLayout(this.potentialDropTarget)) {
                     this.dropIndicatorIndex = this._calculateInsertionIndex(this.potentialDropTarget, x, y);
                 } else {
                     this.dropIndicatorIndex = -1;
@@ -9822,11 +10657,11 @@ class SelectTool extends Tool {
      * Render drop position indicator for auto-layout reordering
      */
     _renderDropPositionIndicator(buffer, container, insertIndex) {
-        if (!container || !container.autoLayout?.enabled) return;
+        if (!container || !SceneObject.hasAutoLayout(container)) return;
         
-        const isHorizontal = container.autoLayout.direction === LayoutDirection.HORIZONTAL;
+        const isHorizontal = container.layoutMode === 'HORIZONTAL';
         const bounds = container.getBounds?.() || { x: container.x, y: container.y, width: container.width, height: container.height };
-        const padding = container.autoLayout.padding || 0;
+        const padding = Math.max(container.paddingLeft || 0, container.paddingTop || 0);
         
         let indicatorX, indicatorY, indicatorLength;
         
@@ -9932,7 +10767,7 @@ class SelectTool extends Tool {
                 
                 // Check if we're dropping into a different container than we started
                 const isNewContainer = dropTarget !== this.dragStartContainer;
-                const isReordering = dropTarget === this.dragStartContainer && dropTarget?.autoLayout?.enabled;
+                const isReordering = dropTarget === this.dragStartContainer && SceneObject.hasAutoLayout(dropTarget);
                 
                 if (isNewContainer || isReordering) {
                     // Save state for undo (already saved on mousedown, but re-save for safety)
@@ -10343,21 +11178,28 @@ class SelectTool extends Tool {
                 const distributionInput = $('#prop-auto-layout-distribution');
                 const wrapInput = $('#prop-auto-layout-wrap');
                 
-                if (enabledInput) enabledInput.checked = obj.autoLayout?.enabled || false;
-                if (directionInput) directionInput.value = obj.autoLayout?.direction || 'vertical';
-                if (spacingInput) spacingInput.value = obj.autoLayout?.spacing ?? 1;
+                // Map flat properties to UI controls
+                const hasAutoLayout = SceneObject.hasAutoLayout(obj);
+                const isHorizontal = obj.layoutMode === 'HORIZONTAL';
+                
+                if (enabledInput) enabledInput.checked = hasAutoLayout;
+                if (directionInput) directionInput.value = isHorizontal ? 'horizontal' : 'vertical';
+                if (spacingInput) spacingInput.value = obj.itemSpacing ?? 1;
                 if (paddingInput) {
-                    // Use single padding value (average if complex)
-                    const p = obj.autoLayout?.padding;
-                    if (typeof p === 'object') {
-                        paddingInput.value = p.top ?? 1;
-                    } else {
-                        paddingInput.value = p ?? 1;
-                    }
+                    // Use paddingTop as representative value
+                    paddingInput.value = obj.paddingTop ?? 1;
                 }
-                if (alignmentInput) alignmentInput.value = obj.autoLayout?.alignment || 'start';
-                if (distributionInput) distributionInput.value = obj.autoLayout?.distribution || 'packed';
-                if (wrapInput) wrapInput.checked = obj.autoLayout?.wrap || false;
+                // Map Figma values back to internal UI values
+                if (alignmentInput) {
+                    const alignMap = { 'MIN': 'start', 'CENTER': 'center', 'MAX': 'end', 'STRETCH': 'stretch', 'BASELINE': 'baseline' };
+                    alignmentInput.value = alignMap[obj.counterAxisAlignItems] || 'start';
+                }
+                if (distributionInput) {
+                    const distMap = { 'MIN': 'packed', 'CENTER': 'packed', 'MAX': 'packed', 
+                                      'SPACE_BETWEEN': 'space-between', 'SPACE_AROUND': 'space-around', 'SPACE_EVENLY': 'space-evenly' };
+                    distributionInput.value = distMap[obj.primaryAxisAlignItems] || 'packed';
+                }
+                if (wrapInput) wrapInput.checked = obj.layoutWrap === 'WRAP';
             }
         }
         
@@ -10435,6 +11277,12 @@ class SelectTool extends Tool {
         
         // Update UI component properties
         this._updateUIComponentProperties(obj);
+        
+        // Update style picker buttons (get app reference)
+        const appRef = window.Asciistrator?.app;
+        if (appRef && typeof appRef._updateStylePickerButtons === 'function') {
+            appRef._updateStylePickerButtons();
+        }
     }
     
     /**
@@ -14135,6 +14983,32 @@ class Asciistrator extends EventEmitter {
                 }
             }
             
+            // Style shortcuts (Alt+number when in global mode)
+            if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && !isToolTyping) {
+                switch (e.key.toLowerCase()) {
+                    case 'f':
+                        // Alt+Shift+F: Create fill style from selection
+                        e.preventDefault();
+                        this._createStyleFromSelectionByType(StyleType.FILL);
+                        return;
+                    case 's':
+                        // Alt+Shift+S: Create stroke style from selection
+                        e.preventDefault();
+                        this._createStyleFromSelectionByType(StyleType.STROKE);
+                        return;
+                    case 't':
+                        // Alt+Shift+T: Create text style from selection
+                        e.preventDefault();
+                        this._createStyleFromSelectionByType(StyleType.TEXT);
+                        return;
+                    case 'e':
+                        // Alt+Shift+E: Create effect style from selection
+                        e.preventDefault();
+                        this._createStyleFromSelectionByType(StyleType.EFFECT);
+                        return;
+                }
+            }
+            
             // Delete/Backspace to delete selected objects
             if (e.key === 'Delete' || e.key === 'Backspace') {
                 if (AppState.selectedObjects.length > 0 && 
@@ -15280,6 +16154,9 @@ class Asciistrator extends EventEmitter {
         
         // Components panel
         this._setupComponentsPanel();
+        
+        // Styles panel
+        this._setupStylesPanel();
     }
     
     _setupPanelTabs() {
@@ -15565,27 +16442,49 @@ class Asciistrator extends EventEmitter {
             if (AppState.selectedObjects.length > 0) {
                 self.saveStateForUndo();
                 const obj = AppState.selectedObjects[0];
-                if (!obj.autoLayout) {
-                    obj.autoLayout = {
-                        enabled: false,
-                        direction: 'vertical',
-                        spacing: 1,
-                        padding: { top: 1, right: 1, bottom: 1, left: 1 },
-                        alignment: 'start',
-                        distribution: 'packed',
-                        wrap: false
-                    };
-                }
                 
-                if (prop === 'padding') {
-                    // Apply padding to all sides
-                    obj.autoLayout.padding = { top: value, right: value, bottom: value, left: value };
-                } else {
-                    obj.autoLayout[prop] = value;
+                // Map UI properties to flat Figma-style properties
+                switch (prop) {
+                    case 'enabled':
+                        if (value) {
+                            // Enable auto layout - use current direction or default to VERTICAL
+                            obj.layoutMode = obj.layoutMode !== 'NONE' ? obj.layoutMode : 'VERTICAL';
+                        } else {
+                            obj.layoutMode = 'NONE';
+                        }
+                        break;
+                    case 'direction':
+                        if (SceneObject.hasAutoLayout(obj)) {
+                            obj.layoutMode = value === 'horizontal' ? 'HORIZONTAL' : 'VERTICAL';
+                        }
+                        break;
+                    case 'spacing':
+                        obj.itemSpacing = value;
+                        break;
+                    case 'padding':
+                        // Apply padding to all sides
+                        obj.paddingTop = value;
+                        obj.paddingRight = value;
+                        obj.paddingBottom = value;
+                        obj.paddingLeft = value;
+                        break;
+                    case 'alignment':
+                        // Map to counterAxisAlignItems
+                        const alignMap = { 'start': 'MIN', 'center': 'CENTER', 'end': 'MAX', 'stretch': 'STRETCH', 'baseline': 'BASELINE' };
+                        obj.counterAxisAlignItems = alignMap[value] || 'MIN';
+                        break;
+                    case 'distribution':
+                        // Map to primaryAxisAlignItems
+                        const distMap = { 'packed': 'MIN', 'space-between': 'SPACE_BETWEEN', 'space-around': 'SPACE_AROUND', 'space-evenly': 'SPACE_EVENLY' };
+                        obj.primaryAxisAlignItems = distMap[value] || 'MIN';
+                        break;
+                    case 'wrap':
+                        obj.layoutWrap = value ? 'WRAP' : 'NO_WRAP';
+                        break;
                 }
                 
                 // Re-layout children if auto layout is enabled
-                if (obj.autoLayout.enabled && obj.layoutChildren) {
+                if (SceneObject.hasAutoLayout(obj) && obj.layoutChildren) {
                     obj.layoutChildren();
                 }
                 
@@ -15814,6 +16713,25 @@ class Asciistrator extends EventEmitter {
                 AppState.lineStyle = e.target.value;
             });
         }
+    }
+    
+    /**
+     * Update the properties panel for the current selection
+     * This delegates to the active tool's _updatePropertiesPanel method
+     * and also updates style picker buttons
+     */
+    _updatePropertiesPanel() {
+        // Get the first selected object
+        const obj = AppState.selectedObjects.length > 0 ? AppState.selectedObjects[0] : null;
+        
+        // Delegate to active tool's _updatePropertiesPanel if it exists
+        const activeTool = this.toolManager?.activeTool;
+        if (activeTool && typeof activeTool._updatePropertiesPanel === 'function') {
+            activeTool._updatePropertiesPanel(obj);
+        }
+        
+        // Always update style picker buttons
+        this._updateStylePickerButtons();
     }
     
     _setupLayersPanel() {
@@ -17038,7 +17956,7 @@ class Asciistrator extends EventEmitter {
         const containerBadge = canContain ? `<span class="container-badge" title="Container">${hasChildren ? '📦' : '📁'}</span>` : '';
         
         // Show auto-layout indicator
-        const autoLayoutBadge = obj.autoLayout?.enabled ? '<span class="auto-layout-badge" title="Auto Layout">⚡</span>' : '';
+        const autoLayoutBadge = SceneObject.hasAutoLayout(obj) ? '<span class="auto-layout-badge" title="Auto Layout">⚡</span>' : '';
         
         objItem.innerHTML = `
             <span class="object-expand" style="cursor: ${(hasChildren || canContain) ? 'pointer' : 'default'}">${expandIcon}</span>
@@ -17077,11 +17995,8 @@ class Asciistrator extends EventEmitter {
             this.renderAllObjects();
             this._updateStatus(`Selected: ${objName}`);
             
-            // Update properties panel - use toolManager's active tool
-            const activeTool = this.toolManager?.activeTool;
-            if (activeTool && activeTool._updatePropertiesPanel) {
-                activeTool._updatePropertiesPanel(obj);
-            }
+            // Update properties panel (includes style picker buttons)
+            this._updatePropertiesPanel();
         });
         
         // Double-click to enter container or rename
@@ -17548,13 +18463,23 @@ class Asciistrator extends EventEmitter {
         if (!viewport) return;
         
         viewport.addEventListener('dragover', (e) => {
-            if (e.dataTransfer.types.includes('application/x-asciistrator-component')) {
+            if (e.dataTransfer.types.includes('application/x-asciistrator-component') ||
+                e.dataTransfer.types.includes('application/x-asciistrator-style')) {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'copy';
             }
         });
         
         viewport.addEventListener('drop', (e) => {
+            // Handle style drops
+            const styleData = e.dataTransfer.getData('application/x-asciistrator-style');
+            if (styleData) {
+                e.preventDefault();
+                this._handleStyleDrop(e, styleData);
+                return;
+            }
+            
+            // Handle component drops
             const data = e.dataTransfer.getData('application/x-asciistrator-component');
             if (!data) return;
             
@@ -17578,6 +18503,136 @@ class Asciistrator extends EventEmitter {
                 console.error('Failed to drop component:', error);
             }
         });
+    }
+    
+    _handleStyleDrop(e, styleData) {
+        try {
+            const { styleKey, styleType } = JSON.parse(styleData);
+            const style = styleManager.getStyle(styleKey);
+            if (!style) {
+                this._updateStatus('Style not found');
+                return;
+            }
+            
+            // Get canvas position from drop event
+            const pos = this.renderer.pointerToCanvas(e);
+            
+            // Find object at drop position
+            const targetObj = this._findObjectAtPosition(pos.x, pos.y);
+            
+            if (targetObj) {
+                // Apply style to the target object
+                const applyMethod = {
+                    [StyleType.FILL]: 'applyFillStyle',
+                    [StyleType.STROKE]: 'applyStrokeStyle',
+                    [StyleType.TEXT]: 'applyTextStyle',
+                    [StyleType.EFFECT]: 'applyEffectStyle',
+                    [StyleType.GRID]: 'applyGridStyle'
+                };
+                
+                const method = applyMethod[styleType];
+                if (method && typeof targetObj[method] === 'function') {
+                    this.saveStateForUndo();
+                    targetObj[method](styleKey);
+                    this.renderAllObjects();
+                    this._updatePropertiesPanel();
+                    this._updateStatus(`Applied "${style.name}" to ${targetObj.name || targetObj.type}`);
+                } else {
+                    this._updateStatus(`Cannot apply ${styleType.toLowerCase()} style to this object`);
+                }
+            } else {
+                this._updateStatus('Drop style on an object to apply it');
+            }
+        } catch (error) {
+            console.error('Failed to drop style:', error);
+            this._updateStatus('Failed to apply style');
+        }
+    }
+    
+    _findObjectAtPosition(x, y) {
+        // Search through all objects to find one at the given position
+        const searchInChildren = (objects) => {
+            // Search in reverse order (top-most first)
+            for (let i = objects.length - 1; i >= 0; i--) {
+                const obj = objects[i];
+                if (!obj.visible) continue;
+                
+                // Check children first (for groups/frames)
+                if (obj.children && obj.children.length > 0) {
+                    const child = searchInChildren(obj.children);
+                    if (child) return child;
+                }
+                
+                // Use object's containsPoint if available, otherwise use bounds check
+                if (obj.containsPoint) {
+                    if (obj.containsPoint(x, y)) return obj;
+                } else if (this._isPointInObject(x, y, obj)) {
+                    return obj;
+                }
+            }
+            return null;
+        };
+        
+        // Search in layers (same as SelectTool does)
+        for (let i = AppState.layers.length - 1; i >= 0; i--) {
+            const layer = AppState.layers[i];
+            if (!layer.visible || !layer.objects) continue;
+            
+            const found = searchInChildren(layer.objects);
+            if (found) return found;
+        }
+        
+        // Also search in currentPage.children if it exists (for Figma-style document structure)
+        if (AppState.currentPage?.children) {
+            const found = searchInChildren(AppState.currentPage.children);
+            if (found) return found;
+        }
+        
+        return null;
+    }
+    
+    _isPointInObject(x, y, obj) {
+        // Handle different object types
+        const objX = obj.x ?? 0;
+        const objY = obj.y ?? 0;
+        const objW = obj.width ?? 0;
+        const objH = obj.height ?? 0;
+        
+        // Basic bounding box check
+        if (x >= objX && x <= objX + objW && y >= objY && y <= objY + objH) {
+            return true;
+        }
+        
+        // Check for line objects
+        if (obj.x1 !== undefined && obj.y1 !== undefined) {
+            const minX = Math.min(obj.x1, obj.x2);
+            const maxX = Math.max(obj.x1, obj.x2);
+            const minY = Math.min(obj.y1, obj.y2);
+            const maxY = Math.max(obj.y1, obj.y2);
+            
+            // Expand bounds slightly for easier selection
+            if (x >= minX - 1 && x <= maxX + 1 && y >= minY - 1 && y <= maxY + 1) {
+                return true;
+            }
+        }
+        
+        // Check for ellipse
+        if (obj.type === 'ellipse' && obj.radiusX !== undefined) {
+            const cx = objX + (obj.radiusX || 0);
+            const cy = objY + (obj.radiusY || 0);
+            const rx = obj.radiusX || 0;
+            const ry = obj.radiusY || 0;
+            
+            if (rx > 0 && ry > 0) {
+                const dx = (x - cx) / rx;
+                const dy = (y - cy) / ry;
+                if (dx * dx + dy * dy <= 1) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
     }
     
     _insertComponent(component, x, y) {
@@ -17708,6 +18763,42 @@ class Asciistrator extends EventEmitter {
                 connector.label = def.label || '';
                 if (def.name) connector.name = def.name;
                 return connector;
+            
+            case 'frame':
+                const frame = new FrameObject(def.x, def.y, def.width, def.height);
+                if (def.name) frame.name = def.name;
+                if (def.children) {
+                    frame.children = def.children.map(c => this._createObjectFromDefinition(c)).filter(c => c !== null);
+                    for (const child of frame.children) {
+                        child.parentId = frame.id;
+                        child._cachedParent = frame;
+                    }
+                }
+                return frame;
+            
+            case 'component':
+                const comp = new ComponentObject(def.x, def.y, def.width, def.height);
+                if (def.name) comp.name = def.name;
+                if (def.componentKey) comp.componentKey = def.componentKey;
+                if (def.description) comp.description = def.description;
+                if (def.documentationLinks) comp.documentationLinks = def.documentationLinks;
+                if (def.children) {
+                    comp.children = def.children.map(c => this._createObjectFromDefinition(c)).filter(c => c !== null);
+                    for (const child of comp.children) {
+                        child.parentId = comp.id;
+                        child._cachedParent = comp;
+                    }
+                }
+                return comp;
+            
+            case 'instance':
+                const inst = new InstanceObject(def.x, def.y, def.width, def.height);
+                if (def.name) inst.name = def.name;
+                if (def.componentId) inst.componentId = def.componentId;
+                if (def.overrides) inst.overrides = def.overrides;
+                if (def.exposedInstances) inst.exposedInstances = def.exposedInstances;
+                if (def.scaleFactor !== undefined) inst.scaleFactor = def.scaleFactor;
+                return inst;
                 
             case 'ui-component':
                 // Framework-agnostic UI Component
@@ -18307,6 +19398,1766 @@ class Asciistrator extends EventEmitter {
         return div.innerHTML;
     }
     
+    // ============================================
+    // STYLES PANEL (Figma-style)
+    // ============================================
+    
+    _setupStylesPanel() {
+        // Render initial styles list
+        this._renderStylesPanel();
+        
+        // Setup add style buttons
+        $$('.style-add-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const styleType = btn.dataset.styleType;
+                this._showCreateStyleDialog(styleType);
+            });
+        });
+        
+        // Setup category collapse/expand
+        $$('.style-category-header').forEach(header => {
+            header.addEventListener('click', (e) => {
+                if (e.target.closest('.style-add-btn')) return;
+                const category = header.closest('.style-category');
+                category.classList.toggle('collapsed');
+            });
+        });
+        
+        // Setup import/export buttons
+        const importBtn = $('#btn-import-styles');
+        if (importBtn) {
+            importBtn.addEventListener('click', () => this._importStyles());
+        }
+        
+        const exportBtn = $('#btn-export-styles');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', () => this._exportStyles());
+        }
+        
+        // Setup create from selection button
+        const createFromSelBtn = $('#btn-create-style-from-selection');
+        if (createFromSelBtn) {
+            createFromSelBtn.addEventListener('click', () => this._createStyleFromSelection());
+        }
+        
+        // Setup search
+        const searchInput = $('#styles-search');
+        if (searchInput) {
+            searchInput.addEventListener('input', debounce((e) => {
+                this._filterStyles(e.target.value.trim().toLowerCase());
+            }, 200));
+        }
+        
+        // Setup view toggle
+        const viewToggleBtn = $('#btn-styles-view');
+        if (viewToggleBtn) {
+            viewToggleBtn.addEventListener('click', () => {
+                const content = $('#styles-content');
+                if (content) {
+                    content.classList.toggle('grid-view');
+                    viewToggleBtn.textContent = content.classList.contains('grid-view') ? '☷' : '☰';
+                }
+            });
+        }
+        
+        // Setup style picker buttons in properties panel
+        this._setupStylePickerButtons();
+        
+        // Setup style name badge click handlers
+        this._setupStyleNameBadges();
+        
+        // Listen for style manager events
+        styleManager.subscribe(() => {
+            this._renderStylesPanel();
+            this._updateStylePickerButtons();
+        });
+    }
+    
+    _renderStylesPanel() {
+        const searchQuery = $('#styles-search')?.value?.trim().toLowerCase() || '';
+        
+        // Render each style type list
+        for (const styleType of Object.values(StyleType)) {
+            const listEl = $(`#${styleType.toLowerCase()}-styles-list`);
+            const countEl = $(`#${styleType.toLowerCase()}-styles-count`);
+            if (!listEl) continue;
+            
+            let styles = styleManager.getStylesByType(styleType);
+            
+            // Filter by search query
+            if (searchQuery) {
+                styles = styles.filter(s => 
+                    s.name.toLowerCase().includes(searchQuery) ||
+                    (s.description && s.description.toLowerCase().includes(searchQuery))
+                );
+            }
+            
+            // Update count
+            if (countEl) {
+                countEl.textContent = styles.length;
+            }
+            
+            listEl.innerHTML = '';
+            
+            if (styles.length === 0 && !searchQuery) {
+                // Empty state handled by CSS ::after
+            } else if (styles.length === 0 && searchQuery) {
+                const noResults = createElement('div', { class: 'style-empty' }, 'No matching styles');
+                listEl.appendChild(noResults);
+            } else {
+                // Group styles by slash naming (e.g., "Brand / Primary")
+                const groups = this._groupStylesByName(styles);
+                
+                for (const [groupName, groupStyles] of Object.entries(groups)) {
+                    if (groupName && groupName !== '_ungrouped') {
+                        const groupHeader = createElement('div', { class: 'style-group-header' });
+                        groupHeader.innerHTML = `<span class="style-group-name">${groupName}</span>`;
+                        listEl.appendChild(groupHeader);
+                    }
+                    
+                    for (const style of groupStyles) {
+                        const styleEl = this._createStyleItemElement(style);
+                        listEl.appendChild(styleEl);
+                    }
+                }
+            }
+        }
+    }
+    
+    _groupStylesByName(styles) {
+        const groups = { '_ungrouped': [] };
+        
+        for (const style of styles) {
+            const parts = style.name.split('/').map(p => p.trim());
+            if (parts.length > 1) {
+                const groupName = parts.slice(0, -1).join(' / ');
+                if (!groups[groupName]) {
+                    groups[groupName] = [];
+                }
+                groups[groupName].push(style);
+            } else {
+                groups['_ungrouped'].push(style);
+            }
+        }
+        
+        // Move ungrouped to front, then sort groups alphabetically
+        const result = {};
+        if (groups['_ungrouped'].length > 0) {
+            result['_ungrouped'] = groups['_ungrouped'];
+        }
+        for (const key of Object.keys(groups).sort()) {
+            if (key !== '_ungrouped' && groups[key].length > 0) {
+                result[key] = groups[key];
+            }
+        }
+        
+        return result;
+    }
+    
+    _filterStyles(query) {
+        this._renderStylesPanel();
+    }
+    
+    _createStyleItemElement(style) {
+        const item = createElement('div', {
+            class: 'style-item',
+            'data-style-key': style.key,
+            draggable: true
+        });
+        
+        // Preview
+        const preview = createElement('div', {
+            class: `style-item-preview ${style.styleType.toLowerCase()}-preview`
+        });
+        
+        // Set preview appearance based on style type and data
+        this._setStylePreviewAppearance(preview, style);
+        
+        // Info - extract display name (last part after /)
+        const info = createElement('div', { class: 'style-item-info' });
+        const displayName = style.name.includes('/') 
+            ? style.name.split('/').pop().trim() 
+            : style.name;
+        const name = createElement('div', { class: 'style-item-name' }, displayName);
+        const desc = createElement('div', { class: 'style-item-desc' }, 
+            style.description || this._getStyleDescription(style));
+        info.appendChild(name);
+        info.appendChild(desc);
+        
+        // Actions
+        const actions = createElement('div', { class: 'style-item-actions' });
+        
+        const editBtn = createElement('button', {
+            class: 'icon-btn',
+            title: 'Edit style',
+            onClick: (e) => {
+                e.stopPropagation();
+                this._showEditStyleDialog(style);
+            }
+        }, '✏️');
+        
+        const duplicateBtn = createElement('button', {
+            class: 'icon-btn',
+            title: 'Duplicate style',
+            onClick: (e) => {
+                e.stopPropagation();
+                this._duplicateStyle(style);
+            }
+        }, '📋');
+        
+        const deleteBtn = createElement('button', {
+            class: 'icon-btn',
+            title: 'Delete style',
+            onClick: (e) => {
+                e.stopPropagation();
+                this._deleteStyle(style);
+            }
+        }, '🗑️');
+        
+        actions.appendChild(editBtn);
+        actions.appendChild(duplicateBtn);
+        actions.appendChild(deleteBtn);
+        
+        item.appendChild(preview);
+        item.appendChild(info);
+        item.appendChild(actions);
+        
+        // Click to apply style to selection
+        item.addEventListener('click', () => {
+            this._applyStyleToSelection(style);
+        });
+        
+        // Right-click for context menu
+        item.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this._showStyleContextMenu(e, style);
+        });
+        
+        // Drag and drop for reordering AND dropping on canvas
+        item.addEventListener('dragstart', (e) => {
+            e.dataTransfer.setData('text/plain', style.key);
+            e.dataTransfer.setData('application/x-asciistrator-style', JSON.stringify({
+                styleKey: style.key,
+                styleType: style.styleType
+            }));
+            e.dataTransfer.effectAllowed = 'copyMove';
+            item.classList.add('dragging');
+        });
+        
+        item.addEventListener('dragend', () => {
+            item.classList.remove('dragging');
+            $$('.style-item.drag-over').forEach(el => el.classList.remove('drag-over'));
+        });
+        
+        item.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            const dragging = $('.style-item.dragging');
+            if (dragging && dragging !== item) {
+                item.classList.add('drag-over');
+            }
+        });
+        
+        item.addEventListener('dragleave', () => {
+            item.classList.remove('drag-over');
+        });
+        
+        item.addEventListener('drop', (e) => {
+            e.preventDefault();
+            item.classList.remove('drag-over');
+            const draggedKey = e.dataTransfer.getData('text/plain');
+            const targetKey = style.key;
+            if (draggedKey && draggedKey !== targetKey) {
+                styleManager.reorderStyle(draggedKey, targetKey);
+            }
+        });
+        
+        return item;
+    }
+    
+    _showStyleContextMenu(e, style) {
+        // Remove existing context menu
+        const existing = $('.style-context-menu');
+        if (existing) existing.remove();
+        
+        const menu = createElement('div', { class: 'style-context-menu' });
+        
+        // Get shortcut key for creating this style type
+        const shortcutKeys = {
+            [StyleType.FILL]: 'Alt+Shift+F',
+            [StyleType.STROKE]: 'Alt+Shift+S',
+            [StyleType.TEXT]: 'Alt+Shift+T',
+            [StyleType.EFFECT]: 'Alt+Shift+E'
+        };
+        
+        const menuItems = [
+            { icon: '✏️', label: 'Edit style', action: () => this._showEditStyleDialog(style) },
+            { icon: '📋', label: 'Duplicate style', action: () => this._duplicateStyle(style) },
+            { icon: '📝', label: 'Rename style', action: () => this._renameStyle(style) },
+            { separator: true },
+            { icon: '🎯', label: 'Apply to selection', action: () => this._applyStyleToSelection(style) },
+            { icon: '📦', label: 'Select objects using this style', action: () => this._selectObjectsWithStyle(style) },
+            { separator: true },
+            { icon: '➕', label: `Create ${style.styleType.toLowerCase()} style from selection`, 
+              shortcut: shortcutKeys[style.styleType],
+              action: () => this._createStyleFromSelectionByType(style.styleType) },
+            { icon: '📤', label: 'Copy style', action: () => this._copyStyleToClipboard(style) },
+            { separator: true },
+            { icon: '🗑️', label: 'Delete style', action: () => this._deleteStyle(style), danger: true }
+        ];
+        
+        for (const item of menuItems) {
+            if (item.separator) {
+                menu.appendChild(createElement('div', { class: 'style-context-menu-separator' }));
+            } else {
+                const menuItem = createElement('div', { 
+                    class: `style-context-menu-item ${item.danger ? 'danger' : ''}`,
+                    onClick: () => {
+                        menu.remove();
+                        item.action();
+                    }
+                });
+                menuItem.innerHTML = `
+                    <span class="style-context-menu-item-icon">${item.icon}</span>
+                    <span class="style-context-menu-item-label">${item.label}</span>
+                    ${item.shortcut ? `<span class="style-context-menu-item-shortcut">${item.shortcut}</span>` : ''}
+                `;
+                menu.appendChild(menuItem);
+            }
+        }
+        
+        document.body.appendChild(menu);
+        
+        // Position menu
+        const menuRect = menu.getBoundingClientRect();
+        let left = e.clientX;
+        let top = e.clientY;
+        
+        if (left + menuRect.width > window.innerWidth) {
+            left = window.innerWidth - menuRect.width - 10;
+        }
+        if (top + menuRect.height > window.innerHeight) {
+            top = window.innerHeight - menuRect.height - 10;
+        }
+        
+        menu.style.left = `${left}px`;
+        menu.style.top = `${top}px`;
+        
+        // Close on click outside
+        const closeHandler = (e) => {
+            if (!menu.contains(e.target)) {
+                menu.remove();
+                document.removeEventListener('click', closeHandler);
+            }
+        };
+        setTimeout(() => document.addEventListener('click', closeHandler), 0);
+    }
+    
+    _renameStyle(style) {
+        const newName = prompt('Enter new style name:', style.name);
+        if (newName && newName.trim() && newName !== style.name) {
+            styleManager.updateStyle(style.key, { name: newName.trim() });
+            this._updateStatus(`Renamed style to: ${newName.trim()}`);
+        }
+    }
+    
+    _selectObjectsWithStyle(style) {
+        const propertyMap = {
+            [StyleType.FILL]: 'fillStyleId',
+            [StyleType.STROKE]: 'strokeStyleId',
+            [StyleType.TEXT]: 'textStyleId',
+            [StyleType.EFFECT]: 'effectStyleId'
+        };
+        
+        const property = propertyMap[style.styleType];
+        if (!property) return;
+        
+        const objects = [];
+        const findObjects = (items) => {
+            for (const obj of items) {
+                if (obj[property] === style.key) {
+                    objects.push(obj);
+                }
+                if (obj.children) {
+                    findObjects(obj.children);
+                }
+            }
+        };
+        
+        if (AppState.currentPage?.children) {
+            findObjects(AppState.currentPage.children);
+        }
+        
+        if (objects.length > 0) {
+            AppState.selectedObjects = objects;
+            this.renderAllObjects();
+            this._updatePropertiesPanel();
+            this._updateStatus(`Selected ${objects.length} object(s) using "${style.name}"`);
+        } else {
+            this._updateStatus(`No objects using "${style.name}"`);
+        }
+    }
+    
+    async _copyStyleToClipboard(style) {
+        try {
+            const styleData = JSON.stringify(style.toJSON(), null, 2);
+            await navigator.clipboard.writeText(styleData);
+            this._updateStatus(`Copied "${style.name}" to clipboard`);
+        } catch (error) {
+            console.error('Copy failed:', error);
+            this._updateStatus('Copy failed');
+        }
+    }
+    
+    _createStyleFromSelection() {
+        if (AppState.selectedObjects.length === 0) {
+            this._updateStatus('Select an object to create a style from');
+            return;
+        }
+        
+        const obj = AppState.selectedObjects[0];
+        
+        // Show dialog to choose style type
+        const dialogHtml = `
+            <div class="create-style-form">
+                <p style="color: var(--color-text-secondary); margin-bottom: var(--space-md);">
+                    Create a style from the selected object's properties.
+                </p>
+                <div class="form-group">
+                    <label>Style Type</label>
+                    <select id="style-type-select">
+                        <option value="FILL">Fill Style</option>
+                        <option value="STROKE">Stroke Style</option>
+                        <option value="TEXT">Text Style</option>
+                        <option value="EFFECT">Effect Style</option>
+                        <option value="GRID">Grid Style</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Style Name</label>
+                    <input type="text" id="style-name" placeholder="New Style" required>
+                </div>
+            </div>
+        `;
+        
+        this._showDialog('Create Style from Selection', dialogHtml, [
+            { label: 'Cancel', action: () => {} },
+            {
+                label: 'Create',
+                primary: true,
+                action: () => {
+                    const type = $('#style-type-select')?.value;
+                    const name = $('#style-name')?.value?.trim();
+                    
+                    if (!name) {
+                        this._updateStatus('Style name is required');
+                        return false;
+                    }
+                    
+                    let data = {};
+                    
+                    switch (type) {
+                        case 'FILL':
+                            data = {
+                                fills: [{
+                                    type: 'SOLID',
+                                    color: this._hexToFigmaColor(obj.fillColor || '#ffffff'),
+                                    visible: true
+                                }]
+                            };
+                            break;
+                        case 'STROKE':
+                            data = {
+                                strokes: [{
+                                    type: 'SOLID',
+                                    color: this._hexToFigmaColor(obj.strokeColor || '#ffffff'),
+                                    visible: true
+                                }],
+                                strokeWeight: obj.stroke?.weight || 1,
+                                strokeAlign: (obj.stroke?.align || 'center').toUpperCase()
+                            };
+                            break;
+                        case 'TEXT':
+                            data = {
+                                fontFamily: obj.fontFamily || 'monospace',
+                                fontSize: obj.fontSize || 14,
+                                fontWeight: obj.fontWeight || 'normal',
+                                lineHeight: obj.lineHeight || 1.2,
+                                letterSpacing: obj.letterSpacing || 0
+                            };
+                            break;
+                        case 'EFFECT':
+                            data = {
+                                effects: (obj.effects || []).map(e => ({
+                                    type: e.type === 'dropShadow' ? 'DROP_SHADOW' : 
+                                          e.type === 'innerShadow' ? 'INNER_SHADOW' : 'LAYER_BLUR',
+                                    visible: e.visible !== false,
+                                    color: e.color ? this._hexToFigmaColor(e.color) : { r: 0, g: 0, b: 0, a: 0.25 },
+                                    radius: e.blur || 4,
+                                    offset: { x: e.offsetX || 0, y: e.offsetY || 0 }
+                                }))
+                            };
+                            if (data.effects.length === 0) {
+                                data.effects = [{
+                                    type: 'DROP_SHADOW',
+                                    visible: true,
+                                    color: { r: 0, g: 0, b: 0, a: 0.25 },
+                                    radius: 4,
+                                    offset: { x: 2, y: 2 }
+                                }];
+                            }
+                            break;
+                        case 'GRID':
+                            data = {
+                                layoutGrids: obj.layoutGrids || [{
+                                    pattern: 'COLUMNS',
+                                    sectionSize: 10,
+                                    visible: true,
+                                    color: { r: 0.5, g: 0.5, b: 1, a: 0.1 },
+                                    alignment: 'STRETCH',
+                                    gutterSize: 1,
+                                    count: 12
+                                }]
+                            };
+                            break;
+                    }
+                    
+                    styleManager.createStyle(type, name, data);
+                    this._updateStatus(`Created ${type.toLowerCase()} style: ${name}`);
+                    return true;
+                }
+            }
+        ]);
+    }
+    
+    _createStyleFromSelectionByType(styleType) {
+        if (AppState.selectedObjects.length === 0) {
+            this._updateStatus('Select an object to create a style from');
+            return;
+        }
+        
+        const obj = AppState.selectedObjects[0];
+        const defaultName = `New ${styleType.charAt(0) + styleType.slice(1).toLowerCase()} Style`;
+        const name = prompt(`Enter name for new ${styleType.toLowerCase()} style:`, defaultName);
+        
+        if (!name || !name.trim()) {
+            return;
+        }
+        
+        let data = {};
+        
+        switch (styleType) {
+            case StyleType.FILL:
+                data = {
+                    fills: [{
+                        type: 'SOLID',
+                        color: this._hexToFigmaColor(obj.fillColor || '#ffffff'),
+                        visible: true
+                    }]
+                };
+                break;
+            case StyleType.STROKE:
+                data = {
+                    strokes: [{
+                        type: 'SOLID',
+                        color: this._hexToFigmaColor(obj.strokeColor || '#ffffff'),
+                        visible: true
+                    }],
+                    strokeWeight: obj.stroke?.weight || 1,
+                    strokeAlign: (obj.stroke?.align || 'center').toUpperCase()
+                };
+                break;
+            case StyleType.TEXT:
+                data = {
+                    fontFamily: obj.fontFamily || 'monospace',
+                    fontSize: obj.fontSize || 14,
+                    fontWeight: obj.fontWeight || 'normal',
+                    lineHeight: obj.lineHeight || 1.2,
+                    letterSpacing: obj.letterSpacing || 0
+                };
+                break;
+            case StyleType.EFFECT:
+                data = {
+                    effects: (obj.effects || []).map(e => ({
+                        type: e.type === 'dropShadow' ? 'DROP_SHADOW' : 
+                              e.type === 'innerShadow' ? 'INNER_SHADOW' : 'LAYER_BLUR',
+                        visible: e.visible !== false,
+                        color: e.color ? this._hexToFigmaColor(e.color) : { r: 0, g: 0, b: 0, a: 0.25 },
+                        radius: e.blur || 4,
+                        offset: { x: e.offsetX || 0, y: e.offsetY || 0 }
+                    }))
+                };
+                if (data.effects.length === 0) {
+                    data.effects = [{
+                        type: 'DROP_SHADOW',
+                        visible: true,
+                        color: { r: 0, g: 0, b: 0, a: 0.25 },
+                        radius: 4,
+                        offset: { x: 2, y: 2 }
+                    }];
+                }
+                break;
+            case StyleType.GRID:
+                data = {
+                    layoutGrids: obj.layoutGrids || [{
+                        pattern: 'COLUMNS',
+                        sectionSize: 10,
+                        visible: true,
+                        color: { r: 0.5, g: 0.5, b: 1, a: 0.1 },
+                        alignment: 'STRETCH',
+                        gutterSize: 1,
+                        count: 12
+                    }]
+                };
+                break;
+        }
+        
+        const style = styleManager.createStyle(styleType, name.trim(), data);
+        
+        // Apply style to selection
+        const propertyMap = {
+            [StyleType.FILL]: 'applyFillStyle',
+            [StyleType.STROKE]: 'applyStrokeStyle',
+            [StyleType.TEXT]: 'applyTextStyle',
+            [StyleType.EFFECT]: 'applyEffectStyle'
+        };
+        
+        const method = propertyMap[styleType];
+        if (method && typeof obj[method] === 'function') {
+            obj[method](style);
+        }
+        
+        this.renderAllObjects();
+        this._updatePropertiesPanel();
+        this._updateStatus(`Created and applied ${styleType.toLowerCase()} style: ${name.trim()}`);
+    }
+    
+    _setupStyleNameBadges() {
+        // Fill style badge
+        const fillBadge = $('#fill-style-name');
+        if (fillBadge) {
+            fillBadge.addEventListener('click', () => {
+                if (AppState.selectedObjects.length > 0 && AppState.selectedObjects[0].fillStyleId) {
+                    AppState.selectedObjects[0].detachFillStyle();
+                    this.renderAllObjects();
+                    this._updatePropertiesPanel();
+                    this._updateStatus('Fill style detached');
+                }
+            });
+        }
+        
+        // Stroke style badge
+        const strokeBadge = $('#stroke-style-name');
+        if (strokeBadge) {
+            strokeBadge.addEventListener('click', () => {
+                if (AppState.selectedObjects.length > 0 && AppState.selectedObjects[0].strokeStyleId) {
+                    AppState.selectedObjects[0].detachStrokeStyle();
+                    this.renderAllObjects();
+                    this._updatePropertiesPanel();
+                    this._updateStatus('Stroke style detached');
+                }
+            });
+        }
+    }
+    
+    _setStylePreviewAppearance(preview, style) {
+        const data = style.data || {};
+        
+        switch (style.styleType) {
+            case StyleType.FILL:
+                if (data.fills && data.fills.length > 0) {
+                    const fill = data.fills[0];
+                    if (fill.type === 'SOLID' && fill.color) {
+                        const color = this._figmaColorToHex(fill.color);
+                        preview.style.setProperty('--style-color', color);
+                        preview.style.backgroundColor = color;
+                    } else if (fill.type === 'GRADIENT_LINEAR' || fill.type === 'GRADIENT_RADIAL') {
+                        preview.style.background = this._figmaGradientToCss(fill);
+                    }
+                }
+                break;
+                
+            case StyleType.STROKE:
+                if (data.strokes && data.strokes.length > 0) {
+                    const stroke = data.strokes[0];
+                    if (stroke.type === 'SOLID' && stroke.color) {
+                        const color = this._figmaColorToHex(stroke.color);
+                        preview.style.setProperty('--style-color', color);
+                        preview.style.borderColor = color;
+                    }
+                }
+                break;
+                
+            case StyleType.TEXT:
+                preview.textContent = 'Aa';
+                if (data.fontSize) {
+                    preview.style.fontSize = Math.min(data.fontSize, 16) + 'px';
+                }
+                if (data.fontWeight) {
+                    preview.style.fontWeight = data.fontWeight;
+                }
+                break;
+                
+            case StyleType.EFFECT:
+                if (data.effects && data.effects.length > 0) {
+                    const effect = data.effects[0];
+                    if (effect.type === 'DROP_SHADOW' || effect.type === 'INNER_SHADOW') {
+                        const shadow = this._effectToBoxShadow(effect);
+                        preview.style.setProperty('--style-shadow', shadow);
+                        preview.style.boxShadow = shadow;
+                    }
+                }
+                break;
+                
+            case StyleType.GRID:
+                // Grid preview is set by CSS
+                break;
+        }
+    }
+    
+    _figmaColorToHex(color) {
+        if (!color) return '#ffffff';
+        const r = Math.round((color.r || 0) * 255);
+        const g = Math.round((color.g || 0) * 255);
+        const b = Math.round((color.b || 0) * 255);
+        return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    }
+    
+    _hexToFigmaColor(hex) {
+        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        if (!result) return { r: 1, g: 1, b: 1, a: 1 };
+        return {
+            r: parseInt(result[1], 16) / 255,
+            g: parseInt(result[2], 16) / 255,
+            b: parseInt(result[3], 16) / 255,
+            a: 1
+        };
+    }
+    
+    _figmaGradientToCss(fill) {
+        if (!fill.gradientStops || fill.gradientStops.length < 2) {
+            return 'linear-gradient(90deg, #fff, #000)';
+        }
+        
+        const stops = fill.gradientStops.map(stop => {
+            const color = this._figmaColorToHex(stop.color);
+            return `${color} ${(stop.position * 100).toFixed(0)}%`;
+        }).join(', ');
+        
+        const type = fill.type === 'GRADIENT_RADIAL' ? 'radial-gradient' : 'linear-gradient';
+        const angle = fill.type === 'GRADIENT_LINEAR' ? '90deg, ' : '';
+        
+        return `${type}(${angle}${stops})`;
+    }
+    
+    _effectToBoxShadow(effect) {
+        const offsetX = effect.offset?.x || 0;
+        const offsetY = effect.offset?.y || 0;
+        const blur = effect.radius || 4;
+        const spread = effect.spread || 0;
+        const color = effect.color ? this._figmaColorToRgba(effect.color) : 'rgba(0,0,0,0.25)';
+        const inset = effect.type === 'INNER_SHADOW' ? 'inset ' : '';
+        
+        return `${inset}${offsetX}px ${offsetY}px ${blur}px ${spread}px ${color}`;
+    }
+    
+    _figmaColorToRgba(color) {
+        const r = Math.round((color.r || 0) * 255);
+        const g = Math.round((color.g || 0) * 255);
+        const b = Math.round((color.b || 0) * 255);
+        const a = color.a !== undefined ? color.a : 1;
+        return `rgba(${r}, ${g}, ${b}, ${a})`;
+    }
+    
+    _getStyleDescription(style) {
+        const data = style.data || {};
+        
+        switch (style.styleType) {
+            case StyleType.FILL:
+                if (data.fills && data.fills.length > 0) {
+                    const fill = data.fills[0];
+                    if (fill.type === 'SOLID') {
+                        return this._figmaColorToHex(fill.color);
+                    }
+                    return fill.type?.replace('_', ' ').toLowerCase() || 'fill';
+                }
+                return 'No fills';
+                
+            case StyleType.STROKE:
+                if (data.strokes && data.strokes.length > 0) {
+                    const stroke = data.strokes[0];
+                    const weight = data.strokeWeight || 1;
+                    const color = this._figmaColorToHex(stroke.color);
+                    return `${weight}px ${color}`;
+                }
+                return 'No strokes';
+                
+            case StyleType.TEXT:
+                const parts = [];
+                if (data.fontFamily) parts.push(data.fontFamily);
+                if (data.fontSize) parts.push(`${data.fontSize}px`);
+                if (data.fontWeight) parts.push(data.fontWeight);
+                return parts.join(' ') || 'Default text';
+                
+            case StyleType.EFFECT:
+                if (data.effects && data.effects.length > 0) {
+                    return data.effects.map(e => e.type?.replace('_', ' ').toLowerCase()).join(', ');
+                }
+                return 'No effects';
+                
+            case StyleType.GRID:
+                if (data.layoutGrids && data.layoutGrids.length > 0) {
+                    return `${data.layoutGrids.length} grid(s)`;
+                }
+                return 'No grids';
+                
+            default:
+                return '';
+        }
+    }
+    
+    _showCreateStyleDialog(styleType) {
+        const dialogHtml = `
+            <div class="create-style-form">
+                <div class="form-group">
+                    <label>Style Name</label>
+                    <input type="text" id="style-name" placeholder="Style name" required>
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <input type="text" id="style-description" placeholder="Optional description">
+                </div>
+                ${this._getStyleTypeFields(styleType)}
+            </div>
+        `;
+        
+        this._showDialog(`Create ${styleType.charAt(0) + styleType.slice(1).toLowerCase()} Style`, dialogHtml, [
+            { label: 'Cancel', action: () => {} },
+            {
+                label: 'Create',
+                primary: true,
+                action: () => {
+                    const name = $('#style-name')?.value?.trim();
+                    if (!name) {
+                        this._updateStatus('Style name is required');
+                        return false;
+                    }
+                    
+                    const description = $('#style-description')?.value?.trim() || '';
+                    const data = this._collectStyleDataFromDialog(styleType);
+                    
+                    const style = styleManager.createStyle(styleType, name, data, {
+                        description
+                    });
+                    
+                    this._updateStatus(`Created ${styleType.toLowerCase()} style: ${name}`);
+                    return true;
+                }
+            }
+        ]);
+        
+        setTimeout(() => $('#style-name')?.focus(), 100);
+    }
+    
+    _getStyleTypeFields(styleType) {
+        switch (styleType) {
+            case StyleType.FILL:
+                return `
+                    <div class="form-group">
+                        <label>Fill Color</label>
+                        <input type="color" id="style-fill-color" value="#6366f1">
+                    </div>
+                    <div class="form-group">
+                        <label>Opacity</label>
+                        <input type="range" id="style-fill-opacity" min="0" max="100" value="100">
+                        <span id="style-fill-opacity-value">100%</span>
+                    </div>
+                `;
+                
+            case StyleType.STROKE:
+                return `
+                    <div class="form-group">
+                        <label>Stroke Color</label>
+                        <input type="color" id="style-stroke-color" value="#ffffff">
+                    </div>
+                    <div class="form-group">
+                        <label>Stroke Weight</label>
+                        <input type="number" id="style-stroke-weight" value="1" min="0" max="100">
+                    </div>
+                    <div class="form-group">
+                        <label>Stroke Align</label>
+                        <select id="style-stroke-align">
+                            <option value="CENTER">Center</option>
+                            <option value="INSIDE">Inside</option>
+                            <option value="OUTSIDE">Outside</option>
+                        </select>
+                    </div>
+                `;
+                
+            case StyleType.TEXT:
+                return `
+                    <div class="form-group">
+                        <label>Font Family</label>
+                        <input type="text" id="style-font-family" value="monospace" placeholder="Font family">
+                    </div>
+                    <div class="form-group">
+                        <label>Font Size</label>
+                        <input type="number" id="style-font-size" value="14" min="1" max="200">
+                    </div>
+                    <div class="form-group">
+                        <label>Font Weight</label>
+                        <select id="style-font-weight">
+                            <option value="normal">Normal</option>
+                            <option value="bold">Bold</option>
+                            <option value="100">Thin (100)</option>
+                            <option value="300">Light (300)</option>
+                            <option value="500">Medium (500)</option>
+                            <option value="700">Bold (700)</option>
+                            <option value="900">Black (900)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Text Color</label>
+                        <input type="color" id="style-text-color" value="#ffffff">
+                    </div>
+                `;
+                
+            case StyleType.EFFECT:
+                return `
+                    <div class="form-group">
+                        <label>Effect Type</label>
+                        <select id="style-effect-type">
+                            <option value="DROP_SHADOW">Drop Shadow</option>
+                            <option value="INNER_SHADOW">Inner Shadow</option>
+                            <option value="LAYER_BLUR">Layer Blur</option>
+                            <option value="BACKGROUND_BLUR">Background Blur</option>
+                        </select>
+                    </div>
+                    <div class="form-group effect-shadow-fields">
+                        <label>Shadow Color</label>
+                        <input type="color" id="style-shadow-color" value="#000000">
+                    </div>
+                    <div class="form-group effect-shadow-fields">
+                        <label>Offset X / Y</label>
+                        <div style="display: flex; gap: 8px;">
+                            <input type="number" id="style-shadow-x" value="2" style="width: 60px;">
+                            <input type="number" id="style-shadow-y" value="2" style="width: 60px;">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Blur Radius</label>
+                        <input type="number" id="style-effect-blur" value="4" min="0">
+                    </div>
+                `;
+                
+            case StyleType.GRID:
+                return `
+                    <div class="form-group">
+                        <label>Grid Pattern</label>
+                        <select id="style-grid-pattern">
+                            <option value="COLUMNS">Columns</option>
+                            <option value="ROWS">Rows</option>
+                            <option value="GRID">Grid</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Count</label>
+                        <input type="number" id="style-grid-count" value="12" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label>Gutter</label>
+                        <input type="number" id="style-grid-gutter" value="20" min="0">
+                    </div>
+                `;
+                
+            default:
+                return '';
+        }
+    }
+    
+    _collectStyleDataFromDialog(styleType) {
+        switch (styleType) {
+            case StyleType.FILL: {
+                const color = this._hexToFigmaColor($('#style-fill-color')?.value || '#ffffff');
+                const opacity = (parseInt($('#style-fill-opacity')?.value) || 100) / 100;
+                color.a = opacity;
+                return {
+                    fills: [{
+                        type: 'SOLID',
+                        color,
+                        visible: true,
+                        opacity
+                    }]
+                };
+            }
+            
+            case StyleType.STROKE: {
+                const color = this._hexToFigmaColor($('#style-stroke-color')?.value || '#ffffff');
+                const weight = parseInt($('#style-stroke-weight')?.value) || 1;
+                const align = $('#style-stroke-align')?.value || 'CENTER';
+                return {
+                    strokes: [{
+                        type: 'SOLID',
+                        color,
+                        visible: true
+                    }],
+                    strokeWeight: weight,
+                    strokeAlign: align
+                };
+            }
+            
+            case StyleType.TEXT: {
+                const color = this._hexToFigmaColor($('#style-text-color')?.value || '#ffffff');
+                return {
+                    fontFamily: $('#style-font-family')?.value || 'monospace',
+                    fontSize: parseInt($('#style-font-size')?.value) || 14,
+                    fontWeight: $('#style-font-weight')?.value || 'normal',
+                    fills: [{
+                        type: 'SOLID',
+                        color,
+                        visible: true
+                    }]
+                };
+            }
+            
+            case StyleType.EFFECT: {
+                const type = $('#style-effect-type')?.value || 'DROP_SHADOW';
+                const color = this._hexToFigmaColor($('#style-shadow-color')?.value || '#000000');
+                color.a = 0.25;
+                const blur = parseInt($('#style-effect-blur')?.value) || 4;
+                const offsetX = parseInt($('#style-shadow-x')?.value) || 0;
+                const offsetY = parseInt($('#style-shadow-y')?.value) || 0;
+                
+                return {
+                    effects: [{
+                        type,
+                        visible: true,
+                        color,
+                        radius: blur,
+                        offset: { x: offsetX, y: offsetY }
+                    }]
+                };
+            }
+            
+            case StyleType.GRID: {
+                const pattern = $('#style-grid-pattern')?.value || 'COLUMNS';
+                const count = parseInt($('#style-grid-count')?.value) || 12;
+                const gutter = parseInt($('#style-grid-gutter')?.value) || 20;
+                
+                return {
+                    layoutGrids: [{
+                        pattern,
+                        visible: true,
+                        color: { r: 1, g: 0, b: 0, a: 0.1 },
+                        alignment: 'STRETCH',
+                        count,
+                        gutterSize: gutter
+                    }]
+                };
+            }
+            
+            default:
+                return {};
+        }
+    }
+    
+    _showEditStyleDialog(style) {
+        const data = style.data || {};
+        
+        const dialogHtml = `
+            <div class="create-style-form">
+                <div class="form-group">
+                    <label>Style Name</label>
+                    <input type="text" id="style-name" value="${this._escapeHtml(style.name)}" required>
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <input type="text" id="style-description" value="${this._escapeHtml(style.description || '')}">
+                </div>
+                ${this._getStyleTypeFieldsWithValues(style)}
+            </div>
+        `;
+        
+        this._showDialog(`Edit ${style.styleType.charAt(0) + style.styleType.slice(1).toLowerCase()} Style`, dialogHtml, [
+            { label: 'Cancel', action: () => {} },
+            {
+                label: 'Save',
+                primary: true,
+                action: () => {
+                    const name = $('#style-name')?.value?.trim();
+                    if (!name) {
+                        this._updateStatus('Style name is required');
+                        return false;
+                    }
+                    
+                    const description = $('#style-description')?.value?.trim() || '';
+                    const newData = this._collectStyleDataFromDialog(style.styleType);
+                    
+                    styleManager.updateStyle(style.key, {
+                        name,
+                        description,
+                        data: newData
+                    });
+                    
+                    this._updateStatus(`Updated style: ${name}`);
+                    return true;
+                }
+            }
+        ]);
+        
+        setTimeout(() => $('#style-name')?.focus(), 100);
+    }
+    
+    _getStyleTypeFieldsWithValues(style) {
+        const data = style.data || {};
+        
+        switch (style.styleType) {
+            case StyleType.FILL: {
+                const fill = data.fills?.[0] || {};
+                const color = fill.color ? this._figmaColorToHex(fill.color) : '#6366f1';
+                const opacity = Math.round((fill.opacity ?? 1) * 100);
+                
+                return `
+                    <div class="form-group">
+                        <label>Fill Color</label>
+                        <input type="color" id="style-fill-color" value="${color}">
+                    </div>
+                    <div class="form-group">
+                        <label>Opacity</label>
+                        <input type="range" id="style-fill-opacity" min="0" max="100" value="${opacity}">
+                        <span id="style-fill-opacity-value">${opacity}%</span>
+                    </div>
+                `;
+            }
+            
+            case StyleType.STROKE: {
+                const stroke = data.strokes?.[0] || {};
+                const color = stroke.color ? this._figmaColorToHex(stroke.color) : '#ffffff';
+                const weight = data.strokeWeight || 1;
+                const align = data.strokeAlign || 'CENTER';
+                
+                return `
+                    <div class="form-group">
+                        <label>Stroke Color</label>
+                        <input type="color" id="style-stroke-color" value="${color}">
+                    </div>
+                    <div class="form-group">
+                        <label>Stroke Weight</label>
+                        <input type="number" id="style-stroke-weight" value="${weight}" min="0" max="100">
+                    </div>
+                    <div class="form-group">
+                        <label>Stroke Align</label>
+                        <select id="style-stroke-align">
+                            <option value="CENTER" ${align === 'CENTER' ? 'selected' : ''}>Center</option>
+                            <option value="INSIDE" ${align === 'INSIDE' ? 'selected' : ''}>Inside</option>
+                            <option value="OUTSIDE" ${align === 'OUTSIDE' ? 'selected' : ''}>Outside</option>
+                        </select>
+                    </div>
+                `;
+            }
+            
+            case StyleType.TEXT: {
+                const fontFamily = data.fontFamily || 'monospace';
+                const fontSize = data.fontSize || 14;
+                const fontWeight = data.fontWeight || 'normal';
+                const textFill = data.fills?.[0] || {};
+                const textColor = textFill.color ? this._figmaColorToHex(textFill.color) : '#ffffff';
+                
+                return `
+                    <div class="form-group">
+                        <label>Font Family</label>
+                        <input type="text" id="style-font-family" value="${fontFamily}">
+                    </div>
+                    <div class="form-group">
+                        <label>Font Size</label>
+                        <input type="number" id="style-font-size" value="${fontSize}" min="1" max="200">
+                    </div>
+                    <div class="form-group">
+                        <label>Font Weight</label>
+                        <select id="style-font-weight">
+                            <option value="normal" ${fontWeight === 'normal' ? 'selected' : ''}>Normal</option>
+                            <option value="bold" ${fontWeight === 'bold' ? 'selected' : ''}>Bold</option>
+                            <option value="100" ${fontWeight === '100' ? 'selected' : ''}>Thin (100)</option>
+                            <option value="300" ${fontWeight === '300' ? 'selected' : ''}>Light (300)</option>
+                            <option value="500" ${fontWeight === '500' ? 'selected' : ''}>Medium (500)</option>
+                            <option value="700" ${fontWeight === '700' ? 'selected' : ''}>Bold (700)</option>
+                            <option value="900" ${fontWeight === '900' ? 'selected' : ''}>Black (900)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Text Color</label>
+                        <input type="color" id="style-text-color" value="${textColor}">
+                    </div>
+                `;
+            }
+            
+            case StyleType.EFFECT: {
+                const effect = data.effects?.[0] || {};
+                const type = effect.type || 'DROP_SHADOW';
+                const color = effect.color ? this._figmaColorToHex(effect.color) : '#000000';
+                const blur = effect.radius || 4;
+                const offsetX = effect.offset?.x || 0;
+                const offsetY = effect.offset?.y || 0;
+                
+                return `
+                    <div class="form-group">
+                        <label>Effect Type</label>
+                        <select id="style-effect-type">
+                            <option value="DROP_SHADOW" ${type === 'DROP_SHADOW' ? 'selected' : ''}>Drop Shadow</option>
+                            <option value="INNER_SHADOW" ${type === 'INNER_SHADOW' ? 'selected' : ''}>Inner Shadow</option>
+                            <option value="LAYER_BLUR" ${type === 'LAYER_BLUR' ? 'selected' : ''}>Layer Blur</option>
+                            <option value="BACKGROUND_BLUR" ${type === 'BACKGROUND_BLUR' ? 'selected' : ''}>Background Blur</option>
+                        </select>
+                    </div>
+                    <div class="form-group effect-shadow-fields">
+                        <label>Shadow Color</label>
+                        <input type="color" id="style-shadow-color" value="${color}">
+                    </div>
+                    <div class="form-group effect-shadow-fields">
+                        <label>Offset X / Y</label>
+                        <div style="display: flex; gap: 8px;">
+                            <input type="number" id="style-shadow-x" value="${offsetX}" style="width: 60px;">
+                            <input type="number" id="style-shadow-y" value="${offsetY}" style="width: 60px;">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Blur Radius</label>
+                        <input type="number" id="style-effect-blur" value="${blur}" min="0">
+                    </div>
+                `;
+            }
+            
+            case StyleType.GRID: {
+                const grid = data.layoutGrids?.[0] || {};
+                const pattern = grid.pattern || 'COLUMNS';
+                const count = grid.count || 12;
+                const gutter = grid.gutterSize || 20;
+                
+                return `
+                    <div class="form-group">
+                        <label>Grid Pattern</label>
+                        <select id="style-grid-pattern">
+                            <option value="COLUMNS" ${pattern === 'COLUMNS' ? 'selected' : ''}>Columns</option>
+                            <option value="ROWS" ${pattern === 'ROWS' ? 'selected' : ''}>Rows</option>
+                            <option value="GRID" ${pattern === 'GRID' ? 'selected' : ''}>Grid</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Count</label>
+                        <input type="number" id="style-grid-count" value="${count}" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label>Gutter</label>
+                        <input type="number" id="style-grid-gutter" value="${gutter}" min="0">
+                    </div>
+                `;
+            }
+            
+            default:
+                return '';
+        }
+    }
+    
+    _duplicateStyle(style) {
+        const newName = `${style.name} copy`;
+        const newStyle = styleManager.createStyle(style.styleType, newName, { ...style.data }, {
+            description: style.description
+        });
+        this._updateStatus(`Created copy: ${newName}`);
+    }
+    
+    _deleteStyle(style) {
+        if (confirm(`Delete style "${style.name}"?\n\nObjects using this style will be detached.`)) {
+            styleManager.deleteStyle(style.key);
+            this._updateStatus(`Deleted style: ${style.name}`);
+        }
+    }
+    
+    _applyStyleToSelection(style) {
+        if (AppState.selectedObjects.length === 0) {
+            this._updateStatus('Select objects to apply style');
+            return;
+        }
+        
+        const applyMethod = {
+            [StyleType.FILL]: 'applyFillStyle',
+            [StyleType.STROKE]: 'applyStrokeStyle',
+            [StyleType.TEXT]: 'applyTextStyle',
+            [StyleType.EFFECT]: 'applyEffectStyle'
+        };
+        
+        const method = applyMethod[style.styleType];
+        if (!method) {
+            this._updateStatus(`Cannot apply ${style.styleType.toLowerCase()} style`);
+            return;
+        }
+        
+        let count = 0;
+        for (const obj of AppState.selectedObjects) {
+            if (typeof obj[method] === 'function') {
+                obj[method](style.key);
+                count++;
+            }
+        }
+        
+        this.renderAllObjects();
+        this._updatePropertiesPanel();
+        this._updateStatus(`Applied ${style.name} to ${count} object(s)`);
+    }
+    
+    _setupStylePickerButtons() {
+        // Fill style picker
+        const fillStyleBtn = $('#btn-fill-style');
+        if (fillStyleBtn) {
+            fillStyleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._showStylePicker(fillStyleBtn, StyleType.FILL, 'fillStyleId');
+            });
+        }
+        
+        // Stroke style picker
+        const strokeStyleBtn = $('#btn-stroke-style');
+        if (strokeStyleBtn) {
+            strokeStyleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._showStylePicker(strokeStyleBtn, StyleType.STROKE, 'strokeStyleId');
+            });
+        }
+        
+        // Text style picker
+        const textStyleBtn = $('#btn-text-style');
+        if (textStyleBtn) {
+            textStyleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._showStylePicker(textStyleBtn, StyleType.TEXT, 'textStyleId');
+            });
+        }
+        
+        // Effect style picker
+        const effectStyleBtn = $('#btn-effect-style');
+        if (effectStyleBtn) {
+            effectStyleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._showStylePicker(effectStyleBtn, StyleType.EFFECT, 'effectStyleId');
+            });
+        }
+    }
+    
+    _showStylePicker(anchorEl, styleType, propertyName) {
+        // Remove existing picker
+        const existingPicker = $('.style-picker-popup');
+        if (existingPicker) {
+            existingPicker.remove();
+        }
+        
+        let styles = styleManager.getStylesByType(styleType);
+        const currentStyleKey = AppState.selectedObjects.length === 1 
+            ? AppState.selectedObjects[0][propertyName] 
+            : null;
+        
+        // Check for mixed styles
+        const hasMixedStyles = this._checkMixedStyles(propertyName);
+        
+        // Create popup
+        const popup = createElement('div', { class: 'style-picker-popup' });
+        
+        // Header with view toggle
+        const header = createElement('div', { class: 'style-picker-header' });
+        const title = createElement('span', { class: 'style-picker-title' }, 
+            `${styleType.charAt(0) + styleType.slice(1).toLowerCase()} Styles`);
+        
+        const headerActions = createElement('div', { class: 'style-picker-actions' });
+        const viewToggle = createElement('button', {
+            class: 'icon-btn small',
+            title: 'Toggle grid/list view',
+            onClick: (e) => {
+                e.stopPropagation();
+                popup.classList.toggle('grid-view');
+                viewToggle.textContent = popup.classList.contains('grid-view') ? '☰' : '☷';
+            }
+        }, '☷');
+        headerActions.appendChild(viewToggle);
+        
+        header.appendChild(title);
+        header.appendChild(headerActions);
+        popup.appendChild(header);
+        
+        // Search field
+        const searchWrapper = createElement('div', { class: 'style-picker-search' });
+        const searchInput = createElement('input', {
+            type: 'text',
+            class: 'style-picker-search-input',
+            placeholder: 'Search styles...',
+            onInput: (e) => {
+                const query = e.target.value.trim().toLowerCase();
+                this._filterStylePickerList(list, styles, query, currentStyleKey, styleType, popup);
+            },
+            onKeydown: (e) => {
+                if (e.key === 'Escape') {
+                    popup.remove();
+                }
+            }
+        });
+        searchWrapper.appendChild(searchInput);
+        popup.appendChild(searchWrapper);
+        
+        // None option / Mixed indicator
+        if (hasMixedStyles) {
+            const mixedOption = createElement('div', { 
+                class: 'style-picker-mixed',
+            }, '⊖ Mixed styles');
+            popup.appendChild(mixedOption);
+        }
+        
+        const noneOption = createElement('div', { 
+            class: 'style-picker-none',
+            onClick: () => {
+                this._detachStyleFromSelection(styleType, propertyName);
+                popup.remove();
+            }
+        }, '— Detach style —');
+        popup.appendChild(noneOption);
+        
+        // Style list
+        const list = createElement('div', { class: 'style-picker-list' });
+        this._renderStylePickerList(list, styles, '', currentStyleKey, styleType, popup);
+        popup.appendChild(list);
+        
+        // Create button
+        const createSection = createElement('div', { class: 'style-picker-create' });
+        const createBtn = createElement('button', {
+            class: 'btn btn-small',
+            onClick: () => {
+                popup.remove();
+                this._showCreateStyleDialog(styleType);
+            }
+        }, `+ Create ${styleType.toLowerCase()} style`);
+        createSection.appendChild(createBtn);
+        popup.appendChild(createSection);
+        
+        // Position popup
+        document.body.appendChild(popup);
+        const rect = anchorEl.getBoundingClientRect();
+        popup.style.left = `${Math.max(10, rect.left - popup.offsetWidth - 10)}px`;
+        popup.style.top = `${rect.top}px`;
+        
+        // Ensure visible
+        const popupRect = popup.getBoundingClientRect();
+        if (popupRect.bottom > window.innerHeight) {
+            popup.style.top = `${window.innerHeight - popupRect.height - 10}px`;
+        }
+        if (popupRect.left < 0) {
+            popup.style.left = `${rect.right + 10}px`;
+        }
+        
+        // Focus search
+        setTimeout(() => searchInput.focus(), 50);
+        
+        // Close on outside click
+        const closeHandler = (e) => {
+            if (!popup.contains(e.target) && e.target !== anchorEl) {
+                popup.remove();
+                document.removeEventListener('click', closeHandler);
+            }
+        };
+        setTimeout(() => document.addEventListener('click', closeHandler), 0);
+    }
+    
+    _checkMixedStyles(propertyName) {
+        if (AppState.selectedObjects.length <= 1) return false;
+        const firstValue = AppState.selectedObjects[0][propertyName];
+        return AppState.selectedObjects.some(obj => obj[propertyName] !== firstValue);
+    }
+    
+    _filterStylePickerList(list, allStyles, query, currentStyleKey, styleType, popup) {
+        const filtered = query 
+            ? allStyles.filter(s => s.name.toLowerCase().includes(query))
+            : allStyles;
+        this._renderStylePickerList(list, filtered, query, currentStyleKey, styleType, popup);
+    }
+    
+    _renderStylePickerList(list, styles, query, currentStyleKey, styleType, popup) {
+        list.innerHTML = '';
+        
+        if (styles.length === 0) {
+            const empty = createElement('div', { class: 'style-empty' }, 
+                query ? 'No matching styles' : 'No styles available');
+            list.appendChild(empty);
+        } else {
+            // Group styles by slash naming
+            const groups = this._groupStylesByName(styles);
+            
+            for (const [groupName, groupStyles] of Object.entries(groups)) {
+                if (groupName && groupName !== '_ungrouped') {
+                    const groupHeader = createElement('div', { class: 'style-picker-group' });
+                    groupHeader.textContent = groupName;
+                    list.appendChild(groupHeader);
+                }
+                
+                for (const style of groupStyles) {
+                    const item = this._createStylePickerItem(style, currentStyleKey, styleType, popup);
+                    list.appendChild(item);
+                }
+            }
+        }
+    }
+    
+    _createStylePickerItem(style, currentStyleKey, styleType, popup) {
+        // Generate tooltip text
+        const tooltipText = this._getStyleDescription(style);
+        
+        const item = createElement('div', {
+            class: `style-picker-item ${style.key === currentStyleKey ? 'selected' : ''}`,
+            title: style.description || tooltipText
+        });
+        
+        // Round preview thumbnail (Figma style)
+        const preview = createElement('div', {
+            class: `style-picker-thumbnail ${styleType.toLowerCase()}-preview`
+        });
+        this._setStylePreviewAppearance(preview, style);
+        
+        // Name (show only last part after /)
+        const displayName = style.name.includes('/') 
+            ? style.name.split('/').pop().trim() 
+            : style.name;
+        const name = createElement('span', { class: 'style-item-name' }, displayName);
+        
+        // Check mark for selected
+        const check = createElement('span', { class: 'style-picker-check' }, 
+            style.key === currentStyleKey ? '✓' : '');
+        
+        // Edit button (shows on hover)
+        const editBtn = createElement('button', {
+            class: 'style-picker-edit-btn icon-btn small',
+            title: 'Edit style',
+            onClick: (e) => {
+                e.stopPropagation();
+                popup.remove();
+                this._showEditStyleDialog(style);
+            }
+        }, '✏️');
+        
+        // Click to apply
+        item.addEventListener('click', () => {
+            this._applyStyleToSelection(style);
+            popup.remove();
+        });
+        
+        item.appendChild(preview);
+        item.appendChild(name);
+        item.appendChild(check);
+        item.appendChild(editBtn);
+        
+        return item;
+    }
+    
+    _detachStyleFromSelection(styleType, propertyName) {
+        const detachMethod = {
+            [StyleType.FILL]: 'detachFillStyle',
+            [StyleType.STROKE]: 'detachStrokeStyle',
+            [StyleType.TEXT]: 'detachTextStyle',
+            [StyleType.EFFECT]: 'detachEffectStyle'
+        };
+        
+        const method = detachMethod[styleType];
+        
+        for (const obj of AppState.selectedObjects) {
+            if (typeof obj[method] === 'function') {
+                obj[method]();
+            }
+        }
+        
+        this.renderAllObjects();
+        this._updatePropertiesPanel();
+        this._updateStatus('Style detached');
+    }
+    
+    _updateStylePickerButtons() {
+        const fillStyleBtn = $('#btn-fill-style');
+        const strokeStyleBtn = $('#btn-stroke-style');
+        const textStyleBtn = $('#btn-text-style');
+        const effectStyleBtn = $('#btn-effect-style');
+        const fillBadge = $('#fill-style-name');
+        const strokeBadge = $('#stroke-style-name');
+        
+        // Check for mixed styles
+        const fillMixed = this._checkMixedStyles('fillStyleId');
+        const strokeMixed = this._checkMixedStyles('strokeStyleId');
+        
+        // Reset all if no selection
+        if (AppState.selectedObjects.length === 0) {
+            if (fillStyleBtn) {
+                fillStyleBtn.classList.remove('has-style', 'mixed-style');
+                fillStyleBtn.title = 'Apply fill style';
+            }
+            if (strokeStyleBtn) {
+                strokeStyleBtn.classList.remove('has-style', 'mixed-style');
+                strokeStyleBtn.title = 'Apply stroke style';
+            }
+            if (textStyleBtn) {
+                textStyleBtn.classList.remove('has-style', 'mixed-style');
+                textStyleBtn.title = 'Apply text style';
+            }
+            if (effectStyleBtn) {
+                effectStyleBtn.classList.remove('has-style', 'mixed-style');
+                effectStyleBtn.title = 'Apply effect style';
+            }
+            if (fillBadge) {
+                fillBadge.classList.remove('visible', 'mixed');
+                const textEl = fillBadge.querySelector('.style-badge-text');
+                if (textEl) textEl.textContent = '';
+            }
+            if (strokeBadge) {
+                strokeBadge.classList.remove('visible', 'mixed');
+                const textEl = strokeBadge.querySelector('.style-badge-text');
+                if (textEl) textEl.textContent = '';
+            }
+            return;
+        }
+        
+        const obj = AppState.selectedObjects[0];
+        
+        // Update fill style button and badge
+        if (fillStyleBtn) {
+            const hasFillStyle = !!obj.fillStyleId;
+            fillStyleBtn.classList.toggle('has-style', hasFillStyle && !fillMixed);
+            fillStyleBtn.classList.toggle('mixed-style', fillMixed);
+            const fillStyle = obj.fillStyleId ? styleManager.getStyle(obj.fillStyleId) : null;
+            fillStyleBtn.title = fillMixed 
+                ? 'Mixed fill styles'
+                : fillStyle 
+                    ? `Fill style: ${fillStyle.name}`
+                    : 'Apply fill style';
+            
+            if (fillBadge) {
+                if (fillMixed) {
+                    const textEl = fillBadge.querySelector('.style-badge-text');
+                    if (textEl) textEl.textContent = 'Mixed';
+                    fillBadge.classList.add('visible', 'mixed');
+                } else if (fillStyle) {
+                    const textEl = fillBadge.querySelector('.style-badge-text');
+                    if (textEl) textEl.textContent = fillStyle.name;
+                    fillBadge.classList.add('visible');
+                    fillBadge.classList.remove('mixed');
+                } else {
+                    fillBadge.classList.remove('visible', 'mixed');
+                    const textEl = fillBadge.querySelector('.style-badge-text');
+                    if (textEl) textEl.textContent = '';
+                }
+            }
+        }
+        
+        // Update stroke style button and badge
+        if (strokeStyleBtn) {
+            const hasStrokeStyle = !!obj.strokeStyleId;
+            strokeStyleBtn.classList.toggle('has-style', hasStrokeStyle && !strokeMixed);
+            strokeStyleBtn.classList.toggle('mixed-style', strokeMixed);
+            const strokeStyle = obj.strokeStyleId ? styleManager.getStyle(obj.strokeStyleId) : null;
+            strokeStyleBtn.title = strokeMixed
+                ? 'Mixed stroke styles'
+                : strokeStyle 
+                    ? `Stroke style: ${strokeStyle.name}`
+                    : 'Apply stroke style';
+            
+            if (strokeBadge) {
+                if (strokeMixed) {
+                    const textEl = strokeBadge.querySelector('.style-badge-text');
+                    if (textEl) textEl.textContent = 'Mixed';
+                    strokeBadge.classList.add('visible', 'mixed');
+                } else if (strokeStyle) {
+                    const textEl = strokeBadge.querySelector('.style-badge-text');
+                    if (textEl) textEl.textContent = strokeStyle.name;
+                    strokeBadge.classList.add('visible');
+                    strokeBadge.classList.remove('mixed');
+                } else {
+                    strokeBadge.classList.remove('visible', 'mixed');
+                    const textEl = strokeBadge.querySelector('.style-badge-text');
+                    if (textEl) textEl.textContent = '';
+                }
+            }
+        }
+        
+        // Update text style button
+        if (textStyleBtn) {
+            const textMixed = this._checkMixedStyles('textStyleId');
+            textStyleBtn.classList.toggle('has-style', !!obj.textStyleId && !textMixed);
+            textStyleBtn.classList.toggle('mixed-style', textMixed);
+            textStyleBtn.title = textMixed
+                ? 'Mixed text styles'
+                : obj.textStyleId 
+                    ? `Text style: ${styleManager.getStyle(obj.textStyleId)?.name || 'Unknown'}`
+                    : 'Apply text style';
+        }
+        
+        // Update effect style button
+        if (effectStyleBtn) {
+            const effectMixed = this._checkMixedStyles('effectStyleId');
+            effectStyleBtn.classList.toggle('has-style', !!obj.effectStyleId && !effectMixed);
+            effectStyleBtn.classList.toggle('mixed-style', effectMixed);
+            effectStyleBtn.title = effectMixed
+                ? 'Mixed effect styles'
+                : obj.effectStyleId 
+                    ? `Effect style: ${styleManager.getStyle(obj.effectStyleId)?.name || 'Unknown'}`
+                    : 'Apply effect style';
+        }
+    }
+    
+    _importStyles() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        
+        input.onchange = async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+                
+                if (data.styles && Array.isArray(data.styles)) {
+                    styleManager.importStyles(data.styles);
+                    this._updateStatus(`Imported ${data.styles.length} styles`);
+                } else {
+                    this._updateStatus('Invalid styles file format');
+                }
+            } catch (error) {
+                console.error('Import error:', error);
+                this._updateStatus(`Import failed: ${error.message}`);
+            }
+        };
+        
+        input.click();
+    }
+    
+    _exportStyles() {
+        const styles = styleManager.exportStyles();
+        
+        if (styles.length === 0) {
+            this._updateStatus('No styles to export');
+            return;
+        }
+        
+        const data = {
+            version: '1.0',
+            exportedAt: new Date().toISOString(),
+            styles
+        };
+        
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'asciistrator-styles.json';
+        a.click();
+        
+        URL.revokeObjectURL(url);
+        this._updateStatus(`Exported ${styles.length} styles`);
+    }
+
     /**
      * Show a dialog with custom content and buttons
      * @param {string} title - Dialog title
@@ -18621,6 +21472,12 @@ class Asciistrator extends EventEmitter {
         AppState.undoStack = [];
         AppState.redoStack = [];
         
+        // Load shared styles
+        if (data.styles && typeof data.styles === 'object') {
+            styleManager.clear();
+            styleManager.importFromDocument(data.styles);
+        }
+        
         // Restore component libraries
         if (data.componentLibraries && Array.isArray(data.componentLibraries)) {
             const { ComponentLibrary } = await import('./components/ComponentLibrary.js');
@@ -18749,10 +21606,11 @@ class Asciistrator extends EventEmitter {
             opacity: node.opacity ?? 1,
             blendMode: (node.blendMode || 'NORMAL').toLowerCase(),
             
-            // Restore ASCII properties
+            // Restore ASCII properties from ascii namespace
             strokeChar: node.ascii?.strokeChar || '*',
             fillChar: node.ascii?.fillChar || '',
             lineStyle: node.ascii?.lineStyle || 'single',
+            boxStyle: node.ascii?.boxStyle,
             strokeColor: node.ascii?.strokeColor || (node.strokes?.[0]?.color ? ColorUtils.figmaToHex(node.strokes[0].color) : null),
             fillColor: node.ascii?.fillColor || (node.fills?.[0]?.color ? ColorUtils.figmaToHex(node.fills[0].color) : null),
             
@@ -18765,26 +21623,18 @@ class Asciistrator extends EventEmitter {
             clipContent: node.clipsContent || false
         };
         
-        // Restore auto layout
-        if (node.layoutMode && node.layoutMode !== 'NONE') {
-            json.autoLayout = {
-                enabled: true,
-                direction: node.layoutMode === 'HORIZONTAL' ? 'horizontal' : 'vertical',
-                spacing: node.itemSpacing || 0,
-                padding: {
-                    top: node.paddingTop || 0,
-                    right: node.paddingRight || 0,
-                    bottom: node.paddingBottom || 0,
-                    left: node.paddingLeft || 0
-                },
-                alignment: this._mapFigmaCounterAlignmentToInternal(node.counterAxisAlignItems),
-                distribution: node._distribution || this._mapFigmaPrimaryAlignmentToInternal(node.primaryAxisAlignItems),
-                wrap: node.layoutWrap === 'WRAP',
-                wrapSpacing: node.counterAxisSpacing || 0,
-                counterSpacing: node.counterAxisSpacing || 0,
-                reversed: node.itemReverseZIndex || false
-            };
-        }
+        // Restore layout properties (flat Figma-style)
+        json.layoutMode = node.layoutMode || 'NONE';
+        json.primaryAxisAlignItems = node.primaryAxisAlignItems || 'MIN';
+        json.counterAxisAlignItems = node.counterAxisAlignItems || 'MIN';
+        json.paddingLeft = node.paddingLeft ?? 1;
+        json.paddingRight = node.paddingRight ?? 1;
+        json.paddingTop = node.paddingTop ?? 1;
+        json.paddingBottom = node.paddingBottom ?? 1;
+        json.itemSpacing = node.itemSpacing ?? 1;
+        json.counterAxisSpacing = node.counterAxisSpacing ?? 1;
+        json.layoutWrap = node.layoutWrap || 'NO_WRAP';
+        json.itemReverseZIndex = node.itemReverseZIndex || false;
         
         // Restore sizing
         if (node.primaryAxisSizingMode || node.counterAxisSizingMode) {
@@ -18854,12 +21704,13 @@ class Asciistrator extends EventEmitter {
                 break;
                 
             case 'frame':
-                json.showBorder = node.showBorder;
-                json.borderStyle = node.borderStyle;
+                // Restore from ascii namespace (with fallback to old locations)
+                json.showBorder = node.ascii?.showBorder ?? node.showBorder;
+                json.borderStyle = node.ascii?.borderStyle || node.borderStyle;
                 json.backgroundColor = node.backgroundColor ? ColorUtils.figmaToHex(node.backgroundColor) : null;
-                json.backgroundChar = node.backgroundChar;
-                json.title = node.title;
-                json.autoSize = node.autoSize;
+                json.backgroundChar = node.ascii?.backgroundChar || node.backgroundChar;
+                json.title = node.ascii?.title || node.title;
+                json.autoSize = node.ascii?.autoSize ?? node.autoSize;
                 json.padding = {
                     top: node.paddingTop || 0,
                     right: node.paddingRight || 0,
@@ -18868,18 +21719,48 @@ class Asciistrator extends EventEmitter {
                 };
                 break;
                 
+            case 'component':
+                // Component inherits from frame - restore from ascii namespace
+                json.showBorder = node.ascii?.showBorder ?? node.showBorder;
+                json.borderStyle = node.ascii?.borderStyle || node.borderStyle;
+                json.backgroundColor = node.backgroundColor ? ColorUtils.figmaToHex(node.backgroundColor) : null;
+                json.backgroundChar = node.ascii?.backgroundChar || node.backgroundChar;
+                json.title = node.ascii?.title || node.title;
+                json.autoSize = node.ascii?.autoSize ?? node.autoSize;
+                json.padding = {
+                    top: node.paddingTop || 0,
+                    right: node.paddingRight || 0,
+                    bottom: node.paddingBottom || 0,
+                    left: node.paddingLeft || 0
+                };
+                // Component-specific properties
+                json.componentKey = node.componentKey;
+                json.description = node.description || '';
+                json.documentationLinks = node.documentationLinks || [];
+                break;
+                
+            case 'instance':
+                // Instance references a component
+                json.componentId = node.componentId;
+                json.overrides = node.overrides || {};
+                json.exposedInstances = node.exposedInstances || [];
+                json.scaleFactor = node.scaleFactor ?? 1;
+                break;
+                
             case 'table':
                 json.cols = node.cols;
                 json.rows = node.rows;
-                json.cellData = node.cellData;
-                json.columnWidths = node.columnWidths;
-                json.rowHeights = node.rowHeights;
+                // Restore from ascii namespace (with fallback to old locations)
+                json.cellData = node.ascii?.cellData || node.cellData;
+                json.columnWidths = node.ascii?.columnWidths || node.columnWidths;
+                json.rowHeights = node.ascii?.rowHeights || node.rowHeights;
                 break;
                 
             case 'chart':
                 json.chartType = node.chartType;
-                json.chartData = node.chartData;
-                json.chartOptions = node.chartOptions;
+                // Restore from ascii namespace (with fallback to old locations)
+                json.chartData = node.ascii?.chartData || node.chartData;
+                json.chartOptions = node.ascii?.chartOptions || node.chartOptions;
                 break;
                 
             // Flowchart shapes
@@ -18891,8 +21772,9 @@ class Asciistrator extends EventEmitter {
             case 'database':
             case 'subprocess':
             case 'connector-circle':
-                json.label = node.label;
-                json.labelColor = node.labelColor;
+                // Restore from ascii namespace (with fallback to old locations)
+                json.label = node.ascii?.label || node.label;
+                json.labelColor = node.ascii?.labelColor || node.labelColor;
                 break;
                 
             case 'connector':
@@ -18904,11 +21786,12 @@ class Asciistrator extends EventEmitter {
                 json.startY = node.startY;
                 json.endX = node.endX;
                 json.endY = node.endY;
-                json.connectorStyle = node.connectorStyle;
-                json.lineType = node.lineType;
-                json.arrowStart = node.arrowStart;
-                json.arrowEnd = node.arrowEnd;
-                json.waypoints = node.waypoints;
+                // Restore from ascii namespace (with fallback to old locations)
+                json.connectorStyle = node.ascii?.connectorStyle || node.connectorStyle;
+                json.lineType = node.ascii?.lineType || node.lineType;
+                json.arrowStart = node.ascii?.arrowStart || node.arrowStart;
+                json.arrowEnd = node.ascii?.arrowEnd || node.arrowEnd;
+                json.waypoints = node.ascii?.waypoints || node.waypoints;
                 break;
         }
         
@@ -18923,6 +21806,12 @@ class Asciistrator extends EventEmitter {
             json.avaloniaType = node.avaloniaType;
             json.avaloniaProperties = node.avaloniaProperties || {};
         }
+        
+        // Restore style references
+        if (node.fillStyleId) json.fillStyleId = node.fillStyleId;
+        if (node.strokeStyleId) json.strokeStyleId = node.strokeStyleId;
+        if (node.textStyleId) json.textStyleId = node.textStyleId;
+        if (node.effectStyleId) json.effectStyleId = node.effectStyleId;
         
         // Create the object
         const obj = this._createObjectFromJSON(json);
@@ -19025,7 +21914,10 @@ class Asciistrator extends EventEmitter {
             .filter(lib => !lib.isBuiltIn)
             .map(lib => lib.toJSON());
         
-        saveNativeDocument(AppState, AppState.layers, filename, componentLibraries);
+        // Export shared styles
+        const styles = styleManager.exportToDocument();
+        
+        saveNativeDocument(AppState, AppState.layers, filename, componentLibraries, styles);
         this._updateStatus(`Saved ${filename}`);
     }
     
@@ -20087,6 +22979,41 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                 }
                 return obj;
             }
+            case 'frame': {
+                const obj = new FrameObject(json.x, json.y, json.width, json.height);
+                Object.assign(obj, json);
+                if (json.children) {
+                    obj.children = json.children.map(c => {
+                        const child = this._createObjectFromJSON(c);
+                        if (child) {
+                            child.parentId = obj.id;
+                            child._cachedParent = obj;
+                        }
+                        return child;
+                    }).filter(c => c !== null);
+                }
+                return obj;
+            }
+            case 'component': {
+                const obj = new ComponentObject(json.x, json.y, json.width, json.height);
+                Object.assign(obj, json);
+                if (json.children) {
+                    obj.children = json.children.map(c => {
+                        const child = this._createObjectFromJSON(c);
+                        if (child) {
+                            child.parentId = obj.id;
+                            child._cachedParent = obj;
+                        }
+                        return child;
+                    }).filter(c => c !== null);
+                }
+                return obj;
+            }
+            case 'instance': {
+                const obj = new InstanceObject(json.x, json.y, json.width, json.height);
+                Object.assign(obj, json);
+                return obj;
+            }
             case 'flowchart-process':
             case 'process': {
                 const obj = new ProcessShape(json.x, json.y, json.width, json.height);
@@ -20331,13 +23258,15 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         }
         
         this.saveStateForUndo();
-        selectedFrame.autoLayout.enabled = !selectedFrame.autoLayout.enabled;
         
-        if (selectedFrame.autoLayout.enabled) {
+        // Toggle layoutMode between NONE and VERTICAL
+        if (SceneObject.hasAutoLayout(selectedFrame)) {
+            selectedFrame.layoutMode = 'NONE';
+            this._updateStatus('Auto layout disabled');
+        } else {
+            selectedFrame.layoutMode = 'VERTICAL';
             selectedFrame.layoutChildren();
             this._updateStatus('Auto layout enabled');
-        } else {
-            this._updateStatus('Auto layout disabled');
         }
         
         this.renderAllObjects();
@@ -20354,7 +23283,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             return;
         }
         
-        if (!selectedFrame.autoLayout.enabled) {
+        if (!SceneObject.hasAutoLayout(selectedFrame)) {
             this._updateStatus('Auto layout is not enabled on this frame');
             return;
         }
@@ -20451,7 +23380,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             }
             
             for (const frame of affectedFrames) {
-                if (frame.autoLayout?.enabled) {
+                if (SceneObject.hasAutoLayout(frame)) {
                     frame.layoutChildren();
                 }
             }
@@ -20476,7 +23405,24 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             return;
         }
         
-        const al = selectedFrame.autoLayout || { enabled: false, direction: 'vertical', spacing: 1, alignment: 'start', distribution: 'packed', wrap: false, counterSpacing: 1, reversed: false };
+        // Get layout state from flat properties
+        const hasAutoLayout = SceneObject.hasAutoLayout(selectedFrame);
+        const isHorizontal = selectedFrame.layoutMode === 'HORIZONTAL';
+        
+        // Map Figma values to internal values for display
+        const counterAlignMap = { 'MIN': 'start', 'CENTER': 'center', 'MAX': 'end', 'STRETCH': 'stretch', 'BASELINE': 'baseline' };
+        const primaryAlignMap = { 'MIN': 'packed', 'CENTER': 'packed', 'MAX': 'packed', 'SPACE_BETWEEN': 'space-between', 'SPACE_AROUND': 'space-around', 'SPACE_EVENLY': 'space-evenly' };
+        
+        const al = {
+            enabled: hasAutoLayout,
+            direction: isHorizontal ? 'horizontal' : 'vertical',
+            spacing: selectedFrame.itemSpacing ?? 1,
+            alignment: counterAlignMap[selectedFrame.counterAxisAlignItems] || 'start',
+            distribution: primaryAlignMap[selectedFrame.primaryAxisAlignItems] || 'packed',
+            wrap: selectedFrame.layoutWrap === 'WRAP',
+            counterSpacing: selectedFrame.counterAxisSpacing ?? 1,
+            reversed: selectedFrame.itemReverseZIndex || false
+        };
         const sz = selectedFrame.sizing || { horizontal: 'fixed', vertical: 'fixed' };
         
         const dialog = document.createElement('div');
@@ -20667,18 +23613,27 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             selectedFrame.autoSize = dialog.querySelector('#frame-auto-size').checked;
             selectedFrame.backgroundChar = dialog.querySelector('#frame-bg-char').value || ' ';
             
-            // Auto Layout settings
+            // Auto Layout settings - use flat Figma-style properties
             const autoLayoutEnabled = dialog.querySelector('#frame-auto-layout').checked;
-            selectedFrame.autoLayout = {
-                enabled: autoLayoutEnabled,
-                direction: dialog.querySelector('#al-direction').value,
-                spacing: parseInt(dialog.querySelector('#al-spacing').value) || 0,
-                alignment: dialog.querySelector('#al-alignment').value,
-                distribution: dialog.querySelector('#al-distribution').value,
-                wrap: dialog.querySelector('#al-wrap').checked,
-                counterSpacing: parseInt(dialog.querySelector('#al-counter-spacing').value) || 1,
-                reversed: dialog.querySelector('#al-reversed').checked
-            };
+            const direction = dialog.querySelector('#al-direction').value;
+            const alignment = dialog.querySelector('#al-alignment').value;
+            const distribution = dialog.querySelector('#al-distribution').value;
+            
+            // Map to flat properties
+            selectedFrame.layoutMode = autoLayoutEnabled ? 
+                (direction === 'horizontal' ? 'HORIZONTAL' : 'VERTICAL') : 'NONE';
+            selectedFrame.itemSpacing = parseInt(dialog.querySelector('#al-spacing').value) || 0;
+            selectedFrame.counterAxisSpacing = parseInt(dialog.querySelector('#al-counter-spacing').value) || 1;
+            selectedFrame.layoutWrap = dialog.querySelector('#al-wrap').checked ? 'WRAP' : 'NO_WRAP';
+            selectedFrame.itemReverseZIndex = dialog.querySelector('#al-reversed').checked;
+            
+            // Map alignment to counterAxisAlignItems
+            const alignMap = { 'start': 'MIN', 'center': 'CENTER', 'end': 'MAX', 'stretch': 'STRETCH', 'baseline': 'BASELINE' };
+            selectedFrame.counterAxisAlignItems = alignMap[alignment] || 'MIN';
+            
+            // Map distribution to primaryAxisAlignItems
+            const distMap = { 'packed': 'MIN', 'space-between': 'SPACE_BETWEEN', 'space-around': 'SPACE_AROUND', 'space-evenly': 'SPACE_EVENLY' };
+            selectedFrame.primaryAxisAlignItems = distMap[distribution] || 'MIN';
             
             // Sizing settings
             selectedFrame.sizing = {
