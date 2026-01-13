@@ -18593,12 +18593,16 @@ class Asciistrator extends EventEmitter {
     }
     
     async _loadFromNativeFormat(text) {
+        const { detectVersion, NativeDocument, ColorUtils, ConstraintMapping, TypeMapping } = await import('./io/native.js');
         const data = JSON.parse(text);
         
-        // Validate this looks like a native document
-        if (!data.version && !data.layers && !data.objects) {
+        // Detect document version
+        const version = detectVersion(data);
+        if (!version) {
             throw new Error('Not a valid native format document');
         }
+        
+        console.log(`Loading document version ${version}`);
         
         // Clear current state
         this.renderer.clear();
@@ -18610,6 +18614,373 @@ class Asciistrator extends EventEmitter {
         AppState.selectionContext.hoverTarget = null;
         AppState.selectionContext.dropIndicator = null;
         
+        // Check if this is v2 format (nested document structure)
+        const isV2 = version.startsWith('2.') || (data.document?.type === 'DOCUMENT');
+        
+        if (isV2) {
+            // Load v2 format (Figma-compatible nested structure)
+            await this._loadFromNativeFormatV2(data, ColorUtils, ConstraintMapping, TypeMapping);
+        } else {
+            // Load v1 format (legacy flat structure)
+            await this._loadFromNativeFormatV1(data);
+        }
+        
+        // Clear undo/redo stacks for fresh document
+        AppState.undoStack = [];
+        AppState.redoStack = [];
+        
+        // Restore component libraries
+        if (data.componentLibraries && Array.isArray(data.componentLibraries)) {
+            const { ComponentLibrary } = await import('./components/ComponentLibrary.js');
+            for (const libData of data.componentLibraries) {
+                // Skip if library already exists (by ID)
+                const existing = componentLibraryManager.getLibrary(libData.id);
+                if (existing && existing.isBuiltIn) {
+                    continue; // Don't overwrite built-in libraries
+                }
+                
+                // Remove existing non-built-in library with same ID
+                if (existing) {
+                    componentLibraryManager.removeLibrary(libData.id);
+                }
+                
+                // Create and add the library
+                const library = ComponentLibrary.fromJSON(libData);
+                library.isBuiltIn = false;
+                componentLibraryManager.addLibrary(library);
+            }
+            this._renderComponentLibraries();
+        }
+        
+        // Invalidate spatial index and re-render
+        this._spatialIndexDirty = true;
+        this.renderAllObjects();
+        this._updateBreadcrumbUI();
+        this._updateLayerList();
+        this._updateUndoRedoButtons();
+        AppState.modified = false;
+    }
+    
+    /**
+     * Load v2 format document (Figma-compatible nested structure)
+     */
+    async _loadFromNativeFormatV2(data, ColorUtils, ConstraintMapping, TypeMapping) {
+        const doc = data.document;
+        
+        // Default canvas settings
+        let canvasWidth = 120;
+        let canvasHeight = 60;
+        
+        // Get pages (children of DOCUMENT node)
+        const pages = doc.children || [];
+        
+        if (pages.length === 0) {
+            // No pages, create default layer
+            AppState.layers = [{
+                id: 0,
+                name: 'Layer 1',
+                visible: true,
+                locked: false,
+                buffer: new AsciiBuffer(canvasWidth, canvasHeight),
+                objects: []
+            }];
+            AppState.activeLayerId = 0;
+            return;
+        }
+        
+        // Convert pages to layers
+        AppState.layers = pages.map((page, index) => {
+            // Extract layer ID from page ID
+            const idMatch = page.id?.match(/page:(\d+)/);
+            const layerId = idMatch ? parseInt(idMatch[1]) : index;
+            
+            // Get canvas settings from first page
+            if (index === 0) {
+                canvasWidth = page.canvasWidth || 120;
+                canvasHeight = page.canvasHeight || 60;
+                AppState.canvasWidth = canvasWidth;
+                AppState.canvasHeight = canvasHeight;
+                
+                // Restore background color
+                if (page.backgroundColor) {
+                    AppState.backgroundColor = ColorUtils.figmaToHex(page.backgroundColor) || '#1a1a2e';
+                }
+            }
+            
+            const layer = {
+                id: layerId,
+                name: page.name || `Layer ${index + 1}`,
+                visible: page.visible !== false,
+                locked: page.locked || false,
+                opacity: page.opacity || 1,
+                blendMode: (page.blendMode || 'NORMAL').toLowerCase(),
+                buffer: new AsciiBuffer(canvasWidth, canvasHeight),
+                objects: []
+            };
+            
+            // Convert page children (v2 nodes) to objects
+            if (page.children && page.children.length > 0) {
+                for (const node of page.children) {
+                    const obj = this._createObjectFromV2Node(node, ColorUtils, ConstraintMapping, TypeMapping);
+                    if (obj) {
+                        layer.objects.push(obj);
+                    }
+                }
+            }
+            
+            return layer;
+        });
+        
+        // Set active layer to first layer
+        AppState.activeLayerId = AppState.layers[0]?.id || 0;
+    }
+    
+    /**
+     * Create an object from a v2 format node
+     */
+    _createObjectFromV2Node(node, ColorUtils, ConstraintMapping, TypeMapping) {
+        // Map Figma type back to internal type
+        const internalType = TypeMapping.fromFigma[node.type] || node.flowchartType || node.type.toLowerCase();
+        
+        // Build v1-style JSON for _createObjectFromJSON
+        const json = {
+            id: node.id,
+            type: internalType,
+            name: node.name,
+            x: node.absoluteBoundingBox?.x || 0,
+            y: node.absoluteBoundingBox?.y || 0,
+            width: node.absoluteBoundingBox?.width || 1,
+            height: node.absoluteBoundingBox?.height || 1,
+            rotation: node.rotation || 0,
+            visible: node.visible !== false,
+            locked: node.locked || false,
+            opacity: node.opacity ?? 1,
+            blendMode: (node.blendMode || 'NORMAL').toLowerCase(),
+            
+            // Restore ASCII properties
+            strokeChar: node.ascii?.strokeChar || '*',
+            fillChar: node.ascii?.fillChar || '',
+            lineStyle: node.ascii?.lineStyle || 'single',
+            strokeColor: node.ascii?.strokeColor || (node.strokes?.[0]?.color ? ColorUtils.figmaToHex(node.strokes[0].color) : null),
+            fillColor: node.ascii?.fillColor || (node.fills?.[0]?.color ? ColorUtils.figmaToHex(node.fills[0].color) : null),
+            
+            // Constraints (convert back to v1 naming)
+            constraints: {
+                horizontal: ConstraintMapping.toV1.horizontal[node.constraints?.horizontal] || 'left',
+                vertical: ConstraintMapping.toV1.vertical[node.constraints?.vertical] || 'top'
+            },
+            
+            clipContent: node.clipsContent || false
+        };
+        
+        // Restore auto layout
+        if (node.layoutMode && node.layoutMode !== 'NONE') {
+            json.autoLayout = {
+                enabled: true,
+                direction: node.layoutMode === 'HORIZONTAL' ? 'horizontal' : 'vertical',
+                spacing: node.itemSpacing || 0,
+                padding: {
+                    top: node.paddingTop || 0,
+                    right: node.paddingRight || 0,
+                    bottom: node.paddingBottom || 0,
+                    left: node.paddingLeft || 0
+                },
+                alignment: this._mapFigmaCounterAlignmentToV1(node.counterAxisAlignItems),
+                distribution: node._distribution || this._mapFigmaPrimaryAlignmentToV1(node.primaryAxisAlignItems),
+                wrap: node.layoutWrap === 'WRAP',
+                wrapSpacing: node.counterAxisSpacing || 0,
+                counterSpacing: node.counterAxisSpacing || 0,
+                reversed: node.itemReverseZIndex || false
+            };
+        }
+        
+        // Restore sizing
+        if (node.primaryAxisSizingMode || node.counterAxisSizingMode) {
+            json.sizing = {
+                horizontal: node.primaryAxisSizingMode === 'AUTO' ? 'hug' : 'fixed',
+                vertical: node.counterAxisSizingMode === 'AUTO' ? 'hug' : 'fixed',
+                minWidth: node.minWidth,
+                maxWidth: node.maxWidth,
+                minHeight: node.minHeight,
+                maxHeight: node.maxHeight
+            };
+        }
+        
+        // Restore layout sizing
+        if (node.layoutAlign !== undefined || node.layoutGrow !== undefined) {
+            json._layoutSizing = {
+                horizontal: node.layoutGrow > 0 ? 'fill' : 'fixed',
+                vertical: node.layoutAlign === 'STRETCH' ? 'fill' : 'fixed'
+            };
+        }
+        
+        // Type-specific properties
+        switch (internalType) {
+            case 'text':
+            case 'ascii-text':
+                json.text = node.characters || '';
+                json.fontFamily = node.fontFamily;
+                json.fontSize = node.fontSize;
+                if (node.ascii?.isAsciiText) json.type = 'ascii-text';
+                break;
+                
+            case 'line':
+                json.x1 = node.x1;
+                json.y1 = node.y1;
+                json.x2 = node.x2;
+                json.y2 = node.y2;
+                break;
+                
+            case 'ellipse':
+                json.radiusX = node.radiusX;
+                json.radiusY = node.radiusY;
+                // Restore center-based coords
+                json.x = (node.absoluteBoundingBox?.x || 0) + (node.radiusX || 0);
+                json.y = (node.absoluteBoundingBox?.y || 0) + (node.radiusY || 0);
+                break;
+                
+            case 'polygon':
+                json.sides = node.sides;
+                json.points = node.polygonPoints;
+                json.cx = node.cx;
+                json.cy = node.cy;
+                json.radius = node.radius;
+                break;
+                
+            case 'star':
+                json.points = node.starPoints;
+                json.numPoints = node.starPoints;
+                json.innerRadius = node.innerRadius;
+                json.outerRadius = node.outerRadius;
+                json.cx = node.cx;
+                json.cy = node.cy;
+                break;
+                
+            case 'path':
+                json.commands = node.pathCommands;
+                json.segments = node.segments;
+                break;
+                
+            case 'frame':
+                json.showBorder = node.showBorder;
+                json.borderStyle = node.borderStyle;
+                json.backgroundColor = node.backgroundColor ? ColorUtils.figmaToHex(node.backgroundColor) : null;
+                json.backgroundChar = node.backgroundChar;
+                json.title = node.title;
+                json.autoSize = node.autoSize;
+                json.padding = {
+                    top: node.paddingTop || 0,
+                    right: node.paddingRight || 0,
+                    bottom: node.paddingBottom || 0,
+                    left: node.paddingLeft || 0
+                };
+                break;
+                
+            case 'table':
+                json.cols = node.cols;
+                json.rows = node.rows;
+                json.cellData = node.cellData;
+                json.columnWidths = node.columnWidths;
+                json.rowHeights = node.rowHeights;
+                break;
+                
+            case 'chart':
+                json.chartType = node.chartType;
+                json.chartData = node.chartData;
+                json.chartOptions = node.chartOptions;
+                break;
+                
+            // Flowchart shapes
+            case 'process':
+            case 'terminal':
+            case 'decision':
+            case 'io':
+            case 'document':
+            case 'database':
+            case 'subprocess':
+            case 'connector-circle':
+                json.label = node.label;
+                json.labelColor = node.labelColor;
+                break;
+                
+            case 'connector':
+                json.fromShapeId = node.fromShapeId;
+                json.fromSnapPoint = node.fromSnapPoint;
+                json.toShapeId = node.toShapeId;
+                json.toSnapPoint = node.toSnapPoint;
+                json.startX = node.startX;
+                json.startY = node.startY;
+                json.endX = node.endX;
+                json.endY = node.endY;
+                json.connectorStyle = node.connectorStyle;
+                json.lineType = node.lineType;
+                json.arrowStart = node.arrowStart;
+                json.arrowEnd = node.arrowEnd;
+                json.waypoints = node.waypoints;
+                break;
+        }
+        
+        // UI Component properties
+        if (node.uiComponentType) {
+            json.uiComponentType = node.uiComponentType;
+            json.uiProperties = node.uiProperties || {};
+            json.uiRenderWidth = node.uiRenderWidth;
+            json.uiRenderHeight = node.uiRenderHeight;
+        }
+        if (node.avaloniaType) {
+            json.avaloniaType = node.avaloniaType;
+            json.avaloniaProperties = node.avaloniaProperties || {};
+        }
+        
+        // Create the object
+        const obj = this._createObjectFromJSON(json);
+        
+        // Recursively create children
+        if (obj && node.children && node.children.length > 0) {
+            obj.children = [];
+            for (const childNode of node.children) {
+                const childObj = this._createObjectFromV2Node(childNode, ColorUtils, ConstraintMapping, TypeMapping);
+                if (childObj) {
+                    childObj.parentId = obj.id;
+                    childObj._cachedParent = obj;
+                    obj.children.push(childObj);
+                }
+            }
+        }
+        
+        return obj;
+    }
+    
+    /**
+     * Map Figma counter axis alignment to v1 alignment
+     */
+    _mapFigmaCounterAlignmentToV1(alignment) {
+        switch (alignment) {
+            case 'MIN': return 'start';
+            case 'CENTER': return 'center';
+            case 'MAX': return 'end';
+            case 'STRETCH': return 'stretch';
+            case 'BASELINE': return 'baseline';
+            default: return 'start';
+        }
+    }
+    
+    /**
+     * Map Figma primary axis alignment to v1 distribution
+     */
+    _mapFigmaPrimaryAlignmentToV1(alignment) {
+        switch (alignment) {
+            case 'SPACE_BETWEEN': return 'space-between';
+            case 'SPACE_AROUND': return 'space-around';
+            case 'SPACE_EVENLY': return 'space-evenly';
+            default: return 'packed';
+        }
+    }
+    
+    /**
+     * Load v1 format document (legacy flat structure)
+     */
+    async _loadFromNativeFormatV1(data) {
         // Restore document settings
         if (data.document) {
             if (data.document.width) AppState.canvasWidth = data.document.width;
@@ -18665,41 +19036,6 @@ class Asciistrator extends EventEmitter {
             }];
             AppState.activeLayerId = 0;
         }
-        
-        // Clear undo/redo stacks for fresh document
-        AppState.undoStack = [];
-        AppState.redoStack = [];
-        
-        // Restore component libraries
-        if (data.componentLibraries && Array.isArray(data.componentLibraries)) {
-            const { ComponentLibrary } = await import('./components/ComponentLibrary.js');
-            for (const libData of data.componentLibraries) {
-                // Skip if library already exists (by ID)
-                const existing = componentLibraryManager.getLibrary(libData.id);
-                if (existing && existing.isBuiltIn) {
-                    continue; // Don't overwrite built-in libraries
-                }
-                
-                // Remove existing non-built-in library with same ID
-                if (existing) {
-                    componentLibraryManager.removeLibrary(libData.id);
-                }
-                
-                // Create and add the library
-                const library = ComponentLibrary.fromJSON(libData);
-                library.isBuiltIn = false;
-                componentLibraryManager.addLibrary(library);
-            }
-            this._renderComponentLibraries();
-        }
-        
-        // Invalidate spatial index and re-render
-        this._spatialIndexDirty = true;
-        this.renderAllObjects();
-        this._updateBreadcrumbUI();
-        this._updateLayerList();
-        this._updateUndoRedoButtons();
-        AppState.modified = false;
     }
     
     _loadFromText(text) {
