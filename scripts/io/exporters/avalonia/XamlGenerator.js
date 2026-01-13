@@ -3,12 +3,13 @@
  * 
  * Generates Avalonia XAML markup from component definitions.
  * Handles indentation, namespaces, elements, and content properties.
+ * Enhanced with effects, transforms, and gradient support.
  * 
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import { getMappingBySourceId, getMappingByControlName } from './ComponentMappings.js';
-import { propertyConverter } from './PropertyConverters.js';
+import { propertyConverter, ExtendedConverterTypes } from './PropertyConverters.js';
 
 // ==========================================
 // XAML NAMESPACE DEFINITIONS
@@ -42,11 +43,19 @@ export class XamlGenerator {
             includeComments: true,
             rootNamespace: 'AsciistratorApp',
             styleResourceKey: 'AsciiStyles',
+            // Enhanced options
+            includeEffects: true,
+            includeTransforms: true,
+            includeGradients: true,
+            useAvaloniaStyles: true,
+            framework: 'avalonia',
+            avaloniaVersion: 11,
             ...options
         };
         
         this._usedNamespaces = new Set(['default', 'x']);
         this._resourceReferences = new Set();
+        this._generatedResources = new Map();
     }
     
     // ==========================================
@@ -132,12 +141,16 @@ export class XamlGenerator {
     
     /**
      * Generate XAML for a UI component (from component library)
+     * Handles effects, transforms, and gradients as property elements
      * @private
      */
     _generateUIComponent(component, indentLevel) {
         const indent = this._indent(indentLevel);
         const tagName = component.avaloniaControl;
         const lines = [];
+        
+        // Reset complex properties storage
+        this._currentComplexProperties = [];
         
         // Check if namespace prefix needed
         let fullTagName = tagName;
@@ -152,13 +165,15 @@ export class XamlGenerator {
         
         // Collect attributes
         const attributes = this._buildUIComponentAttributes(component);
+        const complexProperties = this._currentComplexProperties || [];
         
         // Get children/content
         const children = component.children || [];
         const contentValue = component.content || component.text;
         
-        // Determine if self-closing
-        const hasContent = children.length > 0 || contentValue;
+        // Determine if has content
+        const hasComplexProps = complexProperties.length > 0;
+        const hasContent = children.length > 0 || contentValue || hasComplexProps;
         
         // Build element
         if (attributes.length === 0 && !hasContent) {
@@ -175,11 +190,22 @@ export class XamlGenerator {
             if (hasContent) {
                 lines[lines.length - 1] += '>';
                 
+                // Add complex property elements (effects, transforms, gradients)
+                for (const complexProp of complexProperties) {
+                    lines.push(`${indent}${this._indent(1)}<${tagName}.${complexProp.property}>`);
+                    // Indent each line of the complex value
+                    const valueLines = complexProp.value.split('\n');
+                    for (const line of valueLines) {
+                        lines.push(`${indent}${this._indent(2)}${line.trim()}`);
+                    }
+                    lines.push(`${indent}${this._indent(1)}</${tagName}.${complexProp.property}>`);
+                }
+                
                 if (children.length > 0) {
                     for (const child of children) {
                         lines.push(this.generateComponent(child, indentLevel + 1));
                     }
-                } else if (contentValue) {
+                } else if (contentValue && !hasComplexProps) {
                     lines.push(`${indent}${this._indent(1)}${this._escapeXml(contentValue)}`);
                 }
                 
@@ -195,10 +221,12 @@ export class XamlGenerator {
     /**
      * Build attributes for UI component
      * Only outputs properties that were explicitly set
+     * Uses enhanced converters for effects, transforms, and gradients
      * @private
      */
     _buildUIComponentAttributes(component) {
         const attributes = [];
+        const complexProperties = [];
         
         // Canvas attached properties (position)
         if (component.canvasLeft !== undefined) {
@@ -239,7 +267,10 @@ export class XamlGenerator {
             'command': 'Command',
             'commandParameter': 'CommandParameter',
             'margin': 'Margin',
-            'padding': 'Padding'
+            'padding': 'Padding',
+            'opacity': 'Opacity',
+            'zIndex': 'Panel.ZIndex',
+            'clipToBounds': 'ClipToBounds'
         };
         
         // Only output properties that exist in the component object
@@ -259,7 +290,197 @@ export class XamlGenerator {
             }
         }
         
+        // Handle fill/background with gradient support
+        if (component.fill || component.background || component.fills) {
+            const fill = component.fill || component.background || component.fills;
+            const brushResult = this._convertBrushProperty(fill, 'Fill');
+            if (brushResult.isSimple) {
+                attributes.push(`Fill="${brushResult.value}"`);
+            } else {
+                complexProperties.push({ property: 'Fill', value: brushResult.value });
+            }
+        }
+        
+        // Handle stroke with gradient support
+        if (component.stroke || component.strokes) {
+            const stroke = component.stroke || component.strokes;
+            const strokeProps = propertyConverter.convertStrokes(stroke);
+            if (strokeProps.stroke) {
+                if (strokeProps.stroke.startsWith('<')) {
+                    complexProperties.push({ property: 'Stroke', value: strokeProps.stroke });
+                } else {
+                    attributes.push(`Stroke="${strokeProps.stroke}"`);
+                }
+            }
+            if (strokeProps.strokeThickness) {
+                attributes.push(`StrokeThickness="${strokeProps.strokeThickness}"`);
+            }
+            if (strokeProps.strokeDashArray) {
+                attributes.push(`StrokeDashArray="${strokeProps.strokeDashArray}"`);
+            }
+            if (strokeProps.strokeLineCap) {
+                attributes.push(`StrokeLineCap="${strokeProps.strokeLineCap}"`);
+            }
+            if (strokeProps.strokeLineJoin) {
+                attributes.push(`StrokeLineJoin="${strokeProps.strokeLineJoin}"`);
+            }
+        }
+        
+        // Handle effects
+        if (this._options.includeEffects && component.effects?.length > 0) {
+            const effectXaml = this._generateEffectsXaml(component.effects);
+            if (effectXaml) {
+                complexProperties.push({ property: 'Effect', value: effectXaml });
+            }
+        }
+        
+        // Handle transforms
+        if (this._options.includeTransforms && (component.rotation || component.scale || component.transforms)) {
+            const transformXaml = this._generateTransformsXaml(component);
+            if (transformXaml) {
+                complexProperties.push({ property: 'RenderTransform', value: transformXaml });
+            }
+        }
+        
+        // Handle transform origin
+        if (component.transformOrigin) {
+            const origin = component.transformOrigin;
+            const originStr = typeof origin === 'string' ? origin : `${origin.x ?? 0.5},${origin.y ?? 0.5}`;
+            attributes.push(`RenderTransformOrigin="${originStr}"`);
+        }
+        
+        // Store complex properties for later element generation
+        this._currentComplexProperties = complexProperties;
+        
         return attributes;
+    }
+    
+    /**
+     * Convert brush property (fill/stroke) handling gradients
+     * @private
+     */
+    _convertBrushProperty(fill, propertyName) {
+        if (!fill) return { isSimple: true, value: 'Transparent' };
+        
+        // Handle array of fills
+        const fills = Array.isArray(fill) ? fill : [fill];
+        const visibleFill = fills.find(f => f.visible !== false) || fills[0];
+        
+        // Handle simple color string
+        if (typeof visibleFill === 'string') {
+            return { isSimple: true, value: visibleFill };
+        }
+        
+        // Handle color object
+        if (visibleFill.color && !visibleFill.type) {
+            const color = propertyConverter.convert(visibleFill.color, 'brush');
+            return { isSimple: true, value: color };
+        }
+        
+        // Handle gradient types
+        switch (visibleFill.type) {
+            case 'SOLID':
+            case 'solid':
+                return { isSimple: true, value: propertyConverter.convert(visibleFill.color, 'brush') };
+                
+            case 'LINEAR_GRADIENT':
+            case 'linearGradient':
+                if (this._options.includeGradients) {
+                    return { isSimple: false, value: propertyConverter._convertLinearGradientBrush(visibleFill) };
+                }
+                return { isSimple: true, value: this._getFallbackColorFromGradient(visibleFill) };
+                
+            case 'RADIAL_GRADIENT':
+            case 'radialGradient':
+                if (this._options.includeGradients) {
+                    return { isSimple: false, value: propertyConverter._convertRadialGradientBrush(visibleFill) };
+                }
+                return { isSimple: true, value: this._getFallbackColorFromGradient(visibleFill) };
+                
+            case 'IMAGE':
+            case 'image':
+                return { isSimple: false, value: propertyConverter._convertImageBrush(visibleFill) };
+                
+            default:
+                return { isSimple: true, value: 'Transparent' };
+        }
+    }
+    
+    /**
+     * Get fallback solid color from gradient
+     * @private
+     */
+    _getFallbackColorFromGradient(gradient) {
+        const stops = gradient.gradientStops || gradient.stops || [];
+        if (stops.length > 0) {
+            return propertyConverter.convert(stops[0].color, 'brush');
+        }
+        return 'Gray';
+    }
+    
+    /**
+     * Generate effects XAML
+     * @private
+     */
+    _generateEffectsXaml(effects) {
+        if (!effects || effects.length === 0) return null;
+        
+        // Use first visible effect
+        const effect = effects.find(e => e.visible !== false) || effects[0];
+        
+        switch (effect.type) {
+            case 'DROP_SHADOW':
+            case 'dropShadow':
+                return propertyConverter._convertDropShadow(effect);
+                
+            case 'INNER_SHADOW':
+            case 'innerShadow':
+                // Inner shadow - approximate with drop shadow
+                return propertyConverter._convertDropShadow({ ...effect, isInner: true });
+                
+            case 'LAYER_BLUR':
+            case 'blur':
+                return propertyConverter._convertBlurEffect(effect);
+                
+            default:
+                return null;
+        }
+    }
+    
+    /**
+     * Generate transforms XAML
+     * @private
+     */
+    _generateTransformsXaml(component) {
+        const transforms = [];
+        
+        // Handle individual transform properties
+        if (component.rotation && component.rotation !== 0) {
+            transforms.push({ type: 'rotate', rotation: component.rotation });
+        }
+        
+        if (component.scale && (component.scale.x !== 1 || component.scale.y !== 1 || 
+            typeof component.scale === 'number')) {
+            transforms.push({ type: 'scale', scale: component.scale });
+        }
+        
+        if (component.skew && (component.skew.x !== 0 || component.skew.y !== 0)) {
+            transforms.push({ type: 'skew', skew: component.skew });
+        }
+        
+        if (component.relativeTransform) {
+            // Matrix transform - decompose if possible
+            transforms.push({ type: 'matrix', matrix: component.relativeTransform });
+        }
+        
+        // Add explicit transforms array
+        if (component.transforms) {
+            transforms.push(...component.transforms);
+        }
+        
+        if (transforms.length === 0) return null;
+        
+        return propertyConverter._convertTransformGroup(transforms);
     }
     
     /**

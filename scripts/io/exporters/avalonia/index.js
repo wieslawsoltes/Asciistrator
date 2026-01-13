@@ -2,8 +2,9 @@
  * Asciistrator - Avalonia Exporter Module Index
  * 
  * Exports all Avalonia XAML exporter components.
+ * Enhanced with effects, transforms, and gradient support.
  * 
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 // Component Mappings
@@ -18,7 +19,8 @@ export {
 // Property Converters
 export {
     PropertyConverter,
-    propertyConverter
+    propertyConverter,
+    ExtendedConverterTypes
 } from './PropertyConverters.js';
 
 // XAML Generator

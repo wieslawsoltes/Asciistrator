@@ -4,13 +4,14 @@
  * Main exporter class that coordinates XAML, style, and code-behind generation.
  * Uses FrameworkMappings for component and property name translation.
  * Extends the base exporter system for integration with the export framework.
+ * Enhanced with effects, transforms, and gradient support.
  * 
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import { BaseExporter } from '../BaseExporter.js';
 import { getMappingBySourceId, AVALONIA_COMPONENT_MAPPINGS } from './ComponentMappings.js';
-import { PropertyConverter, propertyConverter } from './PropertyConverters.js';
+import { PropertyConverter, propertyConverter, ExtendedConverterTypes } from './PropertyConverters.js';
 import { XamlGenerator, createXamlGenerator } from './XamlGenerator.js';
 import { StyleGenerator, createStyleGenerator, ASCII_COLORS } from './StyleGenerator.js';
 import { CodeBehindGenerator, createCodeBehindGenerator } from './CodeBehindGenerator.js';
@@ -46,7 +47,15 @@ export class AvaloniaXamlExporter extends BaseExporter {
             indentSize: 4,
             useTabs: false,
             includeDesignTimeData: true,
-            includeComments: true
+            includeComments: true,
+            // Enhanced options
+            includeEffects: true,
+            includeTransforms: true,
+            includeGradients: true,
+            generateStyles: true,
+            optimizeOutput: true,
+            framework: 'avalonia',
+            avaloniaVersion: 11
         };
     }
     
@@ -133,6 +142,70 @@ export class AvaloniaXamlExporter extends BaseExporter {
                 type: 'boolean',
                 label: 'Include Design-Time Data',
                 default: true
+            },
+            // Enhanced options
+            includeEffects: {
+                type: 'boolean',
+                label: 'Include Effects (Shadows, Blur)',
+                default: true
+            },
+            includeTransforms: {
+                type: 'boolean',
+                label: 'Include Transforms',
+                default: true
+            },
+            includeGradients: {
+                type: 'boolean',
+                label: 'Include Gradients',
+                default: true
+            },
+            generateStyles: {
+                type: 'boolean',
+                label: 'Generate Avalonia Styles',
+                default: true
+            },
+            optimizeOutput: {
+                type: 'boolean',
+                label: 'Optimize Output',
+                default: true
+            }
+        };
+    }
+                type: 'boolean',
+                label: 'Generate ViewModel',
+                default: false
+            },
+            useReactiveUI: {
+                type: 'boolean',
+                label: 'Use ReactiveUI',
+                default: false
+            },
+            useCommunityToolkit: {
+                type: 'boolean',
+                label: 'Use CommunityToolkit.Mvvm',
+                default: false
+            },
+            generateTheme: {
+                type: 'boolean',
+                label: 'Generate Theme File',
+                default: false
+            },
+            indentSize: {
+                type: 'number',
+                label: 'Indent Size',
+                min: 1,
+                max: 8,
+                default: 4
+            },
+            useTabs: {
+                type: 'boolean',
+                label: 'Use Tabs',
+                default: false
+            },
+            includeDesignTimeData: {
+                type: 'boolean',
+                label: 'Include Design-Time Data',
+                default: true
             }
         };
     }
@@ -156,13 +229,21 @@ export class AvaloniaXamlExporter extends BaseExporter {
             useTabs: this._exportOptions.useTabs,
             includeDesignTimeData: this._exportOptions.includeDesignTimeData,
             includeComments: this._exportOptions.includeComments,
-            rootNamespace: this._exportOptions.namespace
+            rootNamespace: this._exportOptions.namespace,
+            // Enhanced options
+            includeEffects: this._exportOptions.includeEffects,
+            includeTransforms: this._exportOptions.includeTransforms,
+            includeGradients: this._exportOptions.includeGradients,
+            framework: this._exportOptions.framework,
+            avaloniaVersion: this._exportOptions.avaloniaVersion
         });
         
         this._styleGenerator = createStyleGenerator({
             indentSize: this._exportOptions.indentSize,
             useTabs: this._exportOptions.useTabs,
-            generateComments: this._exportOptions.includeComments
+            generateComments: this._exportOptions.includeComments,
+            includeEffects: this._exportOptions.includeEffects,
+            includeGradients: this._exportOptions.includeGradients
         });
         
         this._codeBehindGenerator = createCodeBehindGenerator({

@@ -3,8 +3,9 @@
  * 
  * Specialized dialog for exporting to Avalonia XAML with full options
  * for generating Window, UserControl, code-behind, ViewModel, and themes.
+ * Enhanced with effects, transforms, and gradient export options.
  * 
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import { createElement } from '../utils/dom.js';
@@ -35,7 +36,16 @@ const defaultDialogState = {
     includeComments: true,
     preservePositions: true,
     theme: 'dark',
-    customColors: false
+    customColors: false,
+    // Enhanced options
+    includeEffects: true,
+    includeTransforms: true,
+    includeGradients: true,
+    generateStyles: true,
+    useAvaloniaStyles: true,
+    optimizeOutput: true,
+    indentSize: 4,
+    useTabs: false
 };
 
 let dialogState = { ...defaultDialogState };
@@ -201,6 +211,42 @@ export class AvaloniaExportDialog {
                                 <input type="checkbox" id="opt-positions" ${dialogState.preservePositions ? 'checked' : ''}>
                                 <span>Preserve positions</span>
                             </label>
+                            <label class="checkbox-option">
+                                <input type="checkbox" id="opt-optimize" ${dialogState.optimizeOutput ? 'checked' : ''}>
+                                <span>Optimize output</span>
+                            </label>
+                        </div>
+                        
+                        <div class="option-group">
+                            <h3>Visual Properties</h3>
+                            <label class="checkbox-option">
+                                <input type="checkbox" id="opt-effects" ${dialogState.includeEffects ? 'checked' : ''}>
+                                <span>Include effects (shadows, blur)</span>
+                            </label>
+                            <label class="checkbox-option">
+                                <input type="checkbox" id="opt-transforms" ${dialogState.includeTransforms ? 'checked' : ''}>
+                                <span>Include transforms</span>
+                            </label>
+                            <label class="checkbox-option">
+                                <input type="checkbox" id="opt-gradients" ${dialogState.includeGradients ? 'checked' : ''}>
+                                <span>Include gradients</span>
+                            </label>
+                            <label class="checkbox-option">
+                                <input type="checkbox" id="opt-styles" ${dialogState.generateStyles ? 'checked' : ''}>
+                                <span>Generate styles</span>
+                            </label>
+                        </div>
+                        
+                        <div class="option-group">
+                            <h3>Formatting</h3>
+                            <div class="option-row">
+                                <label>Indent Size:</label>
+                                <input type="number" id="opt-indent" value="${dialogState.indentSize}" min="1" max="8" style="width: 60px;">
+                            </div>
+                            <label class="checkbox-option">
+                                <input type="checkbox" id="opt-tabs" ${dialogState.useTabs ? 'checked' : ''}>
+                                <span>Use tabs instead of spaces</span>
+                            </label>
                         </div>
                         
                         <div class="option-group">
@@ -308,16 +354,34 @@ export class AvaloniaExportDialog {
             { id: 'opt-theme', key: 'generateTheme' },
             { id: 'opt-resources', key: 'useResourceDictionary' },
             { id: 'opt-comments', key: 'includeComments' },
-            { id: 'opt-positions', key: 'preservePositions' }
+            { id: 'opt-positions', key: 'preservePositions' },
+            { id: 'opt-optimize', key: 'optimizeOutput' },
+            { id: 'opt-effects', key: 'includeEffects' },
+            { id: 'opt-transforms', key: 'includeTransforms' },
+            { id: 'opt-gradients', key: 'includeGradients' },
+            { id: 'opt-styles', key: 'generateStyles' },
+            { id: 'opt-tabs', key: 'useTabs' }
         ];
         
         checkboxes.forEach(({ id, key }) => {
-            this.dialogEl.querySelector(`#${id}`).addEventListener('change', (e) => {
-                dialogState[key] = e.target.checked;
-                this._updateUI();
+            const el = this.dialogEl.querySelector(`#${id}`);
+            if (el) {
+                el.addEventListener('change', (e) => {
+                    dialogState[key] = e.target.checked;
+                    this._updateUI();
+                    this._updatePreview();
+                });
+            }
+        });
+        
+        // Indent size input
+        const indentEl = this.dialogEl.querySelector('#opt-indent');
+        if (indentEl) {
+            indentEl.addEventListener('change', (e) => {
+                dialogState.indentSize = parseInt(e.target.value, 10) || 4;
                 this._updatePreview();
             });
-        });
+        }
         
         // Theme select
         this.dialogEl.querySelector('#opt-theme').addEventListener('change', (e) => {
@@ -499,7 +563,17 @@ export class AvaloniaExportDialog {
             generateViewModel: dialogState.generateViewModel,
             generateTheme: dialogState.generateTheme,
             useResourceDictionary: dialogState.useResourceDictionary,
-            theme: dialogState.theme
+            theme: dialogState.theme,
+            // Enhanced options
+            includeEffects: dialogState.includeEffects,
+            includeTransforms: dialogState.includeTransforms,
+            includeGradients: dialogState.includeGradients,
+            generateStyles: dialogState.generateStyles,
+            optimizeOutput: dialogState.optimizeOutput,
+            indentSize: dialogState.indentSize,
+            useTabs: dialogState.useTabs,
+            framework: 'avalonia',
+            avaloniaVersion: 11
         };
     }
     

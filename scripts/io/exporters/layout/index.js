@@ -4,7 +4,7 @@
  * Module index for layout transformation and container export engines.
  * These provide deterministic layout handling for each export format.
  * 
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 // ==========================================
@@ -42,7 +42,8 @@ export {
 export {
     XAMLLayoutTransformer,
     XAMLPanelType,
-    XAMLAlignment
+    XAMLAlignment,
+    FrameworkFeatures
 } from './XAMLLayoutTransformer.js';
 
 export {
