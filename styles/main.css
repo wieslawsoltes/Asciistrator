@@ -1914,32 +1914,83 @@ body {
     opacity: 0.6;
 }
 
-/* Guide lines created from rulers */
+/* Guide lines created from rulers - Figma style */
 .guide-line {
-    background-color: var(--color-accent);
-    opacity: 0.8;
+    opacity: 1;
+    pointer-events: none;
 }
 
 .guide-line.guide-horizontal {
     height: 1px;
-    background: repeating-linear-gradient(
-        to right,
-        var(--color-accent),
-        var(--color-accent) 4px,
-        transparent 4px,
-        transparent 8px
-    );
+    background: #f24822; /* Figma red-orange */
+    box-shadow: 0 0 0 1px rgba(242, 72, 34, 0.3);
 }
 
 .guide-line.guide-vertical {
     width: 1px;
-    background: repeating-linear-gradient(
-        to bottom,
-        var(--color-accent),
-        var(--color-accent) 4px,
-        transparent 4px,
-        transparent 8px
-    );
+    background: #f24822; /* Figma red-orange */
+    box-shadow: 0 0 0 1px rgba(242, 72, 34, 0.3);
+}
+
+/* Guide position label shown during drag */
+.guide-line::after {
+    content: attr(data-position);
+    position: absolute;
+    background: #f24822;
+    color: white;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 500;
+    border-radius: 2px;
+    white-space: nowrap;
+}
+
+.guide-line.guide-horizontal::after {
+    left: 50px;
+    top: 4px;
+}
+
+.guide-line.guide-vertical::after {
+    top: 50px;
+    left: 4px;
+}
+
+/* Guide markers on rulers (Figma-style triangles) */
+.ruler-guide-marker {
+    position: absolute;
+    width: 0;
+    height: 0;
+    pointer-events: auto;
+    cursor: pointer;
+    z-index: 10;
+}
+
+/* Vertical guide marker (on horizontal ruler) - triangle pointing down */
+.ruler-horizontal .ruler-guide-marker {
+    bottom: 0;
+    transform: translateX(-4px);
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 6px solid #f24822;
+}
+
+.ruler-horizontal .ruler-guide-marker:hover,
+.ruler-horizontal .ruler-guide-marker.selected {
+    border-top-color: #18a0fb;
+}
+
+/* Horizontal guide marker (on vertical ruler) - triangle pointing right */
+.ruler-vertical .ruler-guide-marker {
+    right: 0;
+    transform: translateY(-4px);
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    border-left: 6px solid #f24822;
+}
+
+.ruler-vertical .ruler-guide-marker:hover,
+.ruler-vertical .ruler-guide-marker.selected {
+    border-left-color: #18a0fb;
 }
 
 /* Rulers hidden state */
