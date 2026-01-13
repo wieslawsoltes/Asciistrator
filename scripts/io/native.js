@@ -910,4 +910,5 @@ export default {
     saveNativeDocument,
     loadNativeDocument,
     detectVersion,
-    ConstraintValues,
+    ConstraintValues
+};
