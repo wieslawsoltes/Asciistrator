@@ -4674,9 +4674,16 @@ class FrameObject extends SceneObject {
         // Create clipping mask if enabled
         const clipBounds = this.clipContent ? this.getContentBounds() : null;
         
-        // Render children (clipped if enabled)
+        // Check which children are being dragged (should not be clipped during drag)
+        const draggingChildren = AppState.isDraggingObjects ? 
+            new Set(AppState.selectedObjects.filter(obj => obj.parentFrame === this.id || obj.parentId === this.id)) : null;
+        
+        // Render children (clipped if enabled, except for children being dragged)
         for (const child of this.children) {
-            if (this.clipContent) {
+            // Skip clipping for children being dragged - allows them to be visible outside frame
+            const isBeingDragged = draggingChildren && draggingChildren.has(child);
+            
+            if (this.clipContent && !isBeingDragged) {
                 // Temporarily modify buffer to clip
                 const originalSetChar = buffer.setChar.bind(buffer);
                 buffer.setChar = (x, y, char, color) => {
@@ -4688,6 +4695,7 @@ class FrameObject extends SceneObject {
                 child.render(buffer);
                 buffer.setChar = originalSetChar;
             } else {
+                // No clipping - either disabled or child is being dragged
                 child.render(buffer);
             }
         }
@@ -6251,6 +6259,9 @@ const AppState = {
     
     // Selection
     selectedObjects: [],
+    
+    // Drag state - used to disable frame clipping during move operations
+    isDraggingObjects: false,
     
     // Hierarchical selection context (Figma-like)
     selectionContext: {
@@ -10225,6 +10236,7 @@ class SelectTool extends Tool {
                     if (obj.containsPoint && obj.containsPoint(x, y)) {
                         this.isMoving = true;
                         this.isDraggingToNest = true;
+                        AppState.isDraggingObjects = true; // Disable frame clipping during drag
                         this.dragStartContainer = AppState.selectionContext.currentContainer;
                         this.moveStartX = x;
                         this.moveStartY = y;
@@ -10265,6 +10277,7 @@ class SelectTool extends Tool {
                 // Start moving immediately after selection
                 this.isMoving = true;
                 this.isDraggingToNest = true;
+                AppState.isDraggingObjects = true; // Disable frame clipping during drag
                 this.dragStartContainer = AppState.selectionContext.currentContainer;
                 this.moveStartX = x;
                 this.moveStartY = y;
@@ -10964,6 +10977,7 @@ class SelectTool extends Tool {
             // Reset dragging state
             this.isMoving = false;
             this.isDraggingToNest = false;
+            AppState.isDraggingObjects = false; // Re-enable frame clipping
             this.dragStartContainer = null;
             this.potentialDropTarget = null;
             this.dropIndicatorIndex = -1;
@@ -11688,6 +11702,28 @@ class SelectTool extends Tool {
     _updateStatus(msg) {
         const statusText = document.querySelector('#status-message');
         if (statusText) statusText.textContent = msg;
+    }
+    
+    /**
+     * Called when tool is deactivated - clean up drag state
+     */
+    onDeactivate(renderer, app) {
+        // Clear drag state to ensure frame clipping is re-enabled
+        this.isMoving = false;
+        this.isDragging = false;
+        this.isDraggingToNest = false;
+        AppState.isDraggingObjects = false;
+        this.initialPositions = null;
+        this.potentialDropTarget = null;
+        this.dropIndicatorIndex = -1;
+        
+        // Clear smart guides
+        this.smartGuides.clearGuides();
+        this.lastSnapResult = null;
+        
+        // Clear selection context hover
+        AppState.selectionContext.hoverTarget = null;
+        AppState.selectionContext.dropIndicator = null;
     }
 }
 
