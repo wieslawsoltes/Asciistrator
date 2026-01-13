@@ -24841,18 +24841,23 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             }
         };
 
+        const updateSelection = () => {
+            results.querySelectorAll('.command-palette-item').forEach(el => {
+                el.classList.toggle('selected', parseInt(el.dataset.commandIndex, 10) === selectedIndex);
+            });
+            scrollToSelected();
+        };
+
         input.addEventListener('keydown', (e) => {
             const maxResults = input.value.trim() ? 20 : 50;
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
                 selectedIndex = Math.min(selectedIndex + 1, Math.min(filteredCommands.length - 1, maxResults - 1));
-                renderResults();
-                scrollToSelected();
+                updateSelection();
             } else if (e.key === 'ArrowUp') {
                 e.preventDefault();
                 selectedIndex = Math.max(selectedIndex - 1, 0);
-                renderResults();
-                scrollToSelected();
+                updateSelection();
             } else if (e.key === 'Enter') {
                 e.preventDefault();
                 if (filteredCommands[selectedIndex]) {
@@ -25044,17 +25049,22 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             }
         };
 
+        const updateSelection = () => {
+            results.querySelectorAll('.quick-insert-item').forEach(el => {
+                el.classList.toggle('selected', parseInt(el.dataset.itemIndex, 10) === selectedIndex);
+            });
+            scrollToSelected();
+        };
+
         input.addEventListener('keydown', (e) => {
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
                 selectedIndex = Math.min(selectedIndex + 1, Math.min(filteredItems.length - 1, 99));
-                renderResults();
-                scrollToSelected();
+                updateSelection();
             } else if (e.key === 'ArrowUp') {
                 e.preventDefault();
                 selectedIndex = Math.max(selectedIndex - 1, 0);
-                renderResults();
-                scrollToSelected();
+                updateSelection();
             } else if (e.key === 'Enter') {
                 e.preventDefault();
                 if (filteredItems[selectedIndex]) {
@@ -25288,15 +25298,31 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         
         // Create objects from component data
         for (const objData of objects) {
-            const obj = this._createObjectFromJSON({
+            let obj = this._createObjectFromJSON({
                 ...objData,
                 x: (objData.x || 0) + offsetX,
                 y: (objData.y || 0) + offsetY,
                 id: uuid() // Generate new ID
             });
             
+            // If _createObjectFromJSON returned null (unknown type like ui-component),
+            // create a placeholder rectangle
+            if (!obj && objData.type) {
+                obj = new RectangleObject(
+                    (objData.x || 0) + offsetX,
+                    (objData.y || 0) + offsetY,
+                    objData.width || 10,
+                    objData.height || 5
+                );
+                obj.id = uuid();
+                obj.name = objData.name || `${component.name} (${objData.type})`;
+                obj.strokeChar = '░';
+                obj.fillChar = ' ';
+                obj.metadata = { originalType: objData.type, componentType: objData.componentType };
+            }
+            
             if (obj) {
-                obj.name = objData.name || `${component.name} part`;
+                obj.name = obj.name || objData.name || `${component.name} part`;
                 this.addObject(obj, false); // Don't save undo for each object
                 createdObjects.push(obj);
             }
