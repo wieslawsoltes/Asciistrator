@@ -922,6 +922,28 @@
     color: var(--ui-text-accent);
 }
 
+.object-tree-item.editing-container {
+    border-left: 2px solid var(--ui-accent);
+    background: rgba(0, 120, 212, 0.1);
+}
+
+.container-badge {
+    font-size: 10px;
+    opacity: 0.7;
+}
+
+.auto-layout-badge {
+    font-size: 9px;
+    color: var(--ui-accent);
+    opacity: 0.8;
+}
+
+.object-count {
+    font-size: 9px;
+    color: var(--ui-text-muted);
+    margin-left: 4px;
+}
+
 .object-expand {
     width: 12px;
     font-size: 8px;

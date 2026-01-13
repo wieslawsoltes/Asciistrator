@@ -264,8 +264,35 @@ class QuadTree {
 // SCENE OBJECT MODEL
 // ==========================================
 
+// Layout constants
+const LayoutDirection = {
+    HORIZONTAL: 'horizontal',
+    VERTICAL: 'vertical'
+};
+
+const LayoutAlignment = {
+    START: 'start',
+    CENTER: 'center',
+    END: 'end',
+    STRETCH: 'stretch'
+};
+
+const LayoutDistribution = {
+    PACKED: 'packed',
+    SPACE_BETWEEN: 'space-between',
+    SPACE_AROUND: 'space-around',
+    SPACE_EVENLY: 'space-evenly'
+};
+
+const SizingMode = {
+    FIXED: 'fixed',
+    HUG: 'hug',
+    FILL: 'fill'
+};
+
 /**
  * Base class for all scene objects (vector objects)
+ * Supports hierarchical containment - any object can contain children
  */
 class SceneObject {
     constructor(type = 'object') {
@@ -294,26 +321,475 @@ class SceneObject {
         
         // Layer reference
         this.layerId = null;
+        
+        // Hierarchy support - any object can contain children
+        this.parentId = null;
+        this.children = [];
+        
+        // Auto Layout settings (Figma-style)
+        this.autoLayout = {
+            enabled: false,
+            direction: LayoutDirection.VERTICAL,
+            spacing: 1,
+            padding: { top: 1, right: 1, bottom: 1, left: 1 },
+            alignment: LayoutAlignment.START,
+            distribution: LayoutDistribution.PACKED,
+            wrap: false,
+            wrapSpacing: 1,
+            reversed: false
+        };
+        
+        // Sizing behavior
+        this.sizing = {
+            horizontal: SizingMode.FIXED,
+            vertical: SizingMode.FIXED,
+            minWidth: null,
+            maxWidth: null,
+            minHeight: null,
+            maxHeight: null
+        };
+        
+        // Layout sizing within parent (for auto layout children)
+        this._layoutSizing = {
+            horizontal: SizingMode.FIXED,
+            vertical: SizingMode.FIXED
+        };
+        
+        // Clipping and rendering
+        this.clipContent = false;
     }
     
     /**
-     * Get bounding box
-     * @returns {{x: number, y: number, width: number, height: number}}
+     * Check if this object can contain children
+     */
+    canContainChildren() {
+        // Frame-type objects can always contain children
+        // Other objects with autoLayout enabled can contain children
+        return this.type === 'frame' || this.type === 'group' || this.autoLayout.enabled;
+    }
+    
+    /**
+     * Add a child object
+     */
+    addChild(obj, index = -1) {
+        // Remove from previous parent
+        if (obj.parentId) {
+            const oldParent = this._findParentById?.(obj.parentId);
+            if (oldParent) {
+                oldParent.removeChild(obj);
+            }
+        }
+        
+        obj.parentId = this.id;
+        
+        // Calculate relative position if needed
+        if (!obj._relativePosition) {
+            obj._relativePosition = {
+                x: obj.x - this.x,
+                y: obj.y - this.y
+            };
+        }
+        
+        if (index >= 0 && index < this.children.length) {
+            this.children.splice(index, 0, obj);
+        } else {
+            this.children.push(obj);
+        }
+        
+        // Apply auto layout if enabled
+        if (this.autoLayout.enabled) {
+            this.layoutChildren();
+        }
+        
+        // Recalculate size if hugging
+        this._updateSizeIfHugging();
+    }
+    
+    /**
+     * Remove a child object
+     */
+    removeChild(obj) {
+        const idx = this.children.indexOf(obj);
+        if (idx > -1) {
+            this.children.splice(idx, 1);
+            obj.parentId = null;
+            obj._relativePosition = null;
+            
+            // Apply auto layout if enabled
+            if (this.autoLayout.enabled) {
+                this.layoutChildren();
+            }
+            
+            // Recalculate size if hugging
+            this._updateSizeIfHugging();
+        }
+    }
+    
+    /**
+     * Reorder a child within this container
+     */
+    reorderChild(obj, newIndex) {
+        const currentIdx = this.children.indexOf(obj);
+        if (currentIdx === -1) return;
+        
+        this.children.splice(currentIdx, 1);
+        
+        if (newIndex >= this.children.length) {
+            this.children.push(obj);
+        } else {
+            this.children.splice(newIndex, 0, obj);
+        }
+        
+        if (this.autoLayout.enabled) {
+            this.layoutChildren();
+        }
+    }
+    
+    /**
+     * Get all children recursively
+     */
+    getAllChildren(recursive = true) {
+        const result = [...this.children];
+        if (recursive) {
+            for (const child of this.children) {
+                if (child.children && child.children.length > 0) {
+                    result.push(...child.getAllChildren(true));
+                }
+            }
+        }
+        return result;
+    }
+    
+    /**
+     * Get content bounds (inside padding)
+     */
+    getContentBounds() {
+        const p = this.autoLayout.padding || { top: 0, right: 0, bottom: 0, left: 0 };
+        return {
+            x: this.x + p.left,
+            y: this.y + p.top,
+            width: Math.max(0, this.width - p.left - p.right),
+            height: Math.max(0, this.height - p.top - p.bottom)
+        };
+    }
+    
+    /**
+     * Apply auto layout to children
+     */
+    layoutChildren() {
+        if (!this.autoLayout.enabled || this.children.length === 0) return;
+        
+        const al = this.autoLayout;
+        const content = this.getContentBounds();
+        const isHorizontal = al.direction === LayoutDirection.HORIZONTAL;
+        const items = al.reversed ? [...this.children].reverse() : [...this.children];
+        
+        // Calculate sizes
+        const itemSizes = items.map(child => {
+            const bounds = child.getBounds();
+            const sz = child._layoutSizing || { horizontal: SizingMode.FIXED, vertical: SizingMode.FIXED };
+            return {
+                obj: child,
+                width: bounds.width || 1,
+                height: bounds.height || 1,
+                fillH: sz.horizontal === SizingMode.FILL,
+                fillV: sz.vertical === SizingMode.FILL
+            };
+        });
+        
+        // Handle wrapping
+        if (al.wrap) {
+            this._layoutWithWrap(content, itemSizes, al, isHorizontal);
+            return;
+        }
+        
+        // Calculate total fixed size and fill count
+        let totalFixedSize = 0;
+        let fillCount = 0;
+        
+        for (const item of itemSizes) {
+            const isFill = isHorizontal ? item.fillH : item.fillV;
+            const size = isHorizontal ? item.width : item.height;
+            if (!isFill) {
+                totalFixedSize += size;
+            } else {
+                fillCount++;
+            }
+        }
+        
+        const totalSpacing = al.spacing * Math.max(0, items.length - 1);
+        const mainAxisSize = isHorizontal ? content.width : content.height;
+        const crossAxisSize = isHorizontal ? content.height : content.width;
+        const availableForFill = mainAxisSize - totalFixedSize - totalSpacing;
+        const fillSize = fillCount > 0 ? Math.max(1, Math.floor(availableForFill / fillCount)) : 0;
+        
+        // Calculate positions based on distribution
+        let mainPos = 0;
+        let gap = al.spacing;
+        
+        if (al.distribution !== LayoutDistribution.PACKED) {
+            const totalItemSize = itemSizes.reduce((sum, item) => {
+                const isFill = isHorizontal ? item.fillH : item.fillV;
+                return sum + (isFill ? fillSize : (isHorizontal ? item.width : item.height));
+            }, 0);
+            const remainingSpace = mainAxisSize - totalItemSize;
+            
+            switch (al.distribution) {
+                case LayoutDistribution.SPACE_BETWEEN:
+                    gap = items.length > 1 ? remainingSpace / (items.length - 1) : 0;
+                    break;
+                case LayoutDistribution.SPACE_AROUND:
+                    gap = remainingSpace / items.length;
+                    mainPos = gap / 2;
+                    break;
+                case LayoutDistribution.SPACE_EVENLY:
+                    gap = remainingSpace / (items.length + 1);
+                    mainPos = gap;
+                    break;
+            }
+        } else {
+            // Packed alignment
+            const totalSize = totalFixedSize + (fillCount * fillSize) + totalSpacing;
+            switch (al.alignment) {
+                case LayoutAlignment.CENTER:
+                    mainPos = Math.floor((mainAxisSize - totalSize) / 2);
+                    break;
+                case LayoutAlignment.END:
+                    mainPos = mainAxisSize - totalSize;
+                    break;
+            }
+        }
+        
+        // Apply positions
+        for (const item of itemSizes) {
+            const isFillMain = isHorizontal ? item.fillH : item.fillV;
+            const isFillCross = isHorizontal ? item.fillV : item.fillH;
+            
+            let itemMainSize = isFillMain ? fillSize : (isHorizontal ? item.width : item.height);
+            let itemCrossSize = isHorizontal ? item.height : item.width;
+            
+            // Cross axis positioning
+            let crossPos = 0;
+            if (al.alignment === LayoutAlignment.STRETCH || isFillCross) {
+                itemCrossSize = crossAxisSize;
+            } else {
+                switch (al.alignment) {
+                    case LayoutAlignment.CENTER:
+                        crossPos = Math.floor((crossAxisSize - itemCrossSize) / 2);
+                        break;
+                    case LayoutAlignment.END:
+                        crossPos = crossAxisSize - itemCrossSize;
+                        break;
+                }
+            }
+            
+            // Apply main axis fill
+            if (isHorizontal && item.fillH && item.obj.width !== undefined) {
+                item.obj.width = itemMainSize;
+            } else if (!isHorizontal && item.fillV && item.obj.height !== undefined) {
+                item.obj.height = itemMainSize;
+            }
+            
+            // Apply cross axis fill/stretch
+            if (isHorizontal && (item.fillV || al.alignment === LayoutAlignment.STRETCH) && item.obj.height !== undefined) {
+                item.obj.height = itemCrossSize;
+            } else if (!isHorizontal && (item.fillH || al.alignment === LayoutAlignment.STRETCH) && item.obj.width !== undefined) {
+                item.obj.width = itemCrossSize;
+            }
+            
+            // Set position
+            if (isHorizontal) {
+                item.obj.x = content.x + mainPos;
+                item.obj.y = content.y + crossPos;
+            } else {
+                item.obj.x = content.x + crossPos;
+                item.obj.y = content.y + mainPos;
+            }
+            
+            // Update relative position
+            item.obj._relativePosition = {
+                x: item.obj.x - this.x,
+                y: item.obj.y - this.y
+            };
+            
+            // Layout nested children
+            if (item.obj.autoLayout?.enabled) {
+                item.obj.layoutChildren();
+            }
+            
+            mainPos += itemMainSize + gap;
+        }
+        
+        // Update size if hugging
+        this._updateSizeIfHugging();
+    }
+    
+    /**
+     * Layout with wrapping support
+     */
+    _layoutWithWrap(content, itemSizes, al, isHorizontal) {
+        const mainAxisSize = isHorizontal ? content.width : content.height;
+        const lines = [];
+        let currentLine = [];
+        let currentLineSize = 0;
+        
+        // Group into lines
+        for (const item of itemSizes) {
+            const itemSize = isHorizontal ? item.width : item.height;
+            
+            if (currentLine.length > 0 && currentLineSize + al.spacing + itemSize > mainAxisSize) {
+                lines.push({ items: currentLine, size: currentLineSize });
+                currentLine = [item];
+                currentLineSize = itemSize;
+            } else {
+                if (currentLine.length > 0) currentLineSize += al.spacing;
+                currentLine.push(item);
+                currentLineSize += itemSize;
+            }
+        }
+        if (currentLine.length > 0) {
+            lines.push({ items: currentLine, size: currentLineSize });
+        }
+        
+        // Position lines
+        let crossPos = 0;
+        
+        for (const line of lines) {
+            const lineMaxCross = Math.max(...line.items.map(item => 
+                isHorizontal ? item.height : item.width
+            ));
+            
+            let mainPos = 0;
+            switch (al.alignment) {
+                case LayoutAlignment.CENTER:
+                    mainPos = Math.floor((mainAxisSize - line.size) / 2);
+                    break;
+                case LayoutAlignment.END:
+                    mainPos = mainAxisSize - line.size;
+                    break;
+            }
+            
+            for (const item of line.items) {
+                const itemMainSize = isHorizontal ? item.width : item.height;
+                const itemCrossSize = isHorizontal ? item.height : item.width;
+                
+                let itemCrossPos = crossPos;
+                switch (al.alignment) {
+                    case LayoutAlignment.CENTER:
+                        itemCrossPos = crossPos + Math.floor((lineMaxCross - itemCrossSize) / 2);
+                        break;
+                    case LayoutAlignment.END:
+                        itemCrossPos = crossPos + lineMaxCross - itemCrossSize;
+                        break;
+                }
+                
+                if (isHorizontal) {
+                    item.obj.x = content.x + mainPos;
+                    item.obj.y = content.y + itemCrossPos;
+                } else {
+                    item.obj.x = content.x + itemCrossPos;
+                    item.obj.y = content.y + mainPos;
+                }
+                
+                item.obj._relativePosition = {
+                    x: item.obj.x - this.x,
+                    y: item.obj.y - this.y
+                };
+                
+                mainPos += itemMainSize + al.spacing;
+            }
+            
+            crossPos += lineMaxCross + al.wrapSpacing;
+        }
+    }
+    
+    /**
+     * Update size if using hug sizing
+     */
+    _updateSizeIfHugging() {
+        if (this.sizing.horizontal !== SizingMode.HUG && this.sizing.vertical !== SizingMode.HUG) {
+            return;
+        }
+        
+        if (this.children.length === 0) return;
+        
+        const p = this.autoLayout.padding || { top: 0, right: 0, bottom: 0, left: 0 };
+        let maxX = 0, maxY = 0;
+        
+        for (const child of this.children) {
+            const b = child.getBounds();
+            const relX = (b.x - this.x - p.left) + b.width;
+            const relY = (b.y - this.y - p.top) + b.height;
+            maxX = Math.max(maxX, relX);
+            maxY = Math.max(maxY, relY);
+        }
+        
+        if (this.sizing.horizontal === SizingMode.HUG) {
+            this.width = Math.max(3, maxX + p.left + p.right);
+        }
+        if (this.sizing.vertical === SizingMode.HUG) {
+            this.height = Math.max(3, maxY + p.top + p.bottom);
+        }
+    }
+    
+    /**
+     * Move this object and all children
+     */
+    moveTo(newX, newY) {
+        const dx = newX - this.x;
+        const dy = newY - this.y;
+        this.x = newX;
+        this.y = newY;
+        
+        // Move children
+        for (const child of this.children) {
+            child.x += dx;
+            child.y += dy;
+            // Handle line objects with endpoints
+            if (child.x1 !== undefined) { child.x1 += dx; child.x2 += dx; }
+            if (child.y1 !== undefined) { child.y1 += dy; child.y2 += dy; }
+        }
+    }
+    
+    /**
+     * Get bounding box including children
      */
     getBounds() {
-        return {
+        let bounds = {
             x: this.x,
             y: this.y,
             width: this.width,
             height: this.height
         };
+        
+        // If has children and not clipping, expand bounds
+        if (this.children.length > 0 && !this.clipContent) {
+            let minX = bounds.x;
+            let minY = bounds.y;
+            let maxX = bounds.x + bounds.width;
+            let maxY = bounds.y + bounds.height;
+            
+            for (const child of this.children) {
+                const cb = child.getBounds();
+                minX = Math.min(minX, cb.x);
+                minY = Math.min(minY, cb.y);
+                maxX = Math.max(maxX, cb.x + cb.width);
+                maxY = Math.max(maxY, cb.y + cb.height);
+            }
+            
+            bounds = {
+                x: minX,
+                y: minY,
+                width: maxX - minX,
+                height: maxY - minY
+            };
+        }
+        
+        return bounds;
     }
     
     /**
      * Check if point is inside this object
-     * @param {number} px 
-     * @param {number} py 
-     * @returns {boolean}
      */
     containsPoint(px, py) {
         const b = this.getBounds();
@@ -322,27 +798,95 @@ class SceneObject {
     }
     
     /**
+     * Find deepest child at point
+     */
+    findChildAtPoint(px, py) {
+        // Search in reverse order (top-most first)
+        for (let i = this.children.length - 1; i >= 0; i--) {
+            const child = this.children[i];
+            if (!child.visible) continue;
+            
+            // Check children recursively
+            if (child.children && child.children.length > 0) {
+                const nested = child.findChildAtPoint(px, py);
+                if (nested) return nested;
+            }
+            
+            if (child.containsPoint(px, py)) {
+                return child;
+            }
+        }
+        return null;
+    }
+    
+    /**
      * Render this object to a buffer
-     * @param {AsciiBuffer} buffer 
      */
     render(buffer) {
         // Override in subclasses
     }
     
     /**
+     * Render children (called by subclasses after rendering self)
+     */
+    renderChildren(buffer) {
+        if (this.children.length === 0) return;
+        
+        if (this.clipContent) {
+            const content = this.getContentBounds();
+            const originalSetChar = buffer.setChar.bind(buffer);
+            buffer.setChar = (x, y, char, color) => {
+                if (x >= content.x && x < content.x + content.width &&
+                    y >= content.y && y < content.y + content.height) {
+                    originalSetChar(x, y, char, color);
+                }
+            };
+            
+            for (const child of this.children) {
+                if (child.visible) {
+                    child.render(buffer);
+                    child.renderChildren?.(buffer);
+                }
+            }
+            
+            buffer.setChar = originalSetChar;
+        } else {
+            for (const child of this.children) {
+                if (child.visible) {
+                    child.render(buffer);
+                    child.renderChildren?.(buffer);
+                }
+            }
+        }
+    }
+    
+    /**
      * Clone this object
-     * @returns {SceneObject}
      */
     clone() {
         const copy = new this.constructor();
-        Object.assign(copy, deepClone(this));
+        
+        // Copy basic properties
+        const data = this.toJSON();
+        delete data.id;
+        delete data.children;
+        Object.assign(copy, data);
+        
         copy.id = uuid();
+        copy.parentId = null;
+        
+        // Clone children
+        copy.children = this.children.map(child => {
+            const clonedChild = child.clone();
+            clonedChild.parentId = copy.id;
+            return clonedChild;
+        });
+        
         return copy;
     }
     
     /**
      * Serialize to JSON
-     * @returns {Object}
      */
     toJSON() {
         const json = {
@@ -364,7 +908,13 @@ class SceneObject {
             visible: this.visible,
             locked: this.locked,
             opacity: this.opacity,
-            layerId: this.layerId
+            layerId: this.layerId,
+            parentId: this.parentId,
+            autoLayout: this.autoLayout,
+            sizing: this.sizing,
+            clipContent: this.clipContent,
+            _layoutSizing: this._layoutSizing,
+            children: this.children.map(c => c.toJSON())
         };
         
         // Include UI component properties if present
@@ -374,7 +924,6 @@ class SceneObject {
         if (this.uiProperties && Object.keys(this.uiProperties).length > 0) {
             json.uiProperties = this.uiProperties;
         }
-        // Keep avaloniaType for backward compatibility
         if (this.avaloniaType) {
             json.avaloniaType = this.avaloniaType;
         }
@@ -384,12 +933,22 @@ class SceneObject {
     
     /**
      * Create from JSON
-     * @param {Object} json 
-     * @returns {SceneObject}
      */
     static fromJSON(json) {
         const obj = new SceneObject(json.type);
         Object.assign(obj, json);
+        
+        // Restore children
+        if (json.children && json.children.length > 0) {
+            obj.children = json.children.map(childJson => {
+                const child = SceneObject.fromJSON(childJson);
+                child.parentId = obj.id;
+                return child;
+            });
+        } else {
+            obj.children = [];
+        }
+        
         return obj;
     }
 }
@@ -1487,18 +2046,64 @@ class GroupObject extends SceneObject {
         this.children = [];
     }
     
+    /**
+     * Override: Groups can contain children
+     */
+    canContainChildren() {
+        return true;
+    }
+    
     add(obj) {
         obj.layerId = this.id;
+        obj.parentId = this.id;
         this.children.push(obj);
+        this._updateBounds();
+    }
+    
+    /**
+     * Add child to group (alias for add, supports index)
+     */
+    addChild(obj, index = -1) {
+        obj.layerId = this.id;
+        obj.parentId = this.id;
+        if (index >= 0 && index < this.children.length) {
+            this.children.splice(index, 0, obj);
+        } else {
+            this.children.push(obj);
+        }
         this._updateBounds();
     }
     
     remove(obj) {
         const idx = this.children.indexOf(obj);
         if (idx > -1) {
+            obj.parentId = null;
             this.children.splice(idx, 1);
             this._updateBounds();
         }
+    }
+    
+    /**
+     * Remove child from group (alias for remove)
+     */
+    removeChild(obj) {
+        this.remove(obj);
+    }
+    
+    /**
+     * Reorder child within this group
+     */
+    reorderChild(obj, newIndex) {
+        const currentIndex = this.children.indexOf(obj);
+        if (currentIndex === -1) return;
+        
+        this.children.splice(currentIndex, 1);
+        if (newIndex >= this.children.length) {
+            this.children.push(obj);
+        } else {
+            this.children.splice(newIndex, 0, obj);
+        }
+        this._updateBounds();
     }
     
     _updateBounds() {
@@ -1605,15 +2210,23 @@ class FrameObject extends SceneObject {
     }
     
     /**
+     * Override: Frames can always contain children
+     */
+    canContainChildren() {
+        return true;
+    }
+    
+    /**
      * Add child object to frame
      */
-    addChild(obj) {
+    addChild(obj, index = -1) {
         // Store original position relative to frame
         obj._frameOffset = {
             x: obj.x - this.x,
             y: obj.y - this.y
         };
         obj.parentFrame = this.id;
+        obj.parentId = this.id;  // Also set parentId for hierarchy navigation
         
         // Set default sizing for child
         if (!obj._layoutSizing) {
@@ -1623,7 +2236,12 @@ class FrameObject extends SceneObject {
             };
         }
         
-        this.children.push(obj);
+        if (index >= 0 && index < this.children.length) {
+            this.children.splice(index, 0, obj);
+        } else {
+            this.children.push(obj);
+        }
+        
         if (this.autoLayout.enabled) {
             this.layoutChildren();
         } else if (this.autoSize) {
@@ -1638,6 +2256,7 @@ class FrameObject extends SceneObject {
         const idx = this.children.indexOf(obj);
         if (idx > -1) {
             obj.parentFrame = null;
+            obj.parentId = null;
             obj._frameOffset = null;
             obj._layoutSizing = null;
             this.children.splice(idx, 1);
@@ -1646,6 +2265,25 @@ class FrameObject extends SceneObject {
             } else if (this.autoSize) {
                 this._autoResize();
             }
+        }
+    }
+    
+    /**
+     * Reorder child within this frame
+     */
+    reorderChild(obj, newIndex) {
+        const currentIndex = this.children.indexOf(obj);
+        if (currentIndex === -1) return;
+        
+        this.children.splice(currentIndex, 1);
+        if (newIndex >= this.children.length) {
+            this.children.push(obj);
+        } else {
+            this.children.splice(newIndex, 0, obj);
+        }
+        
+        if (this.autoLayout.enabled) {
+            this.layoutChildren();
         }
     }
     
@@ -3382,6 +4020,14 @@ const AppState = {
     // Selection
     selectedObjects: [],
     
+    // Hierarchical selection context (Figma-like)
+    selectionContext: {
+        currentContainer: null,  // Current editing context (null = root level)
+        breadcrumb: [],          // Path from root to current container
+        hoverTarget: null,       // Current drop/hover target for drag operations
+        dropIndicator: null      // Visual indicator for drop position
+    },
+    
     // Drawing settings
     strokeChar: '*',
     fillChar: '',  // Empty by default - shapes draw stroked, not filled
@@ -4547,7 +5193,7 @@ class Tool {
 }
 
 /**
- * Selection Tool - select SceneObjects
+ * Selection Tool - select SceneObjects with hierarchical support
  */
 class SelectTool extends Tool {
     constructor() {
@@ -4569,6 +5215,272 @@ class SelectTool extends Tool {
         // Smart guides for Figma-like snapping and alignment
         this.smartGuides = new SmartGuides();
         this.lastSnapResult = null;
+        
+        // Drag-drop nesting support
+        this.isDraggingToNest = false;
+        this.dragStartContainer = null;
+        this.potentialDropTarget = null;
+        this.dropIndicatorIndex = -1;
+    }
+    
+    /**
+     * Get objects at current hierarchy level
+     */
+    _getObjectsAtCurrentLevel(app) {
+        const ctx = AppState.selectionContext;
+        if (ctx.currentContainer && ctx.currentContainer.children) {
+            return ctx.currentContainer.children;
+        }
+        // Return root objects from active layer
+        const layer = app?._getActiveLayer?.();
+        return layer?.objects || [];
+    }
+    
+    /**
+     * Find object at point within current hierarchy level
+     */
+    _findObjectAtPointInContext(x, y, app) {
+        const objects = this._getObjectsAtCurrentLevel(app);
+        
+        // Search in reverse order (top-most first)
+        for (let i = objects.length - 1; i >= 0; i--) {
+            const obj = objects[i];
+            if (!obj.visible || obj.locked) continue;
+            
+            if (obj.containsPoint && obj.containsPoint(x, y)) {
+                return obj;
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * Find deepest nested object at point (for determining drop targets)
+     */
+    _findDeepestObjectAt(x, y, app, excludeObjects = []) {
+        const rootObjects = this._getObjectsAtCurrentLevel(app);
+        
+        const findInChildren = (objects) => {
+            for (let i = objects.length - 1; i >= 0; i--) {
+                const obj = objects[i];
+                if (!obj.visible || excludeObjects.includes(obj)) continue;
+                
+                // Check children first (deeper in hierarchy)
+                if (obj.children && obj.children.length > 0) {
+                    const childResult = findInChildren(obj.children);
+                    if (childResult) return childResult;
+                }
+                
+                if (obj.containsPoint && obj.containsPoint(x, y)) {
+                    return obj;
+                }
+            }
+            return null;
+        };
+        
+        return findInChildren(rootObjects);
+    }
+    
+    /**
+     * Find potential container for drop at point
+     */
+    _findDropTarget(x, y, app, draggedObjects) {
+        const excludeIds = new Set(draggedObjects.map(o => o.id));
+        
+        // Add all descendants of dragged objects to exclusion
+        const addDescendants = (obj) => {
+            excludeIds.add(obj.id);
+            if (obj.children) {
+                for (const child of obj.children) {
+                    addDescendants(child);
+                }
+            }
+        };
+        draggedObjects.forEach(addDescendants);
+        
+        const rootObjects = this._getObjectsAtCurrentLevel(app);
+        
+        const findContainer = (objects) => {
+            for (let i = objects.length - 1; i >= 0; i--) {
+                const obj = objects[i];
+                if (!obj.visible || excludeIds.has(obj.id)) continue;
+                
+                // Check children first
+                if (obj.children && obj.children.length > 0) {
+                    const childResult = findContainer(obj.children);
+                    if (childResult) return childResult;
+                }
+                
+                // Check if this object can accept children and contains point
+                if (obj.canContainChildren && obj.canContainChildren() && obj.containsPoint(x, y)) {
+                    return obj;
+                }
+            }
+            return null;
+        };
+        
+        return findContainer(rootObjects);
+    }
+    
+    /**
+     * Calculate insertion index for reordering within a container
+     */
+    _calculateInsertionIndex(container, x, y) {
+        if (!container || !container.children || container.children.length === 0) return 0;
+        if (!container.autoLayout?.enabled) return container.children.length;
+        
+        const isHorizontal = container.autoLayout.direction === LayoutDirection.HORIZONTAL;
+        const pos = isHorizontal ? x : y;
+        
+        for (let i = 0; i < container.children.length; i++) {
+            const child = container.children[i];
+            const childPos = isHorizontal ? child.x : child.y;
+            const childSize = isHorizontal ? (child.width || 1) : (child.height || 1);
+            const midPoint = childPos + childSize / 2;
+            
+            if (pos < midPoint) return i;
+        }
+        
+        return container.children.length;
+    }
+    
+    /**
+     * Enter a container for editing (double-click behavior)
+     */
+    _enterContainer(container, app) {
+        if (!container || !container.canContainChildren?.()) return;
+        
+        const ctx = AppState.selectionContext;
+        
+        // Build breadcrumb path
+        ctx.breadcrumb.push(container);
+        ctx.currentContainer = container;
+        AppState.selectedObjects = [];
+        
+        this._updateStatus(`Editing inside: ${container.name || container.type}`);
+        this._updateBreadcrumbUI(app);
+        
+        if (app?.renderAllObjects) app.renderAllObjects();
+        if (app?._updateLayerList) app._updateLayerList();
+    }
+    
+    /**
+     * Exit current container (go up one level)
+     */
+    _exitContainer(app) {
+        const ctx = AppState.selectionContext;
+        if (!ctx.currentContainer) return;
+        
+        ctx.breadcrumb.pop();
+        ctx.currentContainer = ctx.breadcrumb.length > 0 ? ctx.breadcrumb[ctx.breadcrumb.length - 1] : null;
+        AppState.selectedObjects = [];
+        
+        if (ctx.currentContainer) {
+            this._updateStatus(`Editing inside: ${ctx.currentContainer.name || ctx.currentContainer.type}`);
+        } else {
+            this._updateStatus('At root level');
+        }
+        
+        this._updateBreadcrumbUI(app);
+        
+        if (app?.renderAllObjects) app.renderAllObjects();
+        if (app?._updateLayerList) app._updateLayerList();
+    }
+    
+    /**
+     * Exit to root level
+     */
+    _exitToRoot(app) {
+        const ctx = AppState.selectionContext;
+        ctx.currentContainer = null;
+        ctx.breadcrumb = [];
+        AppState.selectedObjects = [];
+        
+        this._updateStatus('At root level');
+        this._updateBreadcrumbUI(app);
+        
+        if (app?.renderAllObjects) app.renderAllObjects();
+        if (app?._updateLayerList) app._updateLayerList();
+    }
+    
+    /**
+     * Update breadcrumb UI
+     */
+    _updateBreadcrumbUI(app) {
+        // Create or update breadcrumb element
+        let breadcrumb = document.querySelector('#hierarchy-breadcrumb');
+        if (!breadcrumb) {
+            breadcrumb = document.createElement('div');
+            breadcrumb.id = 'hierarchy-breadcrumb';
+            breadcrumb.style.cssText = `
+                position: absolute;
+                top: 40px;
+                left: 50%;
+                transform: translateX(-50%);
+                display: flex;
+                align-items: center;
+                gap: 4px;
+                padding: 4px 12px;
+                background: var(--color-bg-secondary);
+                border: 1px solid var(--color-border);
+                border-radius: 4px;
+                font-size: 12px;
+                z-index: 100;
+            `;
+            document.querySelector('#viewport')?.appendChild(breadcrumb);
+        }
+        
+        const ctx = AppState.selectionContext;
+        
+        if (ctx.breadcrumb.length === 0) {
+            breadcrumb.style.display = 'none';
+            return;
+        }
+        
+        breadcrumb.style.display = 'flex';
+        breadcrumb.innerHTML = '';
+        
+        // Root link
+        const rootLink = document.createElement('span');
+        rootLink.textContent = '📁 Root';
+        rootLink.style.cssText = 'cursor: pointer; color: var(--color-accent);';
+        rootLink.onclick = () => this._exitToRoot(app);
+        breadcrumb.appendChild(rootLink);
+        
+        // Add each level
+        for (let i = 0; i < ctx.breadcrumb.length; i++) {
+            const separator = document.createElement('span');
+            separator.textContent = ' › ';
+            separator.style.color = 'var(--color-text-muted)';
+            breadcrumb.appendChild(separator);
+            
+            const obj = ctx.breadcrumb[i];
+            const link = document.createElement('span');
+            link.textContent = obj.name || obj.type;
+            
+            if (i < ctx.breadcrumb.length - 1) {
+                link.style.cssText = 'cursor: pointer; color: var(--color-accent);';
+                link.onclick = () => {
+                    // Navigate to this level
+                    ctx.breadcrumb = ctx.breadcrumb.slice(0, i + 1);
+                    ctx.currentContainer = obj;
+                    AppState.selectedObjects = [];
+                    this._updateBreadcrumbUI(app);
+                    if (app?.renderAllObjects) app.renderAllObjects();
+                };
+            } else {
+                link.style.color = 'var(--color-text-primary)';
+            }
+            
+            breadcrumb.appendChild(link);
+        }
+        
+        // Add exit button
+        const exitBtn = document.createElement('span');
+        exitBtn.textContent = ' ✕';
+        exitBtn.style.cssText = 'cursor: pointer; color: var(--color-text-muted); margin-left: 8px;';
+        exitBtn.onclick = () => this._exitToRoot(app);
+        breadcrumb.appendChild(exitBtn);
     }
     
     onMouseDown(x, y, button, renderer, app) {
@@ -4576,7 +5488,7 @@ class SelectTool extends Tool {
         this.appRef = app;
         
         if (button === 0) {
-            // Check for double-click to edit text
+            // Check for double-click to enter container or edit text
             const now = Date.now();
             const isDoubleClick = (now - this.lastClickTime < 400) && 
                                   Math.abs(x - this.lastClickX) < 2 && 
@@ -4587,6 +5499,13 @@ class SelectTool extends Tool {
             
             if (isDoubleClick && AppState.selectedObjects.length === 1) {
                 const obj = AppState.selectedObjects[0];
+                
+                // Check if it's a container - enter it
+                if (obj.canContainChildren && obj.canContainChildren()) {
+                    this._enterContainer(obj, app);
+                    return;
+                }
+                
                 // Check if it's a text object, ascii-text object, or flowchart shape with label
                 if (obj.type === 'text' || obj.type === 'ascii-text' || obj.label !== undefined) {
                     this._startInlineTextEdit(obj, app);
@@ -4614,33 +5533,41 @@ class SelectTool extends Tool {
                 for (const obj of AppState.selectedObjects) {
                     if (obj.containsPoint && obj.containsPoint(x, y)) {
                         this.isMoving = true;
-                        // Store the initial click position - offset will be relative to first object
+                        this.isDraggingToNest = true;
+                        this.dragStartContainer = AppState.selectionContext.currentContainer;
                         this.moveStartX = x;
                         this.moveStartY = y;
-                        // Store initial positions of all selected objects
                         this.initialPositions = AppState.selectedObjects.map(o => this._captureObjectPosition(o));
-                        // Save undo state for movement
                         if (app && app.saveStateForUndo) app.saveStateForUndo();
                         return;
                     }
                 }
             }
             
-            // Try to select object at click position
-            if (app && app.findObjectAt) {
-                const obj = app.findObjectAt(x, y);
-                if (obj) {
-                    AppState.selectedObjects = [obj];
-                    this._updatePropertiesPanel(obj);
-                    if (app.renderAllObjects) app.renderAllObjects();
-                    this._updateStatus(`Selected: ${obj.name || obj.type}`);
-                    
-                    // Start moving immediately after selection
-                    this.isMoving = true;
-                    this.moveStartX = x;
-                    this.moveStartY = y;
-                    this.initialPositions = AppState.selectedObjects.map(o => this._captureObjectPosition(o));
-                    if (app.saveStateForUndo) app.saveStateForUndo();
+            // Try to select object at click position within current context
+            const obj = this._findObjectAtPointInContext(x, y, app);
+            if (obj) {
+                AppState.selectedObjects = [obj];
+                this._updatePropertiesPanel(obj);
+                if (app.renderAllObjects) app.renderAllObjects();
+                this._updateStatus(`Selected: ${obj.name || obj.type}`);
+                
+                // Start moving immediately after selection
+                this.isMoving = true;
+                this.isDraggingToNest = true;
+                this.dragStartContainer = AppState.selectionContext.currentContainer;
+                this.moveStartX = x;
+                this.moveStartY = y;
+                this.initialPositions = AppState.selectedObjects.map(o => this._captureObjectPosition(o));
+                if (app.saveStateForUndo) app.saveStateForUndo();
+                return;
+            }
+            
+            // Clicked on empty space - check if we should exit current container
+            if (AppState.selectionContext.currentContainer) {
+                // Check if clicked outside current container
+                if (!AppState.selectionContext.currentContainer.containsPoint(x, y)) {
+                    this._exitContainer(app);
                     return;
                 }
             }
@@ -5034,9 +5961,39 @@ class SelectTool extends Tool {
                 this._applyMoveDelta(pos, dx, dy);
             }
             
+            // Find potential drop target for nesting (if drag distance is significant)
+            const dragDistance = Math.sqrt(dx * dx + dy * dy);
+            if (this.isDraggingToNest && dragDistance > 3) {
+                this.potentialDropTarget = this._findDropTarget(x, y, app, AppState.selectedObjects);
+                
+                // Calculate drop index for auto-layout containers
+                if (this.potentialDropTarget && this.potentialDropTarget.autoLayout?.enabled) {
+                    this.dropIndicatorIndex = this._calculateInsertionIndex(this.potentialDropTarget, x, y);
+                } else {
+                    this.dropIndicatorIndex = -1;
+                }
+                
+                // Update selection context for visual feedback
+                AppState.selectionContext.hoverTarget = this.potentialDropTarget;
+                AppState.selectionContext.dropIndicator = this.dropIndicatorIndex >= 0 ? {
+                    containerid: this.potentialDropTarget?.id,
+                    index: this.dropIndicatorIndex
+                } : null;
+            }
+            
             // Render objects and guides
             if (app && app.renderAllObjects) {
                 app.renderAllObjects();
+                
+                // Render drop target indicator
+                if (this.potentialDropTarget && this.isDraggingToNest) {
+                    this._renderDropTargetIndicator(renderer.previewBuffer, this.potentialDropTarget);
+                    
+                    // Render drop position indicator for auto-layout
+                    if (this.dropIndicatorIndex >= 0) {
+                        this._renderDropPositionIndicator(renderer.previewBuffer, this.potentialDropTarget, this.dropIndicatorIndex);
+                    }
+                }
                 
                 // Render smart guides on top
                 if (this.lastSnapResult && AppState.smartGuides.enabled && AppState.smartGuides.showGuides) {
@@ -5052,8 +6009,103 @@ class SelectTool extends Tool {
                         this.lastSnapResult,
                         currentBounds
                     );
-                    renderer.render();
                 }
+                renderer.render();
+            }
+        }
+    }
+    
+    /**
+     * Render a visual indicator showing the drop target container
+     */
+    _renderDropTargetIndicator(buffer, container) {
+        if (!container) return;
+        const bounds = container.getBounds?.() || { x: container.x, y: container.y, width: container.width, height: container.height };
+        
+        // Draw highlight border around container
+        const x = Math.floor(bounds.x);
+        const y = Math.floor(bounds.y);
+        const w = Math.floor(bounds.width);
+        const h = Math.floor(bounds.height);
+        
+        // Draw corners with highlight
+        const corner = '*';
+        buffer.setCell(x - 1, y - 1, corner, '#4CAF50', null);
+        buffer.setCell(x + w, y - 1, corner, '#4CAF50', null);
+        buffer.setCell(x - 1, y + h, corner, '#4CAF50', null);
+        buffer.setCell(x + w, y + h, corner, '#4CAF50', null);
+        
+        // Draw edge highlights
+        for (let i = 0; i < w; i++) {
+            buffer.setCell(x + i, y - 1, '─', '#4CAF50', null);
+            buffer.setCell(x + i, y + h, '─', '#4CAF50', null);
+        }
+        for (let j = 0; j < h; j++) {
+            buffer.setCell(x - 1, y + j, '│', '#4CAF50', null);
+            buffer.setCell(x + w, y + j, '│', '#4CAF50', null);
+        }
+    }
+    
+    /**
+     * Render drop position indicator for auto-layout reordering
+     */
+    _renderDropPositionIndicator(buffer, container, insertIndex) {
+        if (!container || !container.autoLayout?.enabled) return;
+        
+        const isHorizontal = container.autoLayout.direction === LayoutDirection.HORIZONTAL;
+        const bounds = container.getBounds?.() || { x: container.x, y: container.y, width: container.width, height: container.height };
+        const padding = container.autoLayout.padding || 0;
+        
+        let indicatorX, indicatorY, indicatorLength;
+        
+        if (container.children && container.children.length > 0) {
+            if (insertIndex >= container.children.length) {
+                // Insert at end
+                const lastChild = container.children[container.children.length - 1];
+                if (isHorizontal) {
+                    indicatorX = lastChild.x + (lastChild.width || 1) + 1;
+                    indicatorY = bounds.y + padding;
+                    indicatorLength = bounds.height - padding * 2;
+                } else {
+                    indicatorX = bounds.x + padding;
+                    indicatorY = lastChild.y + (lastChild.height || 1) + 1;
+                    indicatorLength = bounds.width - padding * 2;
+                }
+            } else {
+                // Insert before child at index
+                const childAtIndex = container.children[insertIndex];
+                if (isHorizontal) {
+                    indicatorX = childAtIndex.x - 1;
+                    indicatorY = bounds.y + padding;
+                    indicatorLength = bounds.height - padding * 2;
+                } else {
+                    indicatorX = bounds.x + padding;
+                    indicatorY = childAtIndex.y - 1;
+                    indicatorLength = bounds.width - padding * 2;
+                }
+            }
+        } else {
+            // Empty container - show at start
+            if (isHorizontal) {
+                indicatorX = bounds.x + padding;
+                indicatorY = bounds.y + padding;
+                indicatorLength = bounds.height - padding * 2;
+            } else {
+                indicatorX = bounds.x + padding;
+                indicatorY = bounds.y + padding;
+                indicatorLength = bounds.width - padding * 2;
+            }
+        }
+        
+        // Draw the drop indicator line
+        const char = isHorizontal ? '│' : '─';
+        const color = '#2196F3';
+        
+        for (let i = 0; i < indicatorLength; i++) {
+            if (isHorizontal) {
+                buffer.setCell(indicatorX, indicatorY + i, char, color, null);
+            } else {
+                buffer.setCell(indicatorX + i, indicatorY, char, color, null);
             }
         }
     }
@@ -5101,11 +6153,69 @@ class SelectTool extends Tool {
             renderer.clearPreview();
             if (app && app.renderAllObjects) app.renderAllObjects();
         } else if (this.isMoving) {
+            // Handle potential nesting or reordering
+            if (this.isDraggingToNest && this.potentialDropTarget) {
+                const dropTarget = this.potentialDropTarget;
+                const insertIndex = this.dropIndicatorIndex;
+                
+                // Check if we're dropping into a different container than we started
+                const isNewContainer = dropTarget !== this.dragStartContainer;
+                const isReordering = dropTarget === this.dragStartContainer && dropTarget?.autoLayout?.enabled;
+                
+                if (isNewContainer || isReordering) {
+                    // Save state for undo (already saved on mousedown, but re-save for safety)
+                    
+                    for (const obj of AppState.selectedObjects) {
+                        // Remove from current parent
+                        if (obj.parentId) {
+                            const currentParent = this._findObjectById(obj.parentId, app);
+                            if (currentParent) {
+                                currentParent.removeChild(obj);
+                            }
+                        } else {
+                            // Remove from layer root
+                            const layer = app?._getActiveLayer?.();
+                            if (layer && layer.objects) {
+                                const idx = layer.objects.indexOf(obj);
+                                if (idx !== -1) {
+                                    layer.objects.splice(idx, 1);
+                                }
+                            }
+                        }
+                        
+                        // Add to new container
+                        if (insertIndex >= 0) {
+                            dropTarget.addChild(obj, insertIndex);
+                        } else {
+                            dropTarget.addChild(obj);
+                        }
+                    }
+                    
+                    // Relayout the container
+                    if (dropTarget.layoutChildren) {
+                        dropTarget.layoutChildren();
+                    }
+                    
+                    this._updateStatus(`Moved ${AppState.selectedObjects.length} object(s) into ${dropTarget.name || dropTarget.type}`);
+                }
+            }
+            
+            // Reset dragging state
             this.isMoving = false;
+            this.isDraggingToNest = false;
+            this.dragStartContainer = null;
+            this.potentialDropTarget = null;
+            this.dropIndicatorIndex = -1;
             this.initialPositions = null;
+            
+            // Clear selection context hover
+            AppState.selectionContext.hoverTarget = null;
+            AppState.selectionContext.dropIndicator = null;
+            
             // Clear smart guides
             this.smartGuides.clearGuides();
             this.lastSnapResult = null;
+            
             // Invalidate spatial index after moving objects
             if (app && app.invalidateSpatialIndex) {
                 app.invalidateSpatialIndex();
@@ -5123,21 +6233,71 @@ class SelectTool extends Tool {
         }
     }
     
+    /**
+     * Find object by ID in the scene hierarchy
+     */
+    _findObjectById(id, app) {
+        const findInObjects = (objects) => {
+            for (const obj of objects) {
+                if (obj.id === id) return obj;
+                if (obj.children && obj.children.length > 0) {
+                    const found = findInObjects(obj.children);
+                    if (found) return found;
+                }
+            }
+            return null;
+        };
+        
+        for (const layer of AppState.layers) {
+            if (!layer.objects) continue;
+            const found = findInObjects(layer.objects);
+            if (found) return found;
+        }
+        return null;
+    }
+    
     onKeyDown(key, renderer, app) {
+        // Handle Escape - exit container or clear selection
+        if (key === 'Escape') {
+            if (AppState.selectionContext.currentContainer) {
+                // Exit current container first
+                this._exitContainer(app);
+                return;
+            } else if (AppState.selectedObjects.length > 0) {
+                AppState.selectedObjects = [];
+                this._updateStatus('Selection cleared');
+                if (app && app.renderAllObjects) app.renderAllObjects();
+                return;
+            }
+        }
+        
+        // Handle Enter - enter selected container
+        if (key === 'Enter' && AppState.selectedObjects.length === 1) {
+            const obj = AppState.selectedObjects[0];
+            if (obj.canContainChildren && obj.canContainChildren()) {
+                this._enterContainer(obj, app);
+                return;
+            }
+        }
+        
         if (AppState.selectedObjects.length > 0) {
             if (key === 'Delete' || key === 'Backspace') {
                 // Delete selected objects
                 for (const obj of AppState.selectedObjects) {
-                    if (app && app.removeObject) {
+                    // Remove from parent container if inside one
+                    if (obj.parentId) {
+                        const parent = this._findObjectById(obj.parentId, app);
+                        if (parent) {
+                            parent.removeChild(obj);
+                            // Relayout parent
+                            if (parent.layoutChildren) parent.layoutChildren();
+                        }
+                    } else if (app && app.removeObject) {
                         app.removeObject(obj.id);
                     }
                 }
                 AppState.selectedObjects = [];
                 this._updateStatus('Deleted selected objects');
-                if (app && app.renderAllObjects) app.renderAllObjects();
-            } else if (key === 'Escape') {
-                AppState.selectedObjects = [];
-                this._updateStatus('Selection cleared');
                 if (app && app.renderAllObjects) app.renderAllObjects();
             } else if (key === 'ArrowUp') {
                 this._moveSelection(0, -1, app);
@@ -9003,6 +10163,20 @@ class Asciistrator extends EventEmitter {
                         { label: 'Frame Properties...', action: 'frame-properties' },
                     ]
                 },
+                {
+                    label: 'Hierarchy',
+                    submenu: [
+                        { label: 'Enter Container', action: 'enter-container', shortcut: 'Enter' },
+                        { label: 'Exit Container', action: 'exit-container', shortcut: 'Escape' },
+                        { label: 'Exit to Root', action: 'exit-to-root', shortcut: 'Ctrl+Escape' },
+                        { type: 'separator' },
+                        { label: 'Move to Parent', action: 'move-to-parent' },
+                        { label: 'Move Into...', action: 'move-into-container' },
+                        { type: 'separator' },
+                        { label: 'Select Parent', action: 'select-parent' },
+                        { label: 'Select Children', action: 'select-children' },
+                    ]
+                },
                 { type: 'separator' },
                 {
                     label: 'Transform',
@@ -9395,6 +10569,28 @@ class Asciistrator extends EventEmitter {
                 break;
             case 'frame-properties':
                 this.showFramePropertiesDialog();
+                break;
+            // Hierarchy navigation
+            case 'enter-container':
+                this.enterSelectedContainer();
+                break;
+            case 'exit-container':
+                this.exitCurrentContainer();
+                break;
+            case 'exit-to-root':
+                this.exitToRootLevel();
+                break;
+            case 'move-to-parent':
+                this.moveSelectionToParent();
+                break;
+            case 'move-into-container':
+                this.showMoveIntoContainerDialog();
+                break;
+            case 'select-parent':
+                this.selectParentContainer();
+                break;
+            case 'select-children':
+                this.selectContainerChildren();
                 break;
             // Boolean operations
             case 'bool-union':
@@ -10144,6 +11340,51 @@ class Asciistrator extends EventEmitter {
         // Clear main buffer once
         mainBuffer.clear();
         
+        // Helper function to recursively render an object and its children
+        const renderObjectHierarchy = (obj, buffer, clipBounds = null) => {
+            if (!obj.visible) return;
+            
+            // Render the object itself
+            obj.render(buffer);
+            
+            // Render children if any
+            if (obj.children && obj.children.length > 0) {
+                // Determine clipping bounds for children
+                let childClipBounds = clipBounds;
+                if (obj.clipContent) {
+                    const objBounds = obj.getBounds();
+                    childClipBounds = {
+                        x: objBounds.x,
+                        y: objBounds.y,
+                        width: objBounds.width,
+                        height: objBounds.height
+                    };
+                    
+                    // Intersect with parent clip bounds if any
+                    if (clipBounds) {
+                        const maxX = Math.min(clipBounds.x + clipBounds.width, objBounds.x + objBounds.width);
+                        const maxY = Math.min(clipBounds.y + clipBounds.height, objBounds.y + objBounds.height);
+                        childClipBounds.x = Math.max(clipBounds.x, objBounds.x);
+                        childClipBounds.y = Math.max(clipBounds.y, objBounds.y);
+                        childClipBounds.width = Math.max(0, maxX - childClipBounds.x);
+                        childClipBounds.height = Math.max(0, maxY - childClipBounds.y);
+                    }
+                }
+                
+                // Render each child
+                for (const child of obj.children) {
+                    if (child.visible) {
+                        // Apply clipping during render if needed
+                        if (childClipBounds) {
+                            this._renderWithClipping(child, buffer, childClipBounds);
+                        } else {
+                            renderObjectHierarchy(child, buffer, clipBounds);
+                        }
+                    }
+                }
+            }
+        };
+        
         // Track which layers need buffer clear
         const layersToRender = AppState.layers.filter(l => l.visible && l.objects && l.objects.length > 0);
         
@@ -10151,9 +11392,7 @@ class Asciistrator extends EventEmitter {
         if (layersToRender.length === 1) {
             const layer = layersToRender[0];
             for (const obj of layer.objects) {
-                if (obj.visible) {
-                    obj.render(mainBuffer);
-                }
+                renderObjectHierarchy(obj, mainBuffer);
             }
         } else {
             // Multi-layer: composite from bottom to top
@@ -10168,9 +11407,7 @@ class Asciistrator extends EventEmitter {
                 // Render each object to the layer's buffer
                 const targetBuffer = layer.buffer || mainBuffer;
                 for (const obj of layer.objects) {
-                    if (obj.visible) {
-                        obj.render(targetBuffer);
-                    }
+                    renderObjectHierarchy(obj, targetBuffer);
                 }
                 
                 // Composite layer buffer to main buffer using direct array access
@@ -10198,6 +11435,9 @@ class Asciistrator extends EventEmitter {
             }
         }
         
+        // Render current editing container highlight
+        this._renderContainerEditingIndicator();
+        
         // Render selection indicators for selected objects
         this._renderSelectionIndicators();
         
@@ -10210,6 +11450,104 @@ class Asciistrator extends EventEmitter {
         // Mark full redraw needed and render
         this.renderer.markFullDirty();
         this.renderer.render();
+    }
+    
+    /**
+     * Render an object with clipping to specified bounds
+     */
+    _renderWithClipping(obj, buffer, clipBounds) {
+        // Create a temporary clipped render
+        // For simplicity, we render normally but check bounds
+        const tempBuffer = {
+            width: buffer.width,
+            height: buffer.height,
+            setCell: (x, y, char, fg, bg) => {
+                if (x >= clipBounds.x && x < clipBounds.x + clipBounds.width &&
+                    y >= clipBounds.y && y < clipBounds.y + clipBounds.height) {
+                    buffer.setCell(x, y, char, fg, bg);
+                }
+            },
+            setChar: (x, y, char, fg) => {
+                if (x >= clipBounds.x && x < clipBounds.x + clipBounds.width &&
+                    y >= clipBounds.y && y < clipBounds.y + clipBounds.height) {
+                    buffer.setChar(x, y, char, fg);
+                }
+            },
+            getCell: (x, y) => buffer.getCell(x, y),
+            chars: buffer.chars,
+            colors: buffer.colors
+        };
+        
+        obj.render(tempBuffer);
+        
+        // Also render children with clipping
+        if (obj.children && obj.children.length > 0) {
+            for (const child of obj.children) {
+                if (child.visible) {
+                    this._renderWithClipping(child, buffer, clipBounds);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Render indicator for current editing container
+     */
+    _renderContainerEditingIndicator() {
+        const ctx = AppState.selectionContext;
+        if (!ctx.currentContainer) return;
+        
+        const buffer = this.renderer.previewBuffer;
+        const container = ctx.currentContainer;
+        const bounds = container.getBounds ? container.getBounds() : { 
+            x: container.x, y: container.y, 
+            width: container.width, height: container.height 
+        };
+        
+        // Draw a subtle border around the container being edited
+        const color = '#666666';
+        const x1 = bounds.x - 1;
+        const y1 = bounds.y - 1;
+        const x2 = bounds.x + bounds.width;
+        const y2 = bounds.y + bounds.height;
+        
+        // Draw top and bottom edges
+        for (let x = x1; x <= x2; x++) {
+            if (x >= 0 && x < buffer.width) {
+                if (y1 >= 0 && y1 < buffer.height) {
+                    buffer.setChar(x, y1, '─', color);
+                }
+                if (y2 >= 0 && y2 < buffer.height) {
+                    buffer.setChar(x, y2, '─', color);
+                }
+            }
+        }
+        
+        // Draw left and right edges
+        for (let y = y1; y <= y2; y++) {
+            if (y >= 0 && y < buffer.height) {
+                if (x1 >= 0 && x1 < buffer.width) {
+                    buffer.setChar(x1, y, '│', color);
+                }
+                if (x2 >= 0 && x2 < buffer.width) {
+                    buffer.setChar(x2, y, '│', color);
+                }
+            }
+        }
+        
+        // Draw corners
+        if (x1 >= 0 && y1 >= 0 && x1 < buffer.width && y1 < buffer.height) {
+            buffer.setChar(x1, y1, '┌', color);
+        }
+        if (x2 >= 0 && y1 >= 0 && x2 < buffer.width && y1 < buffer.height) {
+            buffer.setChar(x2, y1, '┐', color);
+        }
+        if (x1 >= 0 && y2 >= 0 && x1 < buffer.width && y2 < buffer.height) {
+            buffer.setChar(x1, y2, '└', color);
+        }
+        if (x2 >= 0 && y2 >= 0 && x2 < buffer.width && y2 < buffer.height) {
+            buffer.setChar(x2, y2, '┘', color);
+        }
     }
     
     /**
@@ -10471,26 +11809,38 @@ class Asciistrator extends EventEmitter {
     
     _createObjectTreeNode(obj, parent, depth) {
         const objItem = document.createElement('div');
-        objItem.className = `object-tree-item${AppState.selectedObjects.includes(obj) ? ' selected' : ''}`;
+        const isSelected = AppState.selectedObjects.includes(obj);
+        const isCurrentContainer = AppState.selectionContext.currentContainer === obj;
+        objItem.className = `object-tree-item${isSelected ? ' selected' : ''}${isCurrentContainer ? ' editing-container' : ''}`;
         objItem.style.paddingLeft = `${depth * 16}px`;
         objItem.dataset.objectId = obj.id;
         
         const hasChildren = obj.children && obj.children.length > 0;
+        const canContain = obj.canContainChildren && obj.canContainChildren();
         const isExpanded = this._layerExpandedState[`obj_${obj.id}`] !== false;
-        const expandIcon = hasChildren ? (isExpanded ? '▼' : '▶') : '  ';
+        const expandIcon = (hasChildren || canContain) ? (isExpanded ? '▼' : '▶') : '  ';
         
         // Get object icon based on type
         const typeIcon = this._getObjectTypeIcon(obj.type);
         const objName = obj.name || obj.text || `${obj.type} ${obj.id}`;
         
+        // Show container indicator
+        const containerBadge = canContain ? `<span class="container-badge" title="Container">${hasChildren ? '📦' : '📁'}</span>` : '';
+        
+        // Show auto-layout indicator
+        const autoLayoutBadge = obj.autoLayout?.enabled ? '<span class="auto-layout-badge" title="Auto Layout">⚡</span>' : '';
+        
         objItem.innerHTML = `
-            <span class="object-expand">${expandIcon}</span>
+            <span class="object-expand" style="cursor: ${(hasChildren || canContain) ? 'pointer' : 'default'}">${expandIcon}</span>
             <span class="object-icon">${typeIcon}</span>
+            ${containerBadge}
+            ${autoLayoutBadge}
             <span class="object-name" title="${objName}">${objName}</span>
+            ${hasChildren ? `<span class="object-count">(${obj.children.length})</span>` : ''}
         `;
         
-        // Expand/collapse for groups
-        if (hasChildren) {
+        // Expand/collapse for containers
+        if (hasChildren || canContain) {
             const expandSpan = objItem.querySelector('.object-expand');
             expandSpan.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -10524,11 +11874,21 @@ class Asciistrator extends EventEmitter {
             }
         });
         
-        // Double-click to rename object
-        const nameSpan = objItem.querySelector('.object-name');
-        nameSpan.addEventListener('dblclick', (e) => {
+        // Double-click to enter container or rename
+        objItem.addEventListener('dblclick', (e) => {
             e.stopPropagation();
-            this._startObjectRename(obj, nameSpan);
+            const target = e.target;
+            
+            // If clicked on the name, rename
+            if (target.classList.contains('object-name')) {
+                this._startObjectRename(obj, target);
+                return;
+            }
+            
+            // If container, enter it
+            if (canContain) {
+                this.enterSelectedContainer();
+            }
         });
         
         parent.appendChild(objItem);
@@ -10556,6 +11916,8 @@ class Asciistrator extends EventEmitter {
             'flowchart-connector': '○',
             'connector': '→',
             'group': '▦',
+            'frame': '📦',
+            'panel': '📋',
             'chart': '📊',
             'table': '▤',
             'tree': '🌳',
@@ -13748,6 +15110,368 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         });
     }
     
+    // ========================================
+    // Hierarchy Navigation Methods
+    // ========================================
+    
+    /**
+     * Enter the selected container for editing
+     */
+    enterSelectedContainer() {
+        if (AppState.selectedObjects.length !== 1) {
+            this._updateStatus('Select a single container to enter');
+            return;
+        }
+        
+        const obj = AppState.selectedObjects[0];
+        if (!obj.canContainChildren || !obj.canContainChildren()) {
+            this._updateStatus('Selected object cannot contain children');
+            return;
+        }
+        
+        const ctx = AppState.selectionContext;
+        ctx.breadcrumb.push(obj);
+        ctx.currentContainer = obj;
+        AppState.selectedObjects = [];
+        
+        this._updateBreadcrumbUI();
+        this.renderAllObjects();
+        this._updateLayerList();
+        this._updateStatus(`Editing inside: ${obj.name || obj.type}`);
+    }
+    
+    /**
+     * Exit current container to parent level
+     */
+    exitCurrentContainer() {
+        const ctx = AppState.selectionContext;
+        if (!ctx.currentContainer) {
+            this._updateStatus('Already at root level');
+            return;
+        }
+        
+        ctx.breadcrumb.pop();
+        ctx.currentContainer = ctx.breadcrumb.length > 0 ? ctx.breadcrumb[ctx.breadcrumb.length - 1] : null;
+        AppState.selectedObjects = [];
+        
+        this._updateBreadcrumbUI();
+        this.renderAllObjects();
+        this._updateLayerList();
+        
+        if (ctx.currentContainer) {
+            this._updateStatus(`Editing inside: ${ctx.currentContainer.name || ctx.currentContainer.type}`);
+        } else {
+            this._updateStatus('At root level');
+        }
+    }
+    
+    /**
+     * Exit to root level of the document
+     */
+    exitToRootLevel() {
+        const ctx = AppState.selectionContext;
+        ctx.currentContainer = null;
+        ctx.breadcrumb = [];
+        AppState.selectedObjects = [];
+        
+        this._updateBreadcrumbUI();
+        this.renderAllObjects();
+        this._updateLayerList();
+        this._updateStatus('At root level');
+    }
+    
+    /**
+     * Move selected objects to their parent container (ungroup from current container)
+     */
+    moveSelectionToParent() {
+        if (AppState.selectedObjects.length === 0) {
+            this._updateStatus('No objects selected');
+            return;
+        }
+        
+        this.saveStateForUndo();
+        
+        const ctx = AppState.selectionContext;
+        const currentContainer = ctx.currentContainer;
+        
+        for (const obj of AppState.selectedObjects) {
+            if (obj.parentId) {
+                const parent = this._findObjectById(obj.parentId);
+                if (parent) {
+                    parent.removeChild(obj);
+                    
+                    // Get grandparent
+                    if (parent.parentId) {
+                        const grandparent = this._findObjectById(parent.parentId);
+                        if (grandparent) {
+                            grandparent.addChild(obj);
+                        }
+                    } else {
+                        // Move to root layer
+                        const layer = this._getActiveLayer();
+                        if (layer && layer.objects) {
+                            layer.objects.push(obj);
+                        }
+                    }
+                    
+                    // Relayout affected containers
+                    if (parent.layoutChildren) parent.layoutChildren();
+                }
+            }
+        }
+        
+        this.renderAllObjects();
+        this._updateLayerList();
+        this._updateStatus(`Moved ${AppState.selectedObjects.length} object(s) to parent`);
+    }
+    
+    /**
+     * Show dialog to select a container to move selection into
+     */
+    showMoveIntoContainerDialog() {
+        if (AppState.selectedObjects.length === 0) {
+            this._updateStatus('No objects selected');
+            return;
+        }
+        
+        // Find all containers in the document
+        const containers = [];
+        const selectedIds = new Set(AppState.selectedObjects.map(o => o.id));
+        
+        const findContainers = (objects, depth = 0) => {
+            for (const obj of objects) {
+                if (obj.canContainChildren && obj.canContainChildren() && !selectedIds.has(obj.id)) {
+                    containers.push({ obj, depth, name: obj.name || obj.type });
+                }
+                if (obj.children && obj.children.length > 0) {
+                    findContainers(obj.children, depth + 1);
+                }
+            }
+        };
+        
+        for (const layer of AppState.layers) {
+            if (layer.objects) {
+                findContainers(layer.objects, 0);
+            }
+        }
+        
+        if (containers.length === 0) {
+            this._updateStatus('No containers available');
+            return;
+        }
+        
+        // Build options
+        const options = containers.map((c, i) => {
+            const indent = '  '.repeat(c.depth);
+            return `<option value="${i}">${indent}${c.name} (${c.obj.type})</option>`;
+        }).join('');
+        
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-overlay';
+        dialog.innerHTML = `
+            <div class="modal-dialog" style="max-width: 400px;">
+                <div class="modal-header">
+                    <h3>📦 Move Into Container</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <label>Select Target Container:</label>
+                    <select id="target-container" style="width: 100%; padding: 8px; margin-top: 8px;">
+                        ${options}
+                    </select>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary modal-cancel">Cancel</button>
+                    <button class="btn btn-primary modal-ok">Move</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        
+        const closeDialog = () => dialog.remove();
+        
+        dialog.querySelector('.modal-close').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-cancel').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-ok').addEventListener('click', () => {
+            this.saveStateForUndo();
+            
+            const targetIndex = parseInt(dialog.querySelector('#target-container').value);
+            const targetContainer = containers[targetIndex].obj;
+            
+            for (const obj of AppState.selectedObjects) {
+                // Remove from current parent
+                if (obj.parentId) {
+                    const currentParent = this._findObjectById(obj.parentId);
+                    if (currentParent) {
+                        currentParent.removeChild(obj);
+                    }
+                } else {
+                    // Remove from root layer
+                    const layer = this._getActiveLayer();
+                    if (layer && layer.objects) {
+                        const idx = layer.objects.indexOf(obj);
+                        if (idx !== -1) layer.objects.splice(idx, 1);
+                    }
+                }
+                
+                // Add to target container
+                targetContainer.addChild(obj);
+            }
+            
+            // Relayout target
+            if (targetContainer.layoutChildren) {
+                targetContainer.layoutChildren();
+            }
+            
+            this.renderAllObjects();
+            this._updateLayerList();
+            this._updateStatus(`Moved ${AppState.selectedObjects.length} object(s) into ${targetContainer.name || targetContainer.type}`);
+            closeDialog();
+        });
+        
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) closeDialog();
+        });
+    }
+    
+    /**
+     * Select the parent container of the current selection
+     */
+    selectParentContainer() {
+        if (AppState.selectedObjects.length === 0) {
+            this._updateStatus('No objects selected');
+            return;
+        }
+        
+        const obj = AppState.selectedObjects[0];
+        if (obj.parentId) {
+            const parent = this._findObjectById(obj.parentId);
+            if (parent) {
+                // Exit current container if inside one
+                if (AppState.selectionContext.currentContainer === parent) {
+                    this.exitCurrentContainer();
+                }
+                AppState.selectedObjects = [parent];
+                this.renderAllObjects();
+                this._updatePropertiesPanel();
+                this._updateStatus(`Selected parent: ${parent.name || parent.type}`);
+            }
+        } else {
+            this._updateStatus('Selected object has no parent');
+        }
+    }
+    
+    /**
+     * Select all children of the selected container
+     */
+    selectContainerChildren() {
+        if (AppState.selectedObjects.length !== 1) {
+            this._updateStatus('Select a single container');
+            return;
+        }
+        
+        const container = AppState.selectedObjects[0];
+        if (!container.children || container.children.length === 0) {
+            this._updateStatus('Container has no children');
+            return;
+        }
+        
+        // Enter the container first
+        this.enterSelectedContainer();
+        
+        // Select all children
+        AppState.selectedObjects = [...container.children];
+        this.renderAllObjects();
+        this._updatePropertiesPanel();
+        this._updateStatus(`Selected ${container.children.length} children`);
+    }
+    
+    /**
+     * Update breadcrumb UI (delegated from tools)
+     */
+    _updateBreadcrumbUI() {
+        // Create or update breadcrumb element
+        let breadcrumb = document.querySelector('#hierarchy-breadcrumb');
+        if (!breadcrumb) {
+            breadcrumb = document.createElement('div');
+            breadcrumb.id = 'hierarchy-breadcrumb';
+            breadcrumb.style.cssText = `
+                position: absolute;
+                top: 40px;
+                left: 50%;
+                transform: translateX(-50%);
+                display: flex;
+                align-items: center;
+                gap: 4px;
+                padding: 4px 12px;
+                background: var(--color-bg-secondary);
+                border: 1px solid var(--color-border);
+                border-radius: 4px;
+                font-size: 12px;
+                z-index: 100;
+            `;
+            document.querySelector('#viewport')?.appendChild(breadcrumb);
+        }
+        
+        const ctx = AppState.selectionContext;
+        
+        if (ctx.breadcrumb.length === 0) {
+            breadcrumb.style.display = 'none';
+            return;
+        }
+        
+        breadcrumb.style.display = 'flex';
+        breadcrumb.innerHTML = '';
+        
+        const self = this;
+        
+        // Root link
+        const rootLink = document.createElement('span');
+        rootLink.textContent = '📁 Root';
+        rootLink.style.cssText = 'cursor: pointer; color: var(--color-accent);';
+        rootLink.onclick = () => self.exitToRootLevel();
+        breadcrumb.appendChild(rootLink);
+        
+        // Add each level
+        for (let i = 0; i < ctx.breadcrumb.length; i++) {
+            const separator = document.createElement('span');
+            separator.textContent = ' › ';
+            separator.style.color = 'var(--color-text-muted)';
+            breadcrumb.appendChild(separator);
+            
+            const obj = ctx.breadcrumb[i];
+            const link = document.createElement('span');
+            link.textContent = obj.name || obj.type;
+            
+            if (i < ctx.breadcrumb.length - 1) {
+                link.style.cssText = 'cursor: pointer; color: var(--color-accent);';
+                link.onclick = ((index, container) => () => {
+                    ctx.breadcrumb = ctx.breadcrumb.slice(0, index + 1);
+                    ctx.currentContainer = container;
+                    AppState.selectedObjects = [];
+                    self._updateBreadcrumbUI();
+                    self.renderAllObjects();
+                })(i, obj);
+            } else {
+                link.style.color = 'var(--color-text-primary)';
+            }
+            
+            breadcrumb.appendChild(link);
+        }
+        
+        // Add exit button
+        const exitBtn = document.createElement('span');
+        exitBtn.textContent = ' ✕';
+        exitBtn.style.cssText = 'cursor: pointer; color: var(--color-text-muted); margin-left: 8px;';
+        exitBtn.onclick = () => self.exitToRootLevel();
+        breadcrumb.appendChild(exitBtn);
+    }
+    
+    // ========================================
+    // End Hierarchy Navigation Methods
+    // ========================================
+
     bringToFront() {
         if (AppState.selectedObjects.length > 0) {
             this.saveStateForUndo();
