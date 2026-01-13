@@ -25095,7 +25095,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             if (!viewport || !viewport.contains(e.target)) return;
             
             // Get canvas coordinates from click position
-            const pos = this.pointerToCanvas(e);
+            const pos = this.renderer.pointerToCanvas(e);
             
             // Insert the item at this position
             if (this._pendingInsertItem) {
