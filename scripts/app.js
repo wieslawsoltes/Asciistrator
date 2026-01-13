@@ -7022,18 +7022,18 @@ class ShapeRenderMode extends RenderMode {
      * Render selection indicators in Figma style
      */
     _renderSelectionIndicators() {
-        // Validate and filter selectedObjects to remove stale references
-        AppState.selectedObjects = AppState.selectedObjects.filter(obj => 
-            obj && typeof obj.getBounds === 'function' && this.app._objectExistsInScene(obj.id)
+        // Filter out invalid objects - don't use this.app which may be undefined
+        const validObjects = AppState.selectedObjects.filter(obj => 
+            obj && typeof obj.getBounds === 'function' && obj.visible !== false
         );
         
-        if (AppState.selectedObjects.length === 0) return;
+        if (validObjects.length === 0) return;
         
         const selColor = '#0d99ff';  // Figma blue
         const handleColor = '#ffffff';
         const handleSize = 8;
         
-        for (const obj of AppState.selectedObjects) {
+        for (const obj of validObjects) {
             const bounds = obj.getBounds();
             const pos = this._charToPixel(bounds.x, bounds.y);
             const w = bounds.width * this.charWidth;
@@ -7069,9 +7069,9 @@ class ShapeRenderMode extends RenderMode {
         }
         
         // Draw multi-selection bounding box if multiple objects selected
-        if (AppState.selectedObjects.length > 1) {
+        if (validObjects.length > 1) {
             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-            for (const obj of AppState.selectedObjects) {
+            for (const obj of validObjects) {
                 const bounds = obj.getBounds();
                 const pos = this._charToPixel(bounds.x, bounds.y);
                 const w = bounds.width * this.charWidth;
@@ -8409,12 +8409,12 @@ class RoughRenderMode extends ShapeRenderMode {
      * Override selection indicators for rough hand-drawn style
      */
     _renderSelectionIndicators() {
-        // Validate and filter selectedObjects to remove stale references
-        AppState.selectedObjects = AppState.selectedObjects.filter(obj => 
-            obj && typeof obj.getBounds === 'function' && this.app._objectExistsInScene(obj.id)
+        // Filter out invalid objects - don't use this.app which may be undefined
+        const validObjects = AppState.selectedObjects.filter(obj => 
+            obj && typeof obj.getBounds === 'function' && obj.visible !== false
         );
         
-        if (AppState.selectedObjects.length === 0) return;
+        if (validObjects.length === 0) return;
         
         const selColor = '#ff6b6b';  // Warm red for rough style
         const handleColor = '#ffd93d'; // Yellow handles
@@ -8423,7 +8423,7 @@ class RoughRenderMode extends ShapeRenderMode {
         // Reset seed for consistent wobble
         this._seed = 12345;
         
-        for (const obj of AppState.selectedObjects) {
+        for (const obj of validObjects) {
             const bounds = obj.getBounds();
             const pos = this._charToPixel(bounds.x, bounds.y);
             const w = bounds.width * this.charWidth;
@@ -8480,9 +8480,9 @@ class RoughRenderMode extends ShapeRenderMode {
         }
         
         // Draw multi-selection rough bounding box
-        if (AppState.selectedObjects.length > 1) {
+        if (validObjects.length > 1) {
             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-            for (const obj of AppState.selectedObjects) {
+            for (const obj of validObjects) {
                 const bounds = obj.getBounds();
                 const pos = this._charToPixel(bounds.x, bounds.y);
                 const w = bounds.width * this.charWidth;
