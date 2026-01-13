@@ -1584,6 +1584,24 @@ class FrameObject extends SceneObject {
         this.title = '';             // Optional title shown at top
         this.padding = { top: 1, right: 1, bottom: 1, left: 1 };
         this.autoSize = false;       // Auto-resize to fit content
+        
+        // Auto Layout properties (Figma-style)
+        this.autoLayout = {
+            enabled: false,
+            direction: 'vertical',    // 'horizontal' | 'vertical'
+            spacing: 1,               // Gap between items
+            alignment: 'start',       // 'start' | 'center' | 'end' | 'stretch'
+            distribution: 'packed',   // 'packed' | 'space-between' | 'space-around' | 'space-evenly'
+            wrap: false,              // Wrap items to next line/column
+            counterSpacing: 1,        // Spacing between wrapped rows/columns
+            reversed: false           // Reverse item order
+        };
+        
+        // Sizing behavior
+        this.sizing = {
+            horizontal: 'fixed',      // 'fixed' | 'hug' | 'fill'
+            vertical: 'fixed'         // 'fixed' | 'hug' | 'fill'
+        };
     }
     
     /**
@@ -1596,8 +1614,21 @@ class FrameObject extends SceneObject {
             y: obj.y - this.y
         };
         obj.parentFrame = this.id;
+        
+        // Set default sizing for child
+        if (!obj._layoutSizing) {
+            obj._layoutSizing = {
+                horizontal: 'fixed',  // 'fixed' | 'fill'
+                vertical: 'fixed'     // 'fixed' | 'fill'
+            };
+        }
+        
         this.children.push(obj);
-        if (this.autoSize) this._autoResize();
+        if (this.autoLayout.enabled) {
+            this.layoutChildren();
+        } else if (this.autoSize) {
+            this._autoResize();
+        }
     }
     
     /**
@@ -1608,8 +1639,13 @@ class FrameObject extends SceneObject {
         if (idx > -1) {
             obj.parentFrame = null;
             obj._frameOffset = null;
+            obj._layoutSizing = null;
             this.children.splice(idx, 1);
-            if (this.autoSize) this._autoResize();
+            if (this.autoLayout.enabled) {
+                this.layoutChildren();
+            } else if (this.autoSize) {
+                this._autoResize();
+            }
         }
     }
     
@@ -1626,6 +1662,272 @@ class FrameObject extends SceneObject {
             }
         }
         return result;
+    }
+    
+    /**
+     * Apply auto layout to children (Figma-style)
+     */
+    layoutChildren() {
+        if (!this.autoLayout.enabled || this.children.length === 0) return;
+        
+        const content = this.getContentBounds();
+        const items = this.autoLayout.reversed ? [...this.children].reverse() : this.children;
+        const isHorizontal = this.autoLayout.direction === 'horizontal';
+        
+        // Calculate sizes for fill items and total content size
+        const itemSizes = items.map(child => {
+            const bounds = child.getBounds ? child.getBounds() : 
+                { x: child.x, y: child.y, width: child.width || 1, height: child.height || 1 };
+            return {
+                obj: child,
+                width: bounds.width,
+                height: bounds.height,
+                fillH: child._layoutSizing?.horizontal === 'fill',
+                fillV: child._layoutSizing?.vertical === 'fill'
+            };
+        });
+        
+        // Handle wrapping
+        if (this.autoLayout.wrap) {
+            this._layoutWithWrap(content, itemSizes, isHorizontal);
+            return;
+        }
+        
+        // Calculate total fixed size and count of fill items
+        let totalFixedSize = 0;
+        let fillCount = 0;
+        
+        for (const item of itemSizes) {
+            const size = isHorizontal ? item.width : item.height;
+            const isFill = isHorizontal ? item.fillH : item.fillV;
+            if (!isFill) {
+                totalFixedSize += size;
+            } else {
+                fillCount++;
+            }
+        }
+        
+        // Add spacing to total
+        const totalSpacing = this.autoLayout.spacing * (items.length - 1);
+        const availableSpace = (isHorizontal ? content.width : content.height) - totalFixedSize - totalSpacing;
+        const fillSize = fillCount > 0 ? Math.floor(availableSpace / fillCount) : 0;
+        
+        // Calculate positions based on distribution
+        let positions = [];
+        let currentPos = 0;
+        
+        if (this.autoLayout.distribution === 'packed') {
+            // Align at start, center, or end
+            const totalSize = totalFixedSize + (fillCount * fillSize) + totalSpacing;
+            const containerSize = isHorizontal ? content.width : content.height;
+            
+            switch (this.autoLayout.alignment) {
+                case 'center':
+                    currentPos = Math.floor((containerSize - totalSize) / 2);
+                    break;
+                case 'end':
+                    currentPos = containerSize - totalSize;
+                    break;
+                default: // 'start' or 'stretch'
+                    currentPos = 0;
+            }
+            
+            for (const item of itemSizes) {
+                const size = isHorizontal ? 
+                    (item.fillH ? fillSize : item.width) : 
+                    (item.fillV ? fillSize : item.height);
+                positions.push({ item, pos: currentPos, size });
+                currentPos += size + this.autoLayout.spacing;
+            }
+        } else {
+            // Space distribution modes
+            const totalItemSize = itemSizes.reduce((sum, item) => 
+                sum + (isHorizontal ? (item.fillH ? fillSize : item.width) : (item.fillV ? fillSize : item.height)), 0);
+            const containerSize = isHorizontal ? content.width : content.height;
+            const remainingSpace = containerSize - totalItemSize;
+            
+            let gap = 0;
+            let startOffset = 0;
+            
+            switch (this.autoLayout.distribution) {
+                case 'space-between':
+                    gap = items.length > 1 ? remainingSpace / (items.length - 1) : 0;
+                    break;
+                case 'space-around':
+                    gap = remainingSpace / items.length;
+                    startOffset = gap / 2;
+                    break;
+                case 'space-evenly':
+                    gap = remainingSpace / (items.length + 1);
+                    startOffset = gap;
+                    break;
+            }
+            
+            currentPos = startOffset;
+            for (const item of itemSizes) {
+                const size = isHorizontal ? 
+                    (item.fillH ? fillSize : item.width) : 
+                    (item.fillV ? fillSize : item.height);
+                positions.push({ item, pos: currentPos, size });
+                currentPos += size + gap;
+            }
+        }
+        
+        // Apply positions
+        for (const { item, pos, size } of positions) {
+            const crossSize = isHorizontal ? content.height : content.width;
+            const itemCrossSize = isHorizontal ? item.height : item.width;
+            let crossPos = 0;
+            
+            // Cross-axis alignment
+            switch (this.autoLayout.alignment) {
+                case 'center':
+                    crossPos = Math.floor((crossSize - itemCrossSize) / 2);
+                    break;
+                case 'end':
+                    crossPos = crossSize - itemCrossSize;
+                    break;
+                case 'stretch':
+                    crossPos = 0;
+                    // Apply stretch to cross dimension
+                    if (isHorizontal && item.obj.height !== undefined) {
+                        item.obj.height = crossSize;
+                    } else if (!isHorizontal && item.obj.width !== undefined) {
+                        item.obj.width = crossSize;
+                    }
+                    break;
+                default: // 'start'
+                    crossPos = 0;
+            }
+            
+            // Apply main axis fill size
+            if (isHorizontal && item.fillH && item.obj.width !== undefined) {
+                item.obj.width = size;
+            } else if (!isHorizontal && item.fillV && item.obj.height !== undefined) {
+                item.obj.height = size;
+            }
+            
+            // Set position
+            if (isHorizontal) {
+                item.obj.x = content.x + pos;
+                item.obj.y = content.y + crossPos;
+            } else {
+                item.obj.x = content.x + crossPos;
+                item.obj.y = content.y + pos;
+            }
+            
+            // Update frame offset
+            item.obj._frameOffset = {
+                x: item.obj.x - this.x,
+                y: item.obj.y - this.y
+            };
+        }
+        
+        // Hug sizing
+        if (this.sizing.horizontal === 'hug' || this.sizing.vertical === 'hug') {
+            this._hugContent();
+        }
+    }
+    
+    /**
+     * Layout children with wrapping
+     */
+    _layoutWithWrap(content, itemSizes, isHorizontal) {
+        const mainAxisSize = isHorizontal ? content.width : content.height;
+        const lines = [];
+        let currentLine = [];
+        let currentLineSize = 0;
+        
+        // Group items into lines
+        for (const item of itemSizes) {
+            const itemSize = isHorizontal ? item.width : item.height;
+            
+            if (currentLine.length > 0 && currentLineSize + itemSize + this.autoLayout.spacing > mainAxisSize) {
+                lines.push(currentLine);
+                currentLine = [item];
+                currentLineSize = itemSize;
+            } else {
+                if (currentLine.length > 0) currentLineSize += this.autoLayout.spacing;
+                currentLine.push(item);
+                currentLineSize += itemSize;
+            }
+        }
+        if (currentLine.length > 0) lines.push(currentLine);
+        
+        // Position items in each line
+        let crossPos = 0;
+        for (const line of lines) {
+            let mainPos = 0;
+            const lineMaxCross = Math.max(...line.map(item => isHorizontal ? item.height : item.width));
+            
+            // Calculate main axis start based on alignment
+            const lineMainSize = line.reduce((sum, item) => 
+                sum + (isHorizontal ? item.width : item.height), 0) + 
+                this.autoLayout.spacing * (line.length - 1);
+            
+            switch (this.autoLayout.alignment) {
+                case 'center':
+                    mainPos = Math.floor((mainAxisSize - lineMainSize) / 2);
+                    break;
+                case 'end':
+                    mainPos = mainAxisSize - lineMainSize;
+                    break;
+            }
+            
+            for (const item of line) {
+                const itemCrossSize = isHorizontal ? item.height : item.width;
+                let itemCrossPos = crossPos;
+                
+                // Cross-axis alignment within line
+                if (this.autoLayout.alignment === 'center') {
+                    itemCrossPos = crossPos + Math.floor((lineMaxCross - itemCrossSize) / 2);
+                } else if (this.autoLayout.alignment === 'end') {
+                    itemCrossPos = crossPos + lineMaxCross - itemCrossSize;
+                }
+                
+                if (isHorizontal) {
+                    item.obj.x = content.x + mainPos;
+                    item.obj.y = content.y + itemCrossPos;
+                    mainPos += item.width + this.autoLayout.spacing;
+                } else {
+                    item.obj.x = content.x + itemCrossPos;
+                    item.obj.y = content.y + mainPos;
+                    mainPos += item.height + this.autoLayout.spacing;
+                }
+                
+                item.obj._frameOffset = {
+                    x: item.obj.x - this.x,
+                    y: item.obj.y - this.y
+                };
+            }
+            
+            crossPos += lineMaxCross + this.autoLayout.counterSpacing;
+        }
+    }
+    
+    /**
+     * Resize frame to hug content
+     */
+    _hugContent() {
+        if (this.children.length === 0) return;
+        
+        let maxX = 0, maxY = 0;
+        
+        for (const child of this.children) {
+            const b = child.getBounds ? child.getBounds() : 
+                { x: child.x, y: child.y, width: child.width || 1, height: child.height || 1 };
+            const relX = b.x - this.x - this.padding.left + b.width;
+            const relY = b.y - this.y - this.padding.top + b.height;
+            maxX = Math.max(maxX, relX);
+            maxY = Math.max(maxY, relY);
+        }
+        
+        if (this.sizing.horizontal === 'hug') {
+            this.width = maxX + this.padding.left + this.padding.right;
+        }
+        if (this.sizing.vertical === 'hug') {
+            this.height = maxY + this.padding.top + this.padding.bottom;
+        }
     }
     
     /**
@@ -1800,7 +2102,9 @@ class FrameObject extends SceneObject {
             backgroundChar: this.backgroundChar,
             title: this.title,
             padding: this.padding,
-            autoSize: this.autoSize
+            autoSize: this.autoSize,
+            autoLayout: this.autoLayout,
+            sizing: this.sizing
         };
     }
     
@@ -1819,6 +2123,29 @@ class FrameObject extends SceneObject {
         frame.padding = data.padding || { top: 1, right: 1, bottom: 1, left: 1 };
         frame.autoSize = data.autoSize || false;
         frame.strokeColor = data.strokeColor;
+        
+        // Auto Layout properties
+        if (data.autoLayout) {
+            frame.autoLayout = {
+                enabled: data.autoLayout.enabled || false,
+                direction: data.autoLayout.direction || 'vertical',
+                spacing: data.autoLayout.spacing ?? 1,
+                alignment: data.autoLayout.alignment || 'start',
+                distribution: data.autoLayout.distribution || 'packed',
+                wrap: data.autoLayout.wrap || false,
+                counterSpacing: data.autoLayout.counterSpacing ?? 1,
+                reversed: data.autoLayout.reversed || false
+            };
+        }
+        
+        // Sizing behavior
+        if (data.sizing) {
+            frame.sizing = {
+                horizontal: data.sizing.horizontal || 'fixed',
+                vertical: data.sizing.vertical || 'fixed'
+            };
+        }
+        
         // Children will be reconstructed by the scene loader
         return frame;
     }
@@ -8092,6 +8419,13 @@ class Asciistrator extends EventEmitter {
                     this.swapColors();
                     return;
                 }
+                
+                // Shift+A to toggle auto layout on selected frame
+                if (e.shiftKey && e.key.toLowerCase() === 'a') {
+                    e.preventDefault();
+                    this.toggleAutoLayout();
+                    return;
+                }
             }
             
             // Pass key to active tool
@@ -8653,8 +8987,20 @@ class Asciistrator extends EventEmitter {
                         { label: 'Distribute Vertically', action: 'distribute-v' },
                         { type: 'separator' },
                         { label: 'Tidy Up', action: 'tidy-up' },
+                    ]
+                },
+                {
+                    label: 'Frame / Auto Layout',
+                    submenu: [
+                        { label: 'Create Frame from Selection', action: 'frame-selection', shortcut: 'Ctrl+Alt+G' },
+                        { label: 'Add to Frame', action: 'add-to-frame' },
+                        { label: 'Remove from Frame', action: 'remove-from-frame' },
                         { type: 'separator' },
-                        { label: 'Auto Layout...', action: 'auto-layout' },
+                        { label: 'Toggle Auto Layout', action: 'toggle-auto-layout' },
+                        { label: 'Apply Auto Layout', action: 'apply-auto-layout' },
+                        { type: 'separator' },
+                        { label: 'Set Child Sizing...', action: 'child-sizing' },
+                        { label: 'Frame Properties...', action: 'frame-properties' },
                     ]
                 },
                 { type: 'separator' },
@@ -9031,6 +9377,24 @@ class Asciistrator extends EventEmitter {
             // Frame
             case 'frame-selection':
                 this.frameSelection();
+                break;
+            case 'add-to-frame':
+                this.addSelectionToFrame();
+                break;
+            case 'remove-from-frame':
+                this.removeFromFrame();
+                break;
+            case 'toggle-auto-layout':
+                this.toggleAutoLayout();
+                break;
+            case 'apply-auto-layout':
+                this.applyAutoLayout();
+                break;
+            case 'child-sizing':
+                this.showChildSizingDialog();
+                break;
+            case 'frame-properties':
+                this.showFramePropertiesDialog();
                 break;
             // Boolean operations
             case 'bool-union':
@@ -13002,6 +13366,152 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
     }
     
     /**
+     * Toggle auto layout on selected frame
+     */
+    toggleAutoLayout() {
+        const selectedFrame = AppState.selectedObjects.find(obj => obj.type === 'frame');
+        if (!selectedFrame) {
+            this._updateStatus('No frame selected');
+            return;
+        }
+        
+        this.saveStateForUndo();
+        selectedFrame.autoLayout.enabled = !selectedFrame.autoLayout.enabled;
+        
+        if (selectedFrame.autoLayout.enabled) {
+            selectedFrame.layoutChildren();
+            this._updateStatus('Auto layout enabled');
+        } else {
+            this._updateStatus('Auto layout disabled');
+        }
+        
+        this.renderAllObjects();
+        this._updatePropertiesPanel();
+    }
+    
+    /**
+     * Apply auto layout (recalculate child positions)
+     */
+    applyAutoLayout() {
+        const selectedFrame = AppState.selectedObjects.find(obj => obj.type === 'frame');
+        if (!selectedFrame) {
+            this._updateStatus('No frame selected');
+            return;
+        }
+        
+        if (!selectedFrame.autoLayout.enabled) {
+            this._updateStatus('Auto layout is not enabled on this frame');
+            return;
+        }
+        
+        this.saveStateForUndo();
+        selectedFrame.layoutChildren();
+        this.renderAllObjects();
+        this._updateStatus('Auto layout applied');
+    }
+    
+    /**
+     * Show dialog to set sizing for selected children in a frame
+     */
+    showChildSizingDialog() {
+        // Find selected objects that are children of a frame
+        const childrenInFrames = AppState.selectedObjects.filter(obj => obj.parentFrame);
+        
+        if (childrenInFrames.length === 0) {
+            this._updateStatus('Select objects inside a frame');
+            return;
+        }
+        
+        const firstChild = childrenInFrames[0];
+        const sizing = firstChild._layoutSizing || { horizontal: 'fixed', vertical: 'fixed' };
+        
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-overlay';
+        dialog.innerHTML = `
+            <div class="modal-dialog" style="max-width: 350px;">
+                <div class="modal-header">
+                    <h3>📐 Child Sizing</h3>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p style="font-size: 13px; color: var(--color-text-muted); margin-bottom: 15px;">
+                        Set how ${childrenInFrames.length} object(s) resize within auto layout.
+                    </p>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; font-size: 13px;">Horizontal:</label>
+                            <select id="child-sz-h" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                                <option value="fixed" ${sizing.horizontal === 'fixed' ? 'selected' : ''}>Fixed</option>
+                                <option value="fill" ${sizing.horizontal === 'fill' ? 'selected' : ''}>Fill Container</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; font-size: 13px;">Vertical:</label>
+                            <select id="child-sz-v" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                                <option value="fixed" ${sizing.vertical === 'fixed' ? 'selected' : ''}>Fixed</option>
+                                <option value="fill" ${sizing.vertical === 'fill' ? 'selected' : ''}>Fill Container</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div style="padding: 10px; background: var(--color-bg-secondary); border-radius: 4px; font-size: 12px;">
+                        <strong>Fixed:</strong> Object keeps its size<br>
+                        <strong>Fill:</strong> Object expands to fill available space
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary modal-cancel">Cancel</button>
+                    <button class="btn btn-primary modal-ok">Apply</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        
+        const closeDialog = () => dialog.remove();
+        
+        dialog.querySelector('.modal-close').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-cancel').addEventListener('click', closeDialog);
+        dialog.querySelector('.modal-ok').addEventListener('click', () => {
+            this.saveStateForUndo();
+            
+            const newSizing = {
+                horizontal: dialog.querySelector('#child-sz-h').value,
+                vertical: dialog.querySelector('#child-sz-v').value
+            };
+            
+            // Apply to all selected children
+            for (const child of childrenInFrames) {
+                child._layoutSizing = { ...newSizing };
+            }
+            
+            // Refresh layout for affected frames
+            const affectedFrames = new Set();
+            for (const child of childrenInFrames) {
+                if (child.parentFrame) {
+                    const frame = this._findObjectById(child.parentFrame);
+                    if (frame) affectedFrames.add(frame);
+                }
+            }
+            
+            for (const frame of affectedFrames) {
+                if (frame.autoLayout?.enabled) {
+                    frame.layoutChildren();
+                }
+            }
+            
+            this.renderAllObjects();
+            this._updateStatus(`Applied sizing to ${childrenInFrames.length} objects`);
+            closeDialog();
+        });
+        
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) closeDialog();
+        });
+    }
+    
+    /**
      * Show frame properties dialog
      */
     showFramePropertiesDialog() {
@@ -13011,10 +13521,13 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             return;
         }
         
+        const al = selectedFrame.autoLayout || { enabled: false, direction: 'vertical', spacing: 1, alignment: 'start', distribution: 'packed', wrap: false, counterSpacing: 1, reversed: false };
+        const sz = selectedFrame.sizing || { horizontal: 'fixed', vertical: 'fixed' };
+        
         const dialog = document.createElement('div');
         dialog.className = 'modal-overlay';
         dialog.innerHTML = `
-            <div class="modal-dialog" style="max-width: 400px;">
+            <div class="modal-dialog" style="max-width: 500px; max-height: 90vh; overflow-y: auto;">
                 <div class="modal-header">
                     <h3>📦 Frame Properties</h3>
                     <button class="modal-close">&times;</button>
@@ -13073,7 +13586,89 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                         <span style="margin-left: 10px; font-size: 12px; color: var(--color-text-muted);">Empty for transparent</span>
                     </div>
                     
-                    <div style="padding: 10px; background: var(--color-bg-secondary); border-radius: 4px; font-size: 12px;">
+                    <!-- Auto Layout Section -->
+                    <div style="border-top: 1px solid var(--color-border); margin-top: 20px; padding-top: 15px;">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 15px;">
+                            <input type="checkbox" id="frame-auto-layout" ${al.enabled ? 'checked' : ''}>
+                            <span style="font-size: 14px; font-weight: 600;">⚡ Auto Layout</span>
+                        </label>
+                        
+                        <div id="auto-layout-options" style="display: ${al.enabled ? 'block' : 'none'};">
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                                <div>
+                                    <label style="display: block; margin-bottom: 5px; font-size: 13px;">Direction:</label>
+                                    <select id="al-direction" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                                        <option value="horizontal" ${al.direction === 'horizontal' ? 'selected' : ''}>→ Horizontal</option>
+                                        <option value="vertical" ${al.direction === 'vertical' ? 'selected' : ''}>↓ Vertical</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display: block; margin-bottom: 5px; font-size: 13px;">Spacing:</label>
+                                    <input type="number" id="al-spacing" value="${al.spacing}" min="0" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                                </div>
+                            </div>
+                            
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                                <div>
+                                    <label style="display: block; margin-bottom: 5px; font-size: 13px;">Alignment:</label>
+                                    <select id="al-alignment" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                                        <option value="start" ${al.alignment === 'start' ? 'selected' : ''}>⬆ Start</option>
+                                        <option value="center" ${al.alignment === 'center' ? 'selected' : ''}>⬌ Center</option>
+                                        <option value="end" ${al.alignment === 'end' ? 'selected' : ''}>⬇ End</option>
+                                        <option value="stretch" ${al.alignment === 'stretch' ? 'selected' : ''}>↔ Stretch</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display: block; margin-bottom: 5px; font-size: 13px;">Distribution:</label>
+                                    <select id="al-distribution" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                                        <option value="packed" ${al.distribution === 'packed' ? 'selected' : ''}>Packed</option>
+                                        <option value="space-between" ${al.distribution === 'space-between' ? 'selected' : ''}>Space Between</option>
+                                        <option value="space-around" ${al.distribution === 'space-around' ? 'selected' : ''}>Space Around</option>
+                                        <option value="space-evenly" ${al.distribution === 'space-evenly' ? 'selected' : ''}>Space Evenly</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 15px;">
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                    <input type="checkbox" id="al-wrap" ${al.wrap ? 'checked' : ''}>
+                                    <span style="font-size: 13px;">Wrap items</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                    <input type="checkbox" id="al-reversed" ${al.reversed ? 'checked' : ''}>
+                                    <span style="font-size: 13px;">Reverse order</span>
+                                </label>
+                            </div>
+                            
+                            <div id="wrap-spacing-row" style="display: ${al.wrap ? 'block' : 'none'}; margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-size: 13px;">Row/Column Spacing:</label>
+                                <input type="number" id="al-counter-spacing" value="${al.counterSpacing}" min="0" style="width: 80px; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                            </div>
+                            
+                            <!-- Sizing Section -->
+                            <div style="border-top: 1px solid var(--color-border); margin-top: 15px; padding-top: 15px;">
+                                <div style="font-size: 13px; font-weight: 600; margin-bottom: 10px;">Frame Sizing</div>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                                    <div>
+                                        <label style="display: block; margin-bottom: 5px; font-size: 13px;">Horizontal:</label>
+                                        <select id="sz-horizontal" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                                            <option value="fixed" ${sz.horizontal === 'fixed' ? 'selected' : ''}>Fixed</option>
+                                            <option value="hug" ${sz.horizontal === 'hug' ? 'selected' : ''}>Hug Contents</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label style="display: block; margin-bottom: 5px; font-size: 13px;">Vertical:</label>
+                                        <select id="sz-vertical" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary);">
+                                            <option value="fixed" ${sz.vertical === 'fixed' ? 'selected' : ''}>Fixed</option>
+                                            <option value="hug" ${sz.vertical === 'hug' ? 'selected' : ''}>Hug Contents</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div style="padding: 10px; background: var(--color-bg-secondary); border-radius: 4px; font-size: 12px; margin-top: 15px;">
                         <strong>Children:</strong> ${selectedFrame.children ? selectedFrame.children.length : 0} objects
                     </div>
                 </div>
@@ -13085,6 +13680,20 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         `;
         
         document.body.appendChild(dialog);
+        
+        // Toggle auto layout options visibility
+        const autoLayoutCheckbox = dialog.querySelector('#frame-auto-layout');
+        const autoLayoutOptions = dialog.querySelector('#auto-layout-options');
+        autoLayoutCheckbox.addEventListener('change', () => {
+            autoLayoutOptions.style.display = autoLayoutCheckbox.checked ? 'block' : 'none';
+        });
+        
+        // Toggle wrap spacing visibility
+        const wrapCheckbox = dialog.querySelector('#al-wrap');
+        const wrapSpacingRow = dialog.querySelector('#wrap-spacing-row');
+        wrapCheckbox.addEventListener('change', () => {
+            wrapSpacingRow.style.display = wrapCheckbox.checked ? 'block' : 'none';
+        });
         
         const closeDialog = () => dialog.remove();
         
@@ -13102,6 +13711,30 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             selectedFrame.clipContent = dialog.querySelector('#frame-clip-content').checked;
             selectedFrame.autoSize = dialog.querySelector('#frame-auto-size').checked;
             selectedFrame.backgroundChar = dialog.querySelector('#frame-bg-char').value || ' ';
+            
+            // Auto Layout settings
+            const autoLayoutEnabled = dialog.querySelector('#frame-auto-layout').checked;
+            selectedFrame.autoLayout = {
+                enabled: autoLayoutEnabled,
+                direction: dialog.querySelector('#al-direction').value,
+                spacing: parseInt(dialog.querySelector('#al-spacing').value) || 0,
+                alignment: dialog.querySelector('#al-alignment').value,
+                distribution: dialog.querySelector('#al-distribution').value,
+                wrap: dialog.querySelector('#al-wrap').checked,
+                counterSpacing: parseInt(dialog.querySelector('#al-counter-spacing').value) || 1,
+                reversed: dialog.querySelector('#al-reversed').checked
+            };
+            
+            // Sizing settings
+            selectedFrame.sizing = {
+                horizontal: dialog.querySelector('#sz-horizontal').value,
+                vertical: dialog.querySelector('#sz-vertical').value
+            };
+            
+            // Apply auto layout if enabled
+            if (autoLayoutEnabled) {
+                selectedFrame.layoutChildren();
+            }
             
             this.renderAllObjects();
             this._updateLayerList();
@@ -13537,6 +14170,9 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             { label: 'Add to Frame', action: () => this.addSelectionToFrame(), category: 'Object' },
             { label: 'Remove from Frame', action: () => this.removeFromFrame(), category: 'Object' },
             { label: 'Frame Properties...', action: () => this.showFramePropertiesDialog(), category: 'Object' },
+            { label: 'Toggle Auto Layout', action: () => this.toggleAutoLayout(), category: 'Object' },
+            { label: 'Apply Auto Layout', action: () => this.applyAutoLayout(), category: 'Object' },
+            { label: 'Set Child Sizing...', action: () => this.showChildSizingDialog(), category: 'Object' },
             // View
             { label: 'Zoom In', action: () => this.zoomIn(), category: 'View', shortcut: 'Ctrl++' },
             { label: 'Zoom Out', action: () => this.zoomOut(), category: 'View', shortcut: 'Ctrl+-' },

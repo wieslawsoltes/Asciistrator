@@ -452,6 +452,7 @@ Frames are nestable containers that can hold other objects and optionally clip t
 | **Auto Size** | Automatically resize to fit content |
 | **Background** | Fill character and color |
 | **Padding** | Space inside frame edges |
+| **Auto Layout** | Automatic child positioning (Figma-style) |
 
 ### Border Styles
 
@@ -465,6 +466,52 @@ Dashed:          Thick:
 ┌┄┄┄┄┄┄┄┄┐       ┏━━━━━━━━┓
 ┆        ┆       ┃        ┃
 └┄┄┄┄┄┄┄┄┘       ┗━━━━━━━━┛
+```
+
+### Auto Layout (Figma-style)
+
+Auto Layout automatically arranges child objects within a frame.
+
+**Enable Auto Layout:**
+1. Select a frame
+2. Press `Shift+A` or go to Object > Frame / Auto Layout > Toggle Auto Layout
+3. Open Frame Properties to configure settings
+
+**Auto Layout Options:**
+
+| Setting | Options | Description |
+|---------|---------|-------------|
+| **Direction** | Horizontal, Vertical | Stack direction |
+| **Spacing** | 0-n | Gap between items |
+| **Alignment** | Start, Center, End, Stretch | Cross-axis alignment |
+| **Distribution** | Packed, Space Between, Space Around, Space Evenly | Main-axis distribution |
+| **Wrap** | On/Off | Wrap items to next row/column |
+| **Reversed** | On/Off | Reverse item order |
+
+**Frame Sizing:**
+- **Fixed**: Frame keeps manual size
+- **Hug Contents**: Frame shrinks to fit children
+
+**Child Sizing:**
+- **Fixed**: Child keeps its own size
+- **Fill**: Child expands to fill available space
+
+**Example - Horizontal Layout:**
+```
+┌─ Toolbar ─────────────────────────┐
+│ [Save] [Open] [Export] [Settings] │
+└───────────────────────────────────┘
+```
+
+**Example - Vertical Layout with Spacing:**
+```
+┌─ Menu ────┐
+│ Home      │
+│           │
+│ Products  │
+│           │
+│ Contact   │
+└───────────┘
 ```
 
 ### Working with Frames
@@ -495,6 +542,9 @@ Dashed:          Thick:
 | Frame Selection | Ctrl+Alt+G | Create frame from selection |
 | Add to Frame | - | Add objects to selected frame |
 | Remove from Frame | - | Remove objects from frame |
+| Toggle Auto Layout | Shift+A | Enable/disable auto layout |
+| Apply Auto Layout | - | Recalculate child positions |
+| Set Child Sizing | - | Configure how children resize |
 | Frame Properties | - | Edit frame settings |
 
 ---

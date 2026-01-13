@@ -837,7 +837,7 @@ const objects = group.ungroup();
 
 ### Frame
 
-Nestable container with content clipping support.
+Nestable container with content clipping support and Figma-style auto layout.
 
 ```javascript
 // In scripts/app.js - FrameObject class
@@ -854,11 +854,36 @@ frame.backgroundChar = ' ';          // Character for background
 frame.padding = { top: 1, right: 1, bottom: 1, left: 1 };
 frame.autoSize = false;              // Auto-resize to fit content
 
+// Auto Layout (Figma-style)
+frame.autoLayout = {
+    enabled: true,
+    direction: 'vertical',           // 'horizontal' | 'vertical'
+    spacing: 1,                      // Gap between items
+    alignment: 'start',              // 'start' | 'center' | 'end' | 'stretch'
+    distribution: 'packed',          // 'packed' | 'space-between' | 'space-around' | 'space-evenly'
+    wrap: false,                     // Wrap items to next line/column
+    counterSpacing: 1,               // Spacing between wrapped rows/columns
+    reversed: false                  // Reverse item order
+};
+
+// Frame sizing behavior
+frame.sizing = {
+    horizontal: 'fixed',             // 'fixed' | 'hug'
+    vertical: 'hug'                  // 'fixed' | 'hug'
+};
+
+// Child sizing (on child objects)
+childObject._layoutSizing = {
+    horizontal: 'fill',              // 'fixed' | 'fill'
+    vertical: 'fixed'                // 'fixed' | 'fill'
+};
+
 // Child management
 frame.addChild(object);              // Add child to frame
 frame.removeChild(object);           // Remove child from frame
 frame.getAllChildren(recursive);     // Get all children (optionally recursive)
 frame.getContentBounds();            // Get inner bounds (inside padding)
+frame.layoutChildren();              // Apply auto layout to children
 
 // Movement
 frame.moveTo(newX, newY);           // Move frame and all children
@@ -876,6 +901,14 @@ const restored = FrameObject.fromJSON(json);
 | `rounded` | ╭─╮│╰╯ |
 | `dashed` | ┌┄┐┆└┘ |
 | `thick` | ┏━┓┃┗┛ |
+
+**Auto Layout Distribution:**
+| Distribution | Description |
+|--------------|-------------|
+| `packed` | Items grouped at start/center/end based on alignment |
+| `space-between` | Equal space between items, none at edges |
+| `space-around` | Equal space around each item |
+| `space-evenly` | Equal space between and around items |
 
 **Events:**
 | Event | Data | Description |

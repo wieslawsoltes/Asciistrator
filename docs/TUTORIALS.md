@@ -800,27 +800,85 @@ Frames can contain other frames for complex layouts:
 └─────────────────────────────────────────────────┘
 ```
 
-#### Step 7: Build a Dashboard Layout
+#### Step 7: Using Auto Layout
+
+Auto Layout automatically arranges children within a frame - similar to Figma!
+
+1. Create a frame
+2. Add several rectangles or text objects inside
+3. Select the frame
+4. Press `Shift+A` to enable Auto Layout
+5. Objects automatically stack vertically
+
+**Configure Auto Layout:**
+1. Select the frame
+2. Open Frame Properties (via context menu or command palette)
+3. Adjust these settings:
+   - **Direction**: Horizontal or Vertical stacking
+   - **Spacing**: Gap between items
+   - **Alignment**: Start, Center, End, or Stretch
+   - **Distribution**: Packed, Space Between, Space Around, Space Evenly
+
+**Example - Horizontal Toolbar:**
+```
+┌─ Toolbar ─────────────────────────────┐
+│ [File] [Edit] [View] [Help]           │
+└───────────────────────────────────────┘
+```
+
+**Example - Vertical Menu with Spacing:**
+```
+┌─ Navigation ─┐
+│ Dashboard    │
+│              │
+│ Projects     │
+│              │
+│ Settings     │
+└──────────────┘
+```
+
+#### Step 8: Child Sizing
+
+Control how children resize within auto layout:
+
+1. Add objects to an auto layout frame
+2. Select a child object
+3. Use Object > Frame / Auto Layout > Set Child Sizing
+4. Choose:
+   - **Fixed**: Object keeps its size
+   - **Fill**: Object expands to fill available space
+
+**Fill Example:**
+```
+┌─ Form ──────────────────────────┐
+│ ┌──────────────────────────────┐│  ← Input field set to "Fill"
+│ └──────────────────────────────┘│
+│ [Submit]                        │  ← Button stays "Fixed"
+└─────────────────────────────────┘
+```
+
+#### Step 9: Build a Dashboard Layout
 Let's create a simple dashboard:
 
 1. Create a large outer frame (70x20)
 2. Set title to "Server Monitor"
-3. Create inner frames for different sections:
-   - Status frame (top-left)
-   - Performance frame (top-right)
-   - Logs frame (bottom, full width)
+3. Enable Auto Layout with Vertical direction
+4. Create inner frames for different sections:
+   - Status frame (horizontal auto layout)
+   - Performance frame 
+   - Logs frame (set to Fill vertically)
 
 ### Exercise
-Create this card layout using frames:
+Create this card layout using frames and auto layout:
 
 ```
 ┌─ Product Card ─────────────────┐
-│ ┌─ Image ─────┐ ┌─ Info ─────┐ │
+│ ┌─ Image ─────┐ ┌─ Info ─────┐ │  ← Horizontal auto layout
 │ │             │ │ Name: Item │ │
-│ │   [IMAGE]   │ │ Price: $99 │ │
+│ │   [IMAGE]   │ │ Price: $99 │ │  ← Info uses vertical auto layout
 │ │             │ │ Stock: 42  │ │
 │ └─────────────┘ └────────────┘ │
-│ ┌─ Description ───────────────┐│
+│ ┌─ Description ───────────────┐│  ← Description set to Fill width
 │ │ A wonderful product that    ││
 │ │ everyone needs to have!     ││
 │ └─────────────────────────────┘│
