@@ -512,23 +512,23 @@ function createFill(type = FillType.SOLID) {
  * Defines how object responds to parent width changes
  */
 const HorizontalConstraint = {
-    LEFT: 'left',           // Maintain distance from left edge
-    RIGHT: 'right',         // Maintain distance from right edge
-    LEFT_RIGHT: 'leftRight', // Stretch to maintain both distances (scale width)
-    CENTER: 'center',       // Maintain position relative to center
-    SCALE: 'scale'          // Scale position and size proportionally
+    MIN: 'MIN',             // Maintain distance from left edge (Figma: MIN)
+    MAX: 'MAX',             // Maintain distance from right edge (Figma: MAX)
+    STRETCH: 'STRETCH',     // Stretch to maintain both distances (Figma: STRETCH)
+    CENTER: 'CENTER',       // Maintain position relative to center (Figma: CENTER)
+    SCALE: 'SCALE'          // Scale position and size proportionally (Figma: SCALE)
 };
 
 /**
- * Vertical constraint types
+ * Vertical constraint types (Figma-compatible)
  * Defines how object responds to parent height changes
  */
 const VerticalConstraint = {
-    TOP: 'top',             // Maintain distance from top edge
-    BOTTOM: 'bottom',       // Maintain distance from bottom edge
-    TOP_BOTTOM: 'topBottom', // Stretch to maintain both distances (scale height)
-    CENTER: 'center',       // Maintain position relative to center
-    SCALE: 'scale'          // Scale position and size proportionally
+    MIN: 'MIN',             // Maintain distance from top edge (Figma: MIN)
+    MAX: 'MAX',             // Maintain distance from bottom edge (Figma: MAX)
+    STRETCH: 'STRETCH',     // Stretch to maintain both distances (Figma: STRETCH)
+    CENTER: 'CENTER',       // Maintain position relative to center (Figma: CENTER)
+    SCALE: 'SCALE'          // Scale position and size proportionally (Figma: SCALE)
 };
 
 /**
@@ -654,8 +654,8 @@ class ConstraintEngine {
         scaleX, scaleY
     ) {
         const constraints = child.constraints;
-        const hConstraint = constraints?.horizontal || 'left';
-        const vConstraint = constraints?.vertical || 'top';
+        const hConstraint = constraints?.horizontal || 'MIN';
+        const vConstraint = constraints?.vertical || 'MIN';
         
         // Get child bounds - use simple bounds for speed
         const childX = child.x;
@@ -676,21 +676,21 @@ class ConstraintEngine {
         
         // Apply horizontal constraint
         switch (hConstraint) {
-            case 'left':
+            case 'MIN':
                 resultX = newX + leftDist;
                 break;
-            case 'right':
+            case 'MAX':
                 resultX = (newX + newW) - rightDist - childW;
                 break;
-            case 'leftRight':
+            case 'STRETCH':
                 resultX = newX + leftDist;
                 resultW = newW - leftDist - rightDist;
                 break;
-            case 'center':
+            case 'CENTER':
                 const centerXOffset = (childX + childW * 0.5) - oldCenterX;
                 resultX = newCenterX + centerXOffset - childW * 0.5;
                 break;
-            case 'scale':
+            case 'SCALE':
                 resultX = newX + (leftDist * scaleX);
                 resultW = childW * scaleX;
                 break;
@@ -698,21 +698,21 @@ class ConstraintEngine {
         
         // Apply vertical constraint
         switch (vConstraint) {
-            case 'top':
+            case 'MIN':
                 resultY = newY + topDist;
                 break;
-            case 'bottom':
+            case 'MAX':
                 resultY = (newY + newH) - bottomDist - childH;
                 break;
-            case 'topBottom':
+            case 'STRETCH':
                 resultY = newY + topDist;
                 resultH = newH - topDist - bottomDist;
                 break;
-            case 'center':
+            case 'CENTER':
                 const centerYOffset = (childY + childH * 0.5) - oldCenterY;
                 resultY = newCenterY + centerYOffset - childH * 0.5;
                 break;
-            case 'scale':
+            case 'SCALE':
                 resultY = newY + (topDist * scaleY);
                 resultH = childH * scaleY;
                 break;
@@ -723,9 +723,9 @@ class ConstraintEngine {
         const dy = (resultY + 0.5 | 0) - childY;
         
         // Calculate scale factors for this child (for size-affecting constraints)
-        const childScaleX = (hConstraint === 'leftRight' || hConstraint === 'scale') && childW > 0 
+        const childScaleX = (hConstraint === 'STRETCH' || hConstraint === 'SCALE') && childW > 0 
             ? resultW / childW : 1;
-        const childScaleY = (vConstraint === 'topBottom' || vConstraint === 'scale') && childH > 0 
+        const childScaleY = (vConstraint === 'STRETCH' || vConstraint === 'SCALE') && childH > 0 
             ? resultH / childH : 1;
         
         // Handle special object types
@@ -804,10 +804,10 @@ class ConstraintEngine {
         child.y = (resultY + 0.5) | 0;
         
         // Only update size if constraint affects it
-        if (hConstraint === 'leftRight' || hConstraint === 'scale') {
+        if (hConstraint === 'STRETCH' || hConstraint === 'SCALE') {
             child.width = Math.max(1, (resultW + 0.5) | 0);
         }
-        if (vConstraint === 'topBottom' || vConstraint === 'scale') {
+        if (vConstraint === 'STRETCH' || vConstraint === 'SCALE') {
             child.height = Math.max(1, (resultH + 0.5) | 0);
         }
         
@@ -823,9 +823,9 @@ class ConstraintEngine {
         // Recursively apply to nested children
         if (child.children && child.children.length > 0) {
             // Calculate new child bounds
-            const childNewW = (hConstraint === 'leftRight' || hConstraint === 'scale') 
+            const childNewW = (hConstraint === 'STRETCH' || hConstraint === 'SCALE') 
                 ? child.width : childW;
-            const childNewH = (vConstraint === 'topBottom' || vConstraint === 'scale') 
+            const childNewH = (vConstraint === 'STRETCH' || vConstraint === 'SCALE') 
                 ? child.height : childH;
             
             // Only recurse if bounds actually changed
@@ -914,23 +914,23 @@ class ConstraintEngine {
      * Get constraint info for display
      */
     static getConstraintLabel(constraints) {
-        const h = constraints?.horizontal || 'left';
-        const v = constraints?.vertical || 'top';
+        const h = constraints?.horizontal || 'MIN';
+        const v = constraints?.vertical || 'MIN';
         
         const hLabels = {
-            'left': 'Left',
-            'right': 'Right',
-            'leftRight': 'Left & Right',
-            'center': 'Center',
-            'scale': 'Scale'
+            'MIN': 'Left',
+            'MAX': 'Right',
+            'STRETCH': 'Left & Right',
+            'CENTER': 'Center',
+            'SCALE': 'Scale'
         };
         
         const vLabels = {
-            'top': 'Top',
-            'bottom': 'Bottom',
-            'topBottom': 'Top & Bottom',
-            'center': 'Center',
-            'scale': 'Scale'
+            'MIN': 'Top',
+            'MAX': 'Bottom',
+            'STRETCH': 'Top & Bottom',
+            'CENTER': 'Center',
+            'SCALE': 'Scale'
         };
         
         return `${hLabels[h]}, ${vLabels[v]}`;
@@ -1131,8 +1131,8 @@ class SceneObject {
         
         // Constraints - how object responds to parent resizing (Figma-style)
         this.constraints = {
-            horizontal: HorizontalConstraint.LEFT,  // left, right, leftRight, center, scale
-            vertical: VerticalConstraint.TOP        // top, bottom, topBottom, center, scale
+            horizontal: HorizontalConstraint.MIN,   // MIN, MAX, STRETCH, CENTER, SCALE
+            vertical: VerticalConstraint.MIN        // MIN, MAX, STRETCH, CENTER, SCALE
         };
         
         // Clipping and rendering
@@ -10320,10 +10320,10 @@ class SelectTool extends Tool {
             constraintsGroup.style.display = 'block';
             
             if (constraintH) {
-                constraintH.value = obj.constraints?.horizontal || 'left';
+                constraintH.value = obj.constraints?.horizontal || 'MIN';
             }
             if (constraintV) {
-                constraintV.value = obj.constraints?.vertical || 'top';
+                constraintV.value = obj.constraints?.vertical || 'MIN';
             }
         }
         
@@ -15518,7 +15518,7 @@ class Asciistrator extends EventEmitter {
                     self.saveStateForUndo();
                     for (const obj of AppState.selectedObjects) {
                         if (!obj.constraints) {
-                            obj.constraints = { horizontal: 'left', vertical: 'top' };
+                            obj.constraints = { horizontal: 'MIN', vertical: 'MIN' };
                         }
                         obj.constraints.horizontal = e.target.value;
                     }
@@ -15535,7 +15535,7 @@ class Asciistrator extends EventEmitter {
                     self.saveStateForUndo();
                     for (const obj of AppState.selectedObjects) {
                         if (!obj.constraints) {
-                            obj.constraints = { horizontal: 'left', vertical: 'top' };
+                            obj.constraints = { horizontal: 'MIN', vertical: 'MIN' };
                         }
                         obj.constraints.vertical = e.target.value;
                     }
@@ -18593,7 +18593,7 @@ class Asciistrator extends EventEmitter {
     }
     
     async _loadFromNativeFormat(text) {
-        const { detectVersion, NativeDocument, ColorUtils, ConstraintMapping, TypeMapping } = await import('./io/native.js');
+        const { detectVersion, NativeDocument, ColorUtils, TypeMapping } = await import('./io/native.js');
         const data = JSON.parse(text);
         
         // Detect document version (v2+ only)
@@ -18615,7 +18615,7 @@ class Asciistrator extends EventEmitter {
         AppState.selectionContext.dropIndicator = null;
         
         // Load v2 format (Figma-compatible nested structure)
-        await this._loadFromNativeFormatV2(data, ColorUtils, ConstraintMapping, TypeMapping);
+        await this._loadFromNativeFormatV2(data, ColorUtils, TypeMapping);
         
         // Clear undo/redo stacks for fresh document
         AppState.undoStack = [];
@@ -18656,7 +18656,7 @@ class Asciistrator extends EventEmitter {
     /**
      * Load v2 format document (Figma-compatible nested structure)
      */
-    async _loadFromNativeFormatV2(data, ColorUtils, ConstraintMapping, TypeMapping) {
+    async _loadFromNativeFormatV2(data, ColorUtils, TypeMapping) {
         const doc = data.document;
         
         // Default canvas settings
@@ -18713,7 +18713,7 @@ class Asciistrator extends EventEmitter {
             // Convert page children (v2 nodes) to objects
             if (page.children && page.children.length > 0) {
                 for (const node of page.children) {
-                    const obj = this._createObjectFromV2Node(node, ColorUtils, ConstraintMapping, TypeMapping);
+                    const obj = this._createObjectFromV2Node(node, ColorUtils, TypeMapping);
                     if (obj) {
                         layer.objects.push(obj);
                     }
@@ -18730,7 +18730,7 @@ class Asciistrator extends EventEmitter {
     /**
      * Create an object from a v2 format node
      */
-    _createObjectFromV2Node(node, ColorUtils, ConstraintMapping, TypeMapping) {
+    _createObjectFromV2Node(node, ColorUtils, TypeMapping) {
         // Map Figma type back to internal type
         const internalType = TypeMapping.fromFigma[node.type] || node.flowchartType || node.type.toLowerCase();
         
@@ -18756,10 +18756,10 @@ class Asciistrator extends EventEmitter {
             strokeColor: node.ascii?.strokeColor || (node.strokes?.[0]?.color ? ColorUtils.figmaToHex(node.strokes[0].color) : null),
             fillColor: node.ascii?.fillColor || (node.fills?.[0]?.color ? ColorUtils.figmaToHex(node.fills[0].color) : null),
             
-            // Constraints (convert Figma naming to internal)
+            // Constraints (now using Figma naming internally)
             constraints: {
-                horizontal: ConstraintMapping.toInternal.horizontal[node.constraints?.horizontal] || 'left',
-                vertical: ConstraintMapping.toInternal.vertical[node.constraints?.vertical] || 'top'
+                horizontal: node.constraints?.horizontal || 'MIN',
+                vertical: node.constraints?.vertical || 'MIN'
             },
             
             clipContent: node.clipsContent || false
@@ -18931,7 +18931,7 @@ class Asciistrator extends EventEmitter {
         if (obj && node.children && node.children.length > 0) {
             obj.children = [];
             for (const childNode of node.children) {
-                const childObj = this._createObjectFromV2Node(childNode, ColorUtils, ConstraintMapping, TypeMapping);
+                const childObj = this._createObjectFromV2Node(childNode, ColorUtils, TypeMapping);
                 if (childObj) {
                     childObj.parentId = obj.id;
                     childObj._cachedParent = obj;
@@ -22155,7 +22155,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         
         // Initialize constraints if not set
         if (!obj.constraints) {
-            obj.constraints = { horizontal: 'left', vertical: 'top' };
+            obj.constraints = { horizontal: 'MIN', vertical: 'MIN' };
         }
         
         // Check if object has a parent container

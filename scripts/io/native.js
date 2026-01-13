@@ -18,43 +18,16 @@ export const FORMAT_VERSION = '2.0.0';
 export const SCHEMA_VERSION = 0;
 
 /**
- * Constraint value mapping (internal ↔ Figma)
+ * Constraint values (Figma-compatible naming used internally)
+ * MIN = maintain distance from min edge (left/top)
+ * MAX = maintain distance from max edge (right/bottom)  
+ * STRETCH = maintain both edge distances
+ * CENTER = maintain center position
+ * SCALE = scale proportionally
  */
-export const ConstraintMapping = {
-    // Internal to Figma
-    toV2: {
-        horizontal: {
-            'left': 'MIN',
-            'right': 'MAX',
-            'leftRight': 'STRETCH',
-            'center': 'CENTER',
-            'scale': 'SCALE'
-        },
-        vertical: {
-            'top': 'MIN',
-            'bottom': 'MAX',
-            'topBottom': 'STRETCH',
-            'center': 'CENTER',
-            'scale': 'SCALE'
-        }
-    },
-    // Figma to internal
-    toInternal: {
-        horizontal: {
-            'MIN': 'left',
-            'MAX': 'right',
-            'STRETCH': 'leftRight',
-            'CENTER': 'center',
-            'SCALE': 'scale'
-        },
-        vertical: {
-            'MIN': 'top',
-            'MAX': 'bottom',
-            'STRETCH': 'topBottom',
-            'CENTER': 'center',
-            'SCALE': 'scale'
-        }
-    }
+export const ConstraintValues = {
+    horizontal: ['MIN', 'MAX', 'STRETCH', 'CENTER', 'SCALE'],
+    vertical: ['MIN', 'MAX', 'STRETCH', 'CENTER', 'SCALE']
 };
 
 /**
@@ -307,10 +280,10 @@ export class NativeDocument {
             // Effects
             effects: obj.effects || [],
             
-            // Constraints (convert to Figma naming)
+            // Constraints (already using Figma naming internally)
             constraints: {
-                horizontal: ConstraintMapping.toV2.horizontal[obj.constraints?.horizontal] || 'MIN',
-                vertical: ConstraintMapping.toV2.vertical[obj.constraints?.vertical] || 'MIN'
+                horizontal: obj.constraints?.horizontal || 'MIN',
+                vertical: obj.constraints?.vertical || 'MIN'
             },
             
             // Clipping
@@ -890,6 +863,4 @@ export default {
     saveNativeDocument,
     loadNativeDocument,
     detectVersion,
-    ConstraintMapping,
-    TypeMapping,
-    ColorUtils
+    ConstraintValues,
