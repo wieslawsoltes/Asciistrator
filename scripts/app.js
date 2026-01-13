@@ -14460,23 +14460,26 @@ class Asciistrator extends EventEmitter {
         const panX = this.renderer.panX;
         const panY = this.renderer.panY;
         
+        // Get canvas offset (border + padding)
+        const canvasOffset = this._getCanvasOffset();
+        
         // Calculate canvas coordinates
         const viewportX = e.clientX - viewportRect.left;
         const viewportY = e.clientY - viewportRect.top;
-        const canvasX = Math.floor((viewportX - panX) / charWidth);
-        const canvasY = Math.floor((viewportY - panY) / charHeight);
+        const canvasX = Math.floor((viewportX - panX - canvasOffset.x) / charWidth);
+        const canvasY = Math.floor((viewportY - panY - canvasOffset.y) / charHeight);
         
-        // Update horizontal ruler indicator
+        // Update horizontal ruler indicator (include offset for proper alignment)
         if (this.rulerHIndicator) {
-            const pixelX = canvasX * charWidth + panX;
+            const pixelX = canvasX * charWidth + panX + canvasOffset.x;
             this.rulerHIndicator.style.left = `${pixelX}px`;
             this.rulerHIndicator.style.display = 'block';
             this.rulerHIndicator.dataset.value = canvasX;
         }
         
-        // Update vertical ruler indicator
+        // Update vertical ruler indicator (include offset for proper alignment)
         if (this.rulerVIndicator) {
-            const pixelY = canvasY * charHeight + panY;
+            const pixelY = canvasY * charHeight + panY + canvasOffset.y;
             this.rulerVIndicator.style.top = `${pixelY}px`;
             this.rulerVIndicator.style.display = 'block';
             this.rulerVIndicator.dataset.value = canvasY;
@@ -14522,6 +14525,10 @@ class Asciistrator extends EventEmitter {
         const panX = this.renderer ? this.renderer.panX : 0;
         const charWidth = this.renderer ? this.renderer.charWidth : 8;
         
+        // Get canvas offset for alignment
+        const canvasOffset = this._getCanvasOffset();
+        const offsetX = canvasOffset.x;
+        
         // Calculate visible range based on ruler width and pan
         const rulerWidth = element.offsetWidth || 800;
         
@@ -14529,8 +14536,8 @@ class Asciistrator extends EventEmitter {
         const { tickInterval, majorInterval, minorInterval } = this._calculateTickIntervals(zoom);
         
         // Calculate start and end positions in canvas coordinates
-        const startX = Math.floor(-panX / charWidth);
-        const endX = Math.ceil((rulerWidth - panX) / charWidth);
+        const startX = Math.floor((-panX - offsetX) / charWidth);
+        const endX = Math.ceil((rulerWidth - panX - offsetX) / charWidth);
         
         // Align to tick interval
         const alignedStart = Math.floor(startX / minorInterval) * minorInterval;
@@ -14542,8 +14549,8 @@ class Asciistrator extends EventEmitter {
             const isMajor = i % majorInterval === 0;
             const isMedium = !isMajor && i % tickInterval === 0;
             
-            // Calculate pixel position
-            const pixelPos = i * charWidth + panX;
+            // Calculate pixel position (include canvas offset)
+            const pixelPos = i * charWidth + panX + offsetX;
             
             // Skip ticks outside visible area
             if (pixelPos < -50 || pixelPos > rulerWidth + 50) continue;
@@ -14584,6 +14591,10 @@ class Asciistrator extends EventEmitter {
         const panY = this.renderer ? this.renderer.panY : 0;
         const charHeight = this.renderer ? this.renderer.charHeight : 16;
         
+        // Get canvas offset for alignment
+        const canvasOffset = this._getCanvasOffset();
+        const offsetY = canvasOffset.y;
+        
         // Calculate visible range based on ruler height and pan
         const rulerHeight = element.offsetHeight || 600;
         
@@ -14591,8 +14602,8 @@ class Asciistrator extends EventEmitter {
         const { tickInterval, majorInterval, minorInterval } = this._calculateTickIntervals(zoom);
         
         // Calculate start and end positions in canvas coordinates
-        const startY = Math.floor(-panY / charHeight);
-        const endY = Math.ceil((rulerHeight - panY) / charHeight);
+        const startY = Math.floor((-panY - offsetY) / charHeight);
+        const endY = Math.ceil((rulerHeight - panY - offsetY) / charHeight);
         
         // Align to tick interval
         const alignedStart = Math.floor(startY / minorInterval) * minorInterval;
@@ -14604,8 +14615,8 @@ class Asciistrator extends EventEmitter {
             const isMajor = i % majorInterval === 0;
             const isMedium = !isMajor && i % tickInterval === 0;
             
-            // Calculate pixel position
-            const pixelPos = i * charHeight + panY;
+            // Calculate pixel position (include canvas offset)
+            const pixelPos = i * charHeight + panY + offsetY;
             
             // Skip ticks outside visible area
             if (pixelPos < -50 || pixelPos > rulerHeight + 50) continue;
@@ -14644,6 +14655,19 @@ class Asciistrator extends EventEmitter {
     /**
      * Calculate tick intervals based on zoom level
      */
+    /**
+     * Get canvas element offset (border + padding) for ruler alignment
+     */
+    _getCanvasOffset() {
+        const canvasElement = this.renderer?.element;
+        if (!canvasElement) return { x: 0, y: 0 };
+        const style = getComputedStyle(canvasElement);
+        return {
+            x: (parseFloat(style.borderLeftWidth) || 0) + (parseFloat(style.paddingLeft) || 0),
+            y: (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.paddingTop) || 0)
+        };
+    }
+
     _calculateTickIntervals(zoom) {
         // Adaptive intervals for different zoom levels
         if (zoom < 0.3) {
@@ -14672,11 +14696,14 @@ class Asciistrator extends EventEmitter {
         const panX = this.renderer.panX;
         const panY = this.renderer.panY;
         
-        // Calculate canvas bounds in pixels
-        const canvasStartX = panX;
-        const canvasEndX = AppState.canvasWidth * charWidth + panX;
-        const canvasStartY = panY;
-        const canvasEndY = AppState.canvasHeight * charHeight + panY;
+        // Get canvas offset (border + padding)
+        const canvasOffset = this._getCanvasOffset();
+        
+        // Calculate canvas bounds in pixels (include offset)
+        const canvasStartX = panX + canvasOffset.x;
+        const canvasEndX = AppState.canvasWidth * charWidth + panX + canvasOffset.x;
+        const canvasStartY = panY + canvasOffset.y;
+        const canvasEndY = AppState.canvasHeight * charHeight + panY + canvasOffset.y;
         
         // Update horizontal ruler canvas bounds
         if (this.rulerHCanvasBounds) {
@@ -14717,10 +14744,23 @@ class Asciistrator extends EventEmitter {
         const panX = this.renderer.panX;
         const panY = this.renderer.panY;
         
+        // Get canvas padding and border to align ruler indicators with canvas content
+        const canvasElement = this.renderer.element;
+        let offsetX = 0, offsetY = 0;
+        if (canvasElement) {
+            const computedStyle = getComputedStyle(canvasElement);
+            const borderLeft = parseFloat(computedStyle.borderLeftWidth) || 0;
+            const borderTop = parseFloat(computedStyle.borderTopWidth) || 0;
+            const paddingLeft = parseFloat(computedStyle.paddingLeft) || 0;
+            const paddingTop = parseFloat(computedStyle.paddingTop) || 0;
+            offsetX = borderLeft + paddingLeft;
+            offsetY = borderTop + paddingTop;
+        }
+        
         // Update horizontal ruler selection indicator
         if (this.rulerHSelection) {
-            const startPx = minX * charWidth + panX;
-            const endPx = maxX * charWidth + panX;
+            const startPx = minX * charWidth + panX + offsetX;
+            const endPx = maxX * charWidth + panX + offsetX;
             const width = Math.max(0, endPx - startPx);
             
             // Only show if selection has positive width and is at least partially visible
@@ -14735,8 +14775,8 @@ class Asciistrator extends EventEmitter {
         
         // Update vertical ruler selection indicator
         if (this.rulerVSelection) {
-            const startPx = minY * charHeight + panY;
-            const endPx = maxY * charHeight + panY;
+            const startPx = minY * charHeight + panY + offsetY;
+            const endPx = maxY * charHeight + panY + offsetY;
             const height = Math.max(0, endPx - startPx);
             
             // Only show if selection has positive height and is at least partially visible
