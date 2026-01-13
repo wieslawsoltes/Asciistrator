@@ -290,6 +290,243 @@ const SizingMode = {
     FILL: 'fill'
 };
 
+// ==========================================
+// CONSTRAINTS SYSTEM (Figma-style)
+// ==========================================
+
+/**
+ * Horizontal constraint types
+ * Defines how object responds to parent width changes
+ */
+const HorizontalConstraint = {
+    LEFT: 'left',           // Maintain distance from left edge
+    RIGHT: 'right',         // Maintain distance from right edge
+    LEFT_RIGHT: 'leftRight', // Stretch to maintain both distances (scale width)
+    CENTER: 'center',       // Maintain position relative to center
+    SCALE: 'scale'          // Scale position and size proportionally
+};
+
+/**
+ * Vertical constraint types
+ * Defines how object responds to parent height changes
+ */
+const VerticalConstraint = {
+    TOP: 'top',             // Maintain distance from top edge
+    BOTTOM: 'bottom',       // Maintain distance from bottom edge
+    TOP_BOTTOM: 'topBottom', // Stretch to maintain both distances (scale height)
+    CENTER: 'center',       // Maintain position relative to center
+    SCALE: 'scale'          // Scale position and size proportionally
+};
+
+/**
+ * Constraint calculation engine
+ * Handles repositioning and resizing children when parent changes
+ */
+class ConstraintEngine {
+    /**
+     * Apply constraints to all children when parent is resized
+     * @param {Object} parent - Parent container object
+     * @param {Object} oldBounds - Previous bounds {x, y, width, height}
+     * @param {Object} newBounds - New bounds {x, y, width, height}
+     */
+    static applyConstraints(parent, oldBounds, newBounds) {
+        if (!parent.children || parent.children.length === 0) return;
+        
+        const deltaWidth = newBounds.width - oldBounds.width;
+        const deltaHeight = newBounds.height - oldBounds.height;
+        const deltaX = newBounds.x - oldBounds.x;
+        const deltaY = newBounds.y - oldBounds.y;
+        
+        // Skip if no size change (just position change - move children too)
+        if (deltaWidth === 0 && deltaHeight === 0) {
+            for (const child of parent.children) {
+                this._moveChild(child, deltaX, deltaY);
+            }
+            return;
+        }
+        
+        const scaleX = oldBounds.width > 0 ? newBounds.width / oldBounds.width : 1;
+        const scaleY = oldBounds.height > 0 ? newBounds.height / oldBounds.height : 1;
+        
+        for (const child of parent.children) {
+            this._applyChildConstraints(child, oldBounds, newBounds, scaleX, scaleY);
+        }
+    }
+    
+    /**
+     * Apply constraints to a single child
+     */
+    static _applyChildConstraints(child, oldParent, newParent, scaleX, scaleY) {
+        const constraints = child.constraints || { horizontal: 'left', vertical: 'top' };
+        const childBounds = child.getBounds ? child.getBounds() : { 
+            x: child.x, y: child.y, width: child.width || 1, height: child.height || 1 
+        };
+        
+        // Calculate relative positions in old parent
+        const leftDist = childBounds.x - oldParent.x;
+        const rightDist = (oldParent.x + oldParent.width) - (childBounds.x + childBounds.width);
+        const topDist = childBounds.y - oldParent.y;
+        const bottomDist = (oldParent.y + oldParent.height) - (childBounds.y + childBounds.height);
+        const centerXOffset = (childBounds.x + childBounds.width / 2) - (oldParent.x + oldParent.width / 2);
+        const centerYOffset = (childBounds.y + childBounds.height / 2) - (oldParent.y + oldParent.height / 2);
+        
+        let newX = childBounds.x;
+        let newY = childBounds.y;
+        let newWidth = childBounds.width;
+        let newHeight = childBounds.height;
+        
+        // Apply horizontal constraint
+        switch (constraints.horizontal) {
+            case HorizontalConstraint.LEFT:
+                // Maintain distance from left edge
+                newX = newParent.x + leftDist;
+                break;
+                
+            case HorizontalConstraint.RIGHT:
+                // Maintain distance from right edge
+                newX = (newParent.x + newParent.width) - rightDist - childBounds.width;
+                break;
+                
+            case HorizontalConstraint.LEFT_RIGHT:
+                // Stretch: maintain both left and right distances
+                newX = newParent.x + leftDist;
+                newWidth = newParent.width - leftDist - rightDist;
+                break;
+                
+            case HorizontalConstraint.CENTER:
+                // Maintain position relative to parent center
+                const newCenterX = newParent.x + newParent.width / 2;
+                newX = newCenterX + centerXOffset - childBounds.width / 2;
+                break;
+                
+            case HorizontalConstraint.SCALE:
+                // Scale position and size proportionally
+                newX = newParent.x + (leftDist * scaleX);
+                newWidth = childBounds.width * scaleX;
+                break;
+        }
+        
+        // Apply vertical constraint
+        switch (constraints.vertical) {
+            case VerticalConstraint.TOP:
+                // Maintain distance from top edge
+                newY = newParent.y + topDist;
+                break;
+                
+            case VerticalConstraint.BOTTOM:
+                // Maintain distance from bottom edge
+                newY = (newParent.y + newParent.height) - bottomDist - childBounds.height;
+                break;
+                
+            case VerticalConstraint.TOP_BOTTOM:
+                // Stretch: maintain both top and bottom distances
+                newY = newParent.y + topDist;
+                newHeight = newParent.height - topDist - bottomDist;
+                break;
+                
+            case VerticalConstraint.CENTER:
+                // Maintain position relative to parent center
+                const newCenterY = newParent.y + newParent.height / 2;
+                newY = newCenterY + centerYOffset - childBounds.height / 2;
+                break;
+                
+            case VerticalConstraint.SCALE:
+                // Scale position and size proportionally
+                newY = newParent.y + (topDist * scaleY);
+                newHeight = childBounds.height * scaleY;
+                break;
+        }
+        
+        // Apply new values (rounding to integers for ASCII)
+        child.x = Math.round(newX);
+        child.y = Math.round(newY);
+        
+        // Only update size if constraint affects it
+        if (constraints.horizontal === HorizontalConstraint.LEFT_RIGHT || 
+            constraints.horizontal === HorizontalConstraint.SCALE) {
+            child.width = Math.max(1, Math.round(newWidth));
+        }
+        if (constraints.vertical === VerticalConstraint.TOP_BOTTOM || 
+            constraints.vertical === VerticalConstraint.SCALE) {
+            child.height = Math.max(1, Math.round(newHeight));
+        }
+        
+        // Update object-specific properties
+        if (child._updateBounds) child._updateBounds();
+        if (child._updateSnapPoints) child._updateSnapPoints();
+        
+        // Recursively apply to nested children
+        if (child.children && child.children.length > 0) {
+            const childOldBounds = { ...childBounds };
+            const childNewBounds = { x: child.x, y: child.y, width: child.width, height: child.height };
+            this.applyConstraints(child, childOldBounds, childNewBounds);
+        }
+    }
+    
+    /**
+     * Move child by delta (for parent position changes without resize)
+     */
+    static _moveChild(child, dx, dy) {
+        child.x += dx;
+        child.y += dy;
+        
+        // Move line endpoints if applicable
+        if (child.x1 !== undefined) {
+            child.x1 += dx;
+            child.y1 += dy;
+            child.x2 += dx;
+            child.y2 += dy;
+        }
+        
+        // Move path points
+        if (child.points) {
+            for (const p of child.points) {
+                p.x += dx;
+                p.y += dy;
+            }
+        }
+        
+        // Move polygon center
+        if (child.cx !== undefined) {
+            child.cx += dx;
+            child.cy += dy;
+        }
+        
+        // Recursively move children
+        if (child.children) {
+            for (const grandchild of child.children) {
+                this._moveChild(grandchild, dx, dy);
+            }
+        }
+    }
+    
+    /**
+     * Get constraint info for display
+     */
+    static getConstraintLabel(constraints) {
+        const h = constraints?.horizontal || 'left';
+        const v = constraints?.vertical || 'top';
+        
+        const hLabels = {
+            'left': 'Left',
+            'right': 'Right',
+            'leftRight': 'Left & Right',
+            'center': 'Center',
+            'scale': 'Scale'
+        };
+        
+        const vLabels = {
+            'top': 'Top',
+            'bottom': 'Bottom',
+            'topBottom': 'Top & Bottom',
+            'center': 'Center',
+            'scale': 'Scale'
+        };
+        
+        return `${hLabels[h]}, ${vLabels[v]}`;
+    }
+}
+
 /**
  * Base class for all scene objects (vector objects)
  * Supports hierarchical containment - any object can contain children
@@ -353,6 +590,12 @@ class SceneObject {
         this._layoutSizing = {
             horizontal: SizingMode.FIXED,
             vertical: SizingMode.FIXED
+        };
+        
+        // Constraints - how object responds to parent resizing (Figma-style)
+        this.constraints = {
+            horizontal: HorizontalConstraint.LEFT,  // left, right, leftRight, center, scale
+            vertical: VerticalConstraint.TOP        // top, bottom, topBottom, center, scale
         };
         
         // Clipping and rendering
@@ -913,6 +1156,7 @@ class SceneObject {
             autoLayout: this.autoLayout,
             sizing: this.sizing,
             clipContent: this.clipContent,
+            constraints: this.constraints,
             _layoutSizing: this._layoutSizing,
             children: this.children.map(c => c.toJSON())
         };
@@ -5863,6 +6107,9 @@ class SelectTool extends Tool {
             
             // Enforce minimum size
             if (newW >= 2 && newH >= 1) {
+                // Capture old bounds for constraint application
+                const oldBounds = { x: obj.x, y: obj.y, width: obj.width, height: obj.height };
+                
                 obj.x = newX;
                 obj.y = newY;
                 obj.width = newW;
@@ -5886,6 +6133,12 @@ class SelectTool extends Tool {
                 
                 if (obj._updateBounds) obj._updateBounds();
                 if (obj._updateSnapPoints) obj._updateSnapPoints();
+                
+                // Apply constraints to children if this is a container
+                if (obj.children && obj.children.length > 0) {
+                    const newBounds = { x: newX, y: newY, width: newW, height: newH };
+                    ConstraintEngine.applyConstraints(obj, oldBounds, newBounds);
+                }
                 
                 if (app && app.renderAllObjects) {
                     app.renderAllObjects();
@@ -6442,6 +6695,23 @@ class SelectTool extends Tool {
         // Update border style
         const borderStyle = $('#prop-border-style');
         if (borderStyle) borderStyle.value = obj.lineStyle || 'single';
+        
+        // Update constraints
+        const constraintH = $('#prop-constraint-h');
+        const constraintV = $('#prop-constraint-v');
+        const constraintsGroup = $('#prop-constraints-group');
+        
+        if (constraintsGroup) {
+            // Show constraints section
+            constraintsGroup.style.display = 'block';
+            
+            if (constraintH) {
+                constraintH.value = obj.constraints?.horizontal || 'left';
+            }
+            if (constraintV) {
+                constraintV.value = obj.constraints?.vertical || 'top';
+            }
+        }
         
         // Update UI component properties
         this._updateUIComponentProperties(obj);
@@ -11015,6 +11285,45 @@ class Asciistrator extends EventEmitter {
             borderStyle.addEventListener('change', (e) => {
                 AppState.lineStyle = e.target.value;
                 updateSelectedObject('lineStyle', e.target.value);
+            });
+        }
+        
+        // Constraint selectors
+        const constraintH = $('#prop-constraint-h');
+        const constraintV = $('#prop-constraint-v');
+        const editConstraintsBtn = $('#btn-edit-constraints');
+        
+        if (constraintH) {
+            constraintH.addEventListener('change', (e) => {
+                if (AppState.selectedObjects.length > 0) {
+                    for (const obj of AppState.selectedObjects) {
+                        if (!obj.constraints) {
+                            obj.constraints = { horizontal: 'left', vertical: 'top' };
+                        }
+                        obj.constraints.horizontal = e.target.value;
+                    }
+                    self._updateStatus(`Horizontal constraint: ${e.target.value}`);
+                }
+            });
+        }
+        
+        if (constraintV) {
+            constraintV.addEventListener('change', (e) => {
+                if (AppState.selectedObjects.length > 0) {
+                    for (const obj of AppState.selectedObjects) {
+                        if (!obj.constraints) {
+                            obj.constraints = { horizontal: 'left', vertical: 'top' };
+                        }
+                        obj.constraints.vertical = e.target.value;
+                    }
+                    self._updateStatus(`Vertical constraint: ${e.target.value}`);
+                }
+            });
+        }
+        
+        if (editConstraintsBtn) {
+            editConstraintsBtn.addEventListener('click', () => {
+                self.showConstraintsDialog();
             });
         }
         
@@ -16553,56 +16862,75 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         }
         
         const obj = AppState.selectedObjects[0];
-        const constraints = obj.constraints || { left: false, right: false, top: false, bottom: false, centerH: false, centerV: false };
+        
+        // Initialize constraints if not set
+        if (!obj.constraints) {
+            obj.constraints = { horizontal: 'left', vertical: 'top' };
+        }
+        
+        // Check if object has a parent container
+        const hasParent = obj.parentId || obj.parentFrame;
+        const parentName = hasParent ? 'Parent Frame' : 'Canvas';
         
         const dialog = document.createElement('div');
         dialog.className = 'modal-overlay';
         dialog.innerHTML = `
-            <div class="modal-dialog" style="max-width: 300px;">
+            <div class="modal-dialog" style="max-width: 380px;">
                 <div class="modal-header">
-                    <h3>Constraints</h3>
+                    <h3>📐 Constraints</h3>
                     <button class="modal-close">&times;</button>
                 </div>
                 <div class="modal-body">
-                    <p style="font-size: 12px; color: var(--color-text-muted); margin-bottom: 15px;">Pin object to canvas edges or center</p>
-                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 15px;">
-                        <div></div>
-                        <label style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
-                            <input type="checkbox" id="constraint-top" ${constraints.top ? 'checked' : ''}>
-                            <span style="font-size: 11px;">Top</span>
-                        </label>
-                        <div></div>
-                        <label style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
-                            <input type="checkbox" id="constraint-left" ${constraints.left ? 'checked' : ''}>
-                            <span style="font-size: 11px;">Left</span>
-                        </label>
-                        <div style="width: 50px; height: 50px; border: 2px dashed var(--color-border); border-radius: 4px; display: flex; align-items: center; justify-content: center;">
-                            <div style="width: 20px; height: 14px; background: var(--color-accent); border-radius: 2px;"></div>
+                    <p style="font-size: 12px; color: var(--ui-text-muted); margin-bottom: 16px;">
+                        Define how <strong>${obj.name || obj.type}</strong> responds when <strong>${parentName}</strong> is resized.
+                    </p>
+                    
+                    <!-- Visual Constraint Preview -->
+                    <div style="display: flex; gap: 20px; margin-bottom: 20px;">
+                        <!-- Horizontal Constraints -->
+                        <div style="flex: 1;">
+                            <label style="font-size: 11px; font-weight: 600; margin-bottom: 8px; display: block;">Horizontal</label>
+                            <div style="width: 100%; height: 60px; border: 2px solid var(--ui-border); border-radius: 4px; position: relative; background: var(--ui-bg-tertiary);" id="h-constraint-preview">
+                                <div id="h-preview-obj" style="position: absolute; top: 50%; transform: translateY(-50%); height: 16px; background: var(--ui-accent); border-radius: 2px; transition: all 0.2s;"></div>
+                            </div>
+                            <select id="constraint-horizontal" style="width: 100%; padding: 8px; margin-top: 8px; background: var(--ui-bg-secondary); border: 1px solid var(--ui-border); border-radius: 4px; color: var(--ui-text);">
+                                <option value="left" ${obj.constraints.horizontal === 'left' ? 'selected' : ''}>⬅ Left</option>
+                                <option value="right" ${obj.constraints.horizontal === 'right' ? 'selected' : ''}>➡ Right</option>
+                                <option value="leftRight" ${obj.constraints.horizontal === 'leftRight' ? 'selected' : ''}>↔ Left & Right (Stretch)</option>
+                                <option value="center" ${obj.constraints.horizontal === 'center' ? 'selected' : ''}>⬌ Center</option>
+                                <option value="scale" ${obj.constraints.horizontal === 'scale' ? 'selected' : ''}>⤢ Scale</option>
+                            </select>
                         </div>
-                        <label style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
-                            <input type="checkbox" id="constraint-right" ${constraints.right ? 'checked' : ''}>
-                            <span style="font-size: 11px;">Right</span>
-                        </label>
-                        <div></div>
-                        <label style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
-                            <input type="checkbox" id="constraint-bottom" ${constraints.bottom ? 'checked' : ''}>
-                            <span style="font-size: 11px;">Bottom</span>
-                        </label>
-                        <div></div>
+                        
+                        <!-- Vertical Constraints -->
+                        <div style="flex: 1;">
+                            <label style="font-size: 11px; font-weight: 600; margin-bottom: 8px; display: block;">Vertical</label>
+                            <div style="width: 100%; height: 60px; border: 2px solid var(--ui-border); border-radius: 4px; position: relative; background: var(--ui-bg-tertiary);" id="v-constraint-preview">
+                                <div id="v-preview-obj" style="position: absolute; left: 50%; transform: translateX(-50%); width: 16px; background: var(--ui-accent); border-radius: 2px; transition: all 0.2s;"></div>
+                            </div>
+                            <select id="constraint-vertical" style="width: 100%; padding: 8px; margin-top: 8px; background: var(--ui-bg-secondary); border: 1px solid var(--ui-border); border-radius: 4px; color: var(--ui-text);">
+                                <option value="top" ${obj.constraints.vertical === 'top' ? 'selected' : ''}>⬆ Top</option>
+                                <option value="bottom" ${obj.constraints.vertical === 'bottom' ? 'selected' : ''}>⬇ Bottom</option>
+                                <option value="topBottom" ${obj.constraints.vertical === 'topBottom' ? 'selected' : ''}>↕ Top & Bottom (Stretch)</option>
+                                <option value="center" ${obj.constraints.vertical === 'center' ? 'selected' : ''}>⬍ Center</option>
+                                <option value="scale" ${obj.constraints.vertical === 'scale' ? 'selected' : ''}>⤡ Scale</option>
+                            </select>
+                        </div>
                     </div>
-                    <div style="display: flex; gap: 15px; justify-content: center; padding-top: 10px; border-top: 1px solid var(--color-border);">
-                        <label style="display: flex; align-items: center; gap: 6px;">
-                            <input type="checkbox" id="constraint-centerH" ${constraints.centerH ? 'checked' : ''}>
-                            <span style="font-size: 12px;">Center H</span>
-                        </label>
-                        <label style="display: flex; align-items: center; gap: 6px;">
-                            <input type="checkbox" id="constraint-centerV" ${constraints.centerV ? 'checked' : ''}>
-                            <span style="font-size: 12px;">Center V</span>
-                        </label>
+                    
+                    <!-- Description -->
+                    <div style="padding: 12px; background: var(--ui-bg-tertiary); border-radius: 4px; font-size: 11px; color: var(--ui-text-secondary);" id="constraint-description">
+                        Maintains distance from the left edge when parent resizes.
                     </div>
+                    
+                    ${!hasParent ? `
+                    <div style="margin-top: 16px; padding: 12px; background: rgba(255, 170, 0, 0.1); border: 1px solid rgba(255, 170, 0, 0.3); border-radius: 4px; font-size: 11px; color: var(--ui-warning);">
+                        ⚠️ This object is at root level. Constraints will apply relative to the canvas bounds.
+                    </div>` : ''}
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-secondary" id="btn-clear-constraints">Clear All</button>
+                    <button class="btn btn-secondary" id="btn-reset-constraints">Reset to Default</button>
+                    <button class="btn btn-secondary modal-cancel">Cancel</button>
                     <button class="btn btn-primary modal-ok">Apply</button>
                 </div>
             </div>
@@ -16610,77 +16938,176 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         
         document.body.appendChild(dialog);
         
+        // Update preview and description
+        const updatePreview = () => {
+            const hSelect = dialog.querySelector('#constraint-horizontal');
+            const vSelect = dialog.querySelector('#constraint-vertical');
+            const hPreview = dialog.querySelector('#h-preview-obj');
+            const vPreview = dialog.querySelector('#v-preview-obj');
+            const description = dialog.querySelector('#constraint-description');
+            
+            // Update horizontal preview
+            switch (hSelect.value) {
+                case 'left':
+                    hPreview.style.left = '8px';
+                    hPreview.style.right = 'auto';
+                    hPreview.style.width = '30%';
+                    break;
+                case 'right':
+                    hPreview.style.left = 'auto';
+                    hPreview.style.right = '8px';
+                    hPreview.style.width = '30%';
+                    break;
+                case 'leftRight':
+                    hPreview.style.left = '8px';
+                    hPreview.style.right = '8px';
+                    hPreview.style.width = 'auto';
+                    break;
+                case 'center':
+                    hPreview.style.left = '50%';
+                    hPreview.style.right = 'auto';
+                    hPreview.style.width = '30%';
+                    hPreview.style.transform = 'translate(-50%, -50%)';
+                    break;
+                case 'scale':
+                    hPreview.style.left = '20%';
+                    hPreview.style.right = 'auto';
+                    hPreview.style.width = '30%';
+                    break;
+            }
+            
+            // Update vertical preview
+            switch (vSelect.value) {
+                case 'top':
+                    vPreview.style.top = '8px';
+                    vPreview.style.bottom = 'auto';
+                    vPreview.style.height = '40%';
+                    break;
+                case 'bottom':
+                    vPreview.style.top = 'auto';
+                    vPreview.style.bottom = '8px';
+                    vPreview.style.height = '40%';
+                    break;
+                case 'topBottom':
+                    vPreview.style.top = '8px';
+                    vPreview.style.bottom = '8px';
+                    vPreview.style.height = 'auto';
+                    break;
+                case 'center':
+                    vPreview.style.top = '50%';
+                    vPreview.style.bottom = 'auto';
+                    vPreview.style.height = '40%';
+                    vPreview.style.transform = 'translate(-50%, -50%)';
+                    break;
+                case 'scale':
+                    vPreview.style.top = '20%';
+                    vPreview.style.bottom = 'auto';
+                    vPreview.style.height = '40%';
+                    break;
+            }
+            
+            // Update description
+            const descriptions = {
+                'left': 'Maintains distance from the left edge when parent resizes.',
+                'right': 'Maintains distance from the right edge when parent resizes.',
+                'leftRight': 'Stretches to maintain both left and right distances. Width changes with parent.',
+                'center': 'Stays centered horizontally. Position adjusts to remain in center.',
+                'scale': 'Scales position and size proportionally with parent.'
+            };
+            const vDescriptions = {
+                'top': 'Maintains distance from the top edge.',
+                'bottom': 'Maintains distance from the bottom edge.',
+                'topBottom': 'Stretches to maintain both top and bottom distances. Height changes with parent.',
+                'center': 'Stays centered vertically.',
+                'scale': 'Scales position and size proportionally.'
+            };
+            
+            description.textContent = `H: ${descriptions[hSelect.value]} V: ${vDescriptions[vSelect.value]}`;
+        };
+        
+        // Attach event listeners
+        dialog.querySelector('#constraint-horizontal').addEventListener('change', updatePreview);
+        dialog.querySelector('#constraint-vertical').addEventListener('change', updatePreview);
+        
+        // Initialize preview
+        updatePreview();
+        
         const closeDialog = () => dialog.remove();
         
         dialog.querySelector('.modal-close').addEventListener('click', closeDialog);
-        dialog.querySelector('#btn-clear-constraints').addEventListener('click', () => {
-            dialog.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+        dialog.querySelector('.modal-cancel').addEventListener('click', closeDialog);
+        
+        dialog.querySelector('#btn-reset-constraints').addEventListener('click', () => {
+            dialog.querySelector('#constraint-horizontal').value = 'left';
+            dialog.querySelector('#constraint-vertical').value = 'top';
+            updatePreview();
         });
+        
         dialog.querySelector('.modal-ok').addEventListener('click', () => {
             this.saveStateForUndo();
-            obj.constraints = {
-                left: dialog.querySelector('#constraint-left').checked,
-                right: dialog.querySelector('#constraint-right').checked,
-                top: dialog.querySelector('#constraint-top').checked,
-                bottom: dialog.querySelector('#constraint-bottom').checked,
-                centerH: dialog.querySelector('#constraint-centerH').checked,
-                centerV: dialog.querySelector('#constraint-centerV').checked
-            };
-            this.applyConstraints(obj);
-            this._updateStatus('Constraints applied');
+            
+            const horizontal = dialog.querySelector('#constraint-horizontal').value;
+            const vertical = dialog.querySelector('#constraint-vertical').value;
+            
+            // Apply to all selected objects
+            for (const selectedObj of AppState.selectedObjects) {
+                selectedObj.constraints = { horizontal, vertical };
+            }
+            
+            this._updateStatus(`Constraints applied: ${ConstraintEngine.getConstraintLabel({ horizontal, vertical })}`);
+            this._updatePropertiesPanel();
             closeDialog();
         });
+        
         dialog.addEventListener('click', (e) => {
             if (e.target === dialog) closeDialog();
         });
     }
     
+    /**
+     * Legacy method - redirects to proper constraint application
+     */
     applyConstraints(obj) {
+        // This is now handled by ConstraintEngine during resize
+        // Keep for backward compatibility with canvas-level constraints
         if (!obj.constraints) return;
         
         const c = obj.constraints;
         const bounds = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y, width: obj.width || 1, height: obj.height || 1 };
         
-        // Apply horizontal constraints
-        if (c.centerH) {
-            const newX = Math.floor((AppState.canvasWidth - bounds.width) / 2);
-            const deltaX = newX - bounds.x;
-            obj.x += deltaX;
-            if (obj.x1 !== undefined) { obj.x1 += deltaX; obj.x2 += deltaX; }
-        } else if (c.left && c.right) {
-            // Stretch to fill
-            obj.x = 1;
-            obj.width = AppState.canvasWidth - 2;
-        } else if (c.left) {
-            const deltaX = 1 - bounds.x;
-            obj.x += deltaX;
-            if (obj.x1 !== undefined) { obj.x1 += deltaX; obj.x2 += deltaX; }
-        } else if (c.right) {
-            const newX = AppState.canvasWidth - bounds.width - 1;
-            const deltaX = newX - bounds.x;
-            obj.x += deltaX;
-            if (obj.x1 !== undefined) { obj.x1 += deltaX; obj.x2 += deltaX; }
-        }
-        
-        // Apply vertical constraints
-        if (c.centerV) {
-            const newY = Math.floor((AppState.canvasHeight - bounds.height) / 2);
-            const deltaY = newY - bounds.y;
-            obj.y += deltaY;
-            if (obj.y1 !== undefined) { obj.y1 += deltaY; obj.y2 += deltaY; }
-        } else if (c.top && c.bottom) {
-            // Stretch to fill
-            obj.y = 1;
-            obj.height = AppState.canvasHeight - 2;
-        } else if (c.top) {
-            const deltaY = 1 - bounds.y;
-            obj.y += deltaY;
-            if (obj.y1 !== undefined) { obj.y1 += deltaY; obj.y2 += deltaY; }
-        } else if (c.bottom) {
-            const newY = AppState.canvasHeight - bounds.height - 1;
-            const deltaY = newY - bounds.y;
-            obj.y += deltaY;
-            if (obj.y1 !== undefined) { obj.y1 += deltaY; obj.y2 += deltaY; }
+        // Legacy canvas-level constraint application
+        if (!obj.parentId && !obj.parentFrame) {
+            // Apply horizontal constraints to canvas
+            if (c.horizontal === 'center') {
+                const newX = Math.floor((AppState.canvasWidth - bounds.width) / 2);
+                const deltaX = newX - bounds.x;
+                obj.x += deltaX;
+                if (obj.x1 !== undefined) { obj.x1 += deltaX; obj.x2 += deltaX; }
+            } else if (c.horizontal === 'leftRight') {
+                obj.x = 1;
+                obj.width = AppState.canvasWidth - 2;
+            } else if (c.horizontal === 'right') {
+                const newX = AppState.canvasWidth - bounds.width - 1;
+                const deltaX = newX - bounds.x;
+                obj.x += deltaX;
+                if (obj.x1 !== undefined) { obj.x1 += deltaX; obj.x2 += deltaX; }
+            }
+            
+            // Apply vertical constraints to canvas
+            if (c.vertical === 'center') {
+                const newY = Math.floor((AppState.canvasHeight - bounds.height) / 2);
+                const deltaY = newY - bounds.y;
+                obj.y += deltaY;
+                if (obj.y1 !== undefined) { obj.y1 += deltaY; obj.y2 += deltaY; }
+            } else if (c.vertical === 'topBottom') {
+                obj.y = 1;
+                obj.height = AppState.canvasHeight - 2;
+            } else if (c.vertical === 'bottom') {
+                const newY = AppState.canvasHeight - bounds.height - 1;
+                const deltaY = newY - bounds.y;
+                obj.y += deltaY;
+                if (obj.y1 !== undefined) { obj.y1 += deltaY; obj.y2 += deltaY; }
+            }
         }
         
         this.renderAllObjects();
