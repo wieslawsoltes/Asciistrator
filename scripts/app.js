@@ -9272,7 +9272,30 @@ class SelectTool extends Tool {
             // Remove from current parent frame
             parentFrame.removeChild(obj);
             
-            if (grandparentId) {
+            // Get the object's center point to find drop target
+            const objBounds = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y, width: obj.width || 1, height: obj.height || 1 };
+            const centerX = objBounds.x + objBounds.width / 2;
+            const centerY = objBounds.y + objBounds.height / 2;
+            
+            // Try to find another frame at the object's position (excluding current parent and its ancestors)
+            const excludeObjects = [obj];
+            let ancestorFrame = parentFrame;
+            while (ancestorFrame) {
+                excludeObjects.push(ancestorFrame);
+                if (ancestorFrame.parentId) {
+                    ancestorFrame = this._findObjectById(ancestorFrame.parentId, app);
+                } else {
+                    break;
+                }
+            }
+            
+            const dropTarget = this._findDropTarget(centerX, centerY, app, excludeObjects);
+            
+            if (dropTarget && dropTarget !== parentFrame && dropTarget.addChild) {
+                // Found another frame at this position - add object to it
+                dropTarget.addChild(obj);
+                this._updateStatus(`Moved ${obj.name || obj.type} from ${parentFrame.name || 'frame'} into ${dropTarget.name || dropTarget.type}`);
+            } else if (grandparentId) {
                 // Move to grandparent container
                 const grandparent = this._findObjectById(grandparentId, app);
                 if (grandparent && grandparent.addChild) {
