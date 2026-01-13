@@ -87,17 +87,27 @@ class SmartGuides {
         this.activeGuides = [];
         this.activeDistances = [];
         this.lastSnapResult = null;
+        this.userGuides = []; // User-created guides from rulers
+    }
+    
+    /**
+     * Update user guides reference for snapping
+     * @param {Array} guides - Array of user-created guides from AppState.guides
+     */
+    setUserGuides(guides) {
+        this.userGuides = guides || [];
     }
     
     /**
      * Calculate snap position and generate guides for a moving object
      * @param {Object} movingBounds - { x, y, width, height } of the object being moved
      * @param {Array} otherObjects - Array of other objects to snap to
-     * @param {number} canvasWidth - Canvas width
-     * @param {number} canvasHeight - Canvas height
+     * @param {number} canvasWidth - Canvas width (or container width when inside a frame)
+     * @param {number} canvasHeight - Canvas height (or container height when inside a frame)
+     * @param {Object} containerBounds - Optional { x, y, width, height } of parent container for frame-relative snapping
      * @returns {SnapResult}
      */
-    calculateSnap(movingBounds, otherObjects, canvasWidth, canvasHeight) {
+    calculateSnap(movingBounds, otherObjects, canvasWidth, canvasHeight, containerBounds = null) {
         const result = new SnapResult(movingBounds.x, movingBounds.y);
         
         if (!this.config.enabled) {
@@ -118,6 +128,71 @@ class SmartGuides {
         let bestSnapY = null;
         let bestDistX = tolerance + 1;
         let bestDistY = tolerance + 1;
+        
+        // Determine snap boundaries - use container bounds if inside a frame
+        const snapLeft = containerBounds ? containerBounds.x : 0;
+        const snapTop = containerBounds ? containerBounds.y : 0;
+        const snapRight = containerBounds ? containerBounds.x + containerBounds.width - 1 : canvasWidth - 1;
+        const snapBottom = containerBounds ? containerBounds.y + containerBounds.height - 1 : canvasHeight - 1;
+        const snapCenterX = containerBounds ? Math.floor(containerBounds.x + containerBounds.width / 2) : Math.floor(canvasWidth / 2);
+        const snapCenterY = containerBounds ? Math.floor(containerBounds.y + containerBounds.height / 2) : Math.floor(canvasHeight / 2);
+        
+        // Snap to user-created guides (highest priority - Figma behavior)
+        if (this.userGuides && this.userGuides.length > 0) {
+            for (const guide of this.userGuides) {
+                if (guide.type === 'vertical') {
+                    // Snap left edge to vertical guide
+                    const distLeft = Math.abs(movingLeft - guide.position);
+                    if (distLeft <= tolerance && distLeft < bestDistX) {
+                        bestSnapX = guide.position;
+                        bestDistX = distLeft;
+                        result.snapTypeX = 'user-guide';
+                        result.guides.push(new GuideLine('user-guide', 'vertical', guide.position, 0, canvasHeight - 1));
+                    }
+                    // Snap right edge to vertical guide
+                    const distRight = Math.abs(movingRight - guide.position);
+                    if (distRight <= tolerance && distRight < bestDistX) {
+                        bestSnapX = guide.position - movingBounds.width + 1;
+                        bestDistX = distRight;
+                        result.snapTypeX = 'user-guide';
+                        result.guides.push(new GuideLine('user-guide', 'vertical', guide.position, 0, canvasHeight - 1));
+                    }
+                    // Snap center to vertical guide
+                    const distCenter = Math.abs(movingCenterX - guide.position);
+                    if (distCenter <= tolerance && distCenter < bestDistX) {
+                        bestSnapX = guide.position - Math.floor(movingBounds.width / 2);
+                        bestDistX = distCenter;
+                        result.snapTypeX = 'user-guide-center';
+                        result.guides.push(new GuideLine('user-guide', 'vertical', guide.position, 0, canvasHeight - 1));
+                    }
+                } else if (guide.type === 'horizontal') {
+                    // Snap top edge to horizontal guide
+                    const distTop = Math.abs(movingTop - guide.position);
+                    if (distTop <= tolerance && distTop < bestDistY) {
+                        bestSnapY = guide.position;
+                        bestDistY = distTop;
+                        result.snapTypeY = 'user-guide';
+                        result.guides.push(new GuideLine('user-guide', 'horizontal', guide.position, 0, canvasWidth - 1));
+                    }
+                    // Snap bottom edge to horizontal guide
+                    const distBottom = Math.abs(movingBottom - guide.position);
+                    if (distBottom <= tolerance && distBottom < bestDistY) {
+                        bestSnapY = guide.position - movingBounds.height + 1;
+                        bestDistY = distBottom;
+                        result.snapTypeY = 'user-guide';
+                        result.guides.push(new GuideLine('user-guide', 'horizontal', guide.position, 0, canvasWidth - 1));
+                    }
+                    // Snap center to horizontal guide
+                    const distCenter = Math.abs(movingCenterY - guide.position);
+                    if (distCenter <= tolerance && distCenter < bestDistY) {
+                        bestSnapY = guide.position - Math.floor(movingBounds.height / 2);
+                        bestDistY = distCenter;
+                        result.snapTypeY = 'user-guide-center';
+                        result.guides.push(new GuideLine('user-guide', 'horizontal', guide.position, 0, canvasWidth - 1));
+                    }
+                }
+            }
+        }
         
         // Snap to grid
         if (this.config.snapToGrid) {
@@ -140,59 +215,56 @@ class SmartGuides {
             }
         }
         
-        // Snap to canvas edges and center
+        // Snap to container/canvas edges
         if (this.config.snapToCanvasEdges) {
             // Left edge
-            if (Math.abs(movingLeft) <= tolerance && Math.abs(movingLeft) < bestDistX) {
-                bestSnapX = 0;
-                bestDistX = Math.abs(movingLeft);
-                result.snapTypeX = 'canvas-edge';
-                result.guides.push(new GuideLine('edge', 'vertical', 0, 0, canvasHeight - 1));
+            if (Math.abs(movingLeft - snapLeft) <= tolerance && Math.abs(movingLeft - snapLeft) < bestDistX) {
+                bestSnapX = snapLeft;
+                bestDistX = Math.abs(movingLeft - snapLeft);
+                result.snapTypeX = containerBounds ? 'container-edge' : 'canvas-edge';
+                result.guides.push(new GuideLine('edge', 'vertical', snapLeft, snapTop, snapBottom));
             }
             // Right edge
-            if (Math.abs(movingRight - (canvasWidth - 1)) <= tolerance && Math.abs(movingRight - (canvasWidth - 1)) < bestDistX) {
-                bestSnapX = canvasWidth - movingBounds.width;
-                bestDistX = Math.abs(movingRight - (canvasWidth - 1));
-                result.snapTypeX = 'canvas-edge';
-                result.guides.push(new GuideLine('edge', 'vertical', canvasWidth - 1, 0, canvasHeight - 1));
+            if (Math.abs(movingRight - snapRight) <= tolerance && Math.abs(movingRight - snapRight) < bestDistX) {
+                bestSnapX = snapRight - movingBounds.width + 1;
+                bestDistX = Math.abs(movingRight - snapRight);
+                result.snapTypeX = containerBounds ? 'container-edge' : 'canvas-edge';
+                result.guides.push(new GuideLine('edge', 'vertical', snapRight, snapTop, snapBottom));
             }
             // Top edge
-            if (Math.abs(movingTop) <= tolerance && Math.abs(movingTop) < bestDistY) {
-                bestSnapY = 0;
-                bestDistY = Math.abs(movingTop);
-                result.snapTypeY = 'canvas-edge';
-                result.guides.push(new GuideLine('edge', 'horizontal', 0, 0, canvasWidth - 1));
+            if (Math.abs(movingTop - snapTop) <= tolerance && Math.abs(movingTop - snapTop) < bestDistY) {
+                bestSnapY = snapTop;
+                bestDistY = Math.abs(movingTop - snapTop);
+                result.snapTypeY = containerBounds ? 'container-edge' : 'canvas-edge';
+                result.guides.push(new GuideLine('edge', 'horizontal', snapTop, snapLeft, snapRight));
             }
             // Bottom edge
-            if (Math.abs(movingBottom - (canvasHeight - 1)) <= tolerance && Math.abs(movingBottom - (canvasHeight - 1)) < bestDistY) {
-                bestSnapY = canvasHeight - movingBounds.height;
-                bestDistY = Math.abs(movingBottom - (canvasHeight - 1));
-                result.snapTypeY = 'canvas-edge';
-                result.guides.push(new GuideLine('edge', 'horizontal', canvasHeight - 1, 0, canvasWidth - 1));
+            if (Math.abs(movingBottom - snapBottom) <= tolerance && Math.abs(movingBottom - snapBottom) < bestDistY) {
+                bestSnapY = snapBottom - movingBounds.height + 1;
+                bestDistY = Math.abs(movingBottom - snapBottom);
+                result.snapTypeY = containerBounds ? 'container-edge' : 'canvas-edge';
+                result.guides.push(new GuideLine('edge', 'horizontal', snapBottom, snapLeft, snapRight));
             }
         }
         
-        // Snap to canvas center
+        // Snap to container/canvas center
         if (this.config.snapToCanvasCenter) {
-            const canvasCenterX = Math.floor(canvasWidth / 2);
-            const canvasCenterY = Math.floor(canvasHeight / 2);
-            
             // Center horizontally
-            const distToCenterX = Math.abs(movingCenterX - canvasCenterX);
+            const distToCenterX = Math.abs(movingCenterX - snapCenterX);
             if (distToCenterX <= tolerance && distToCenterX < bestDistX) {
-                bestSnapX = canvasCenterX - Math.floor(movingBounds.width / 2);
+                bestSnapX = snapCenterX - Math.floor(movingBounds.width / 2);
                 bestDistX = distToCenterX;
-                result.snapTypeX = 'canvas-center';
-                result.guides.push(new GuideLine('center', 'vertical', canvasCenterX, 0, canvasHeight - 1));
+                result.snapTypeX = containerBounds ? 'container-center' : 'canvas-center';
+                result.guides.push(new GuideLine('center', 'vertical', snapCenterX, snapTop, snapBottom));
             }
             
             // Center vertically
-            const distToCenterY = Math.abs(movingCenterY - canvasCenterY);
+            const distToCenterY = Math.abs(movingCenterY - snapCenterY);
             if (distToCenterY <= tolerance && distToCenterY < bestDistY) {
-                bestSnapY = canvasCenterY - Math.floor(movingBounds.height / 2);
+                bestSnapY = snapCenterY - Math.floor(movingBounds.height / 2);
                 bestDistY = distToCenterY;
-                result.snapTypeY = 'canvas-center';
-                result.guides.push(new GuideLine('center', 'horizontal', canvasCenterY, 0, canvasWidth - 1));
+                result.snapTypeY = containerBounds ? 'container-center' : 'canvas-center';
+                result.guides.push(new GuideLine('center', 'horizontal', snapCenterY, snapLeft, snapRight));
             }
         }
         
@@ -393,7 +465,15 @@ class SmartGuides {
         // Render guide lines
         if (this.config.showGuides) {
             for (const guide of snapResult.guides) {
-                const color = guide.type === 'center' ? '#ff00ff' : '#00ffff';
+                // Color based on guide type - user guides are red-orange (Figma style)
+                let color;
+                if (guide.type === 'user-guide') {
+                    color = '#f24822'; // Figma red-orange for user guides
+                } else if (guide.type === 'center') {
+                    color = '#ff00ff';
+                } else {
+                    color = '#00ffff';
+                }
                 const char = guide.axis === 'vertical' ? '│' : '─';
                 
                 if (guide.axis === 'vertical') {
