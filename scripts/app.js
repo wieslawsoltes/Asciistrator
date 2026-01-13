@@ -15149,6 +15149,11 @@ class Asciistrator extends EventEmitter {
                         e.preventDefault();
                         this.showCommandPalette();
                         break;
+                    case 'i':
+                        // Quick insert panel (Ctrl+I)
+                        e.preventDefault();
+                        this.showQuickInsertPanel();
+                        break;
                     case 'h':
                         // Find and replace (Ctrl+H) or toggle visibility (Ctrl+Shift+H)
                         e.preventDefault();
@@ -15594,6 +15599,7 @@ class Asciistrator extends EventEmitter {
                 { label: 'Copy as HTML', action: 'copy-as-html' },
                 { type: 'separator' },
                 { label: 'Quick Actions...', action: 'command-palette', shortcut: 'Ctrl+K' },
+                { label: 'Quick Insert...', action: 'quick-insert', shortcut: 'Ctrl+I' },
                 { type: 'separator' },
                 { label: 'Clear Canvas', action: 'clear' },
             ],
@@ -16037,6 +16043,9 @@ class Asciistrator extends EventEmitter {
                 break;
             case 'command-palette':
                 this.showCommandPalette();
+                break;
+            case 'quick-insert':
+                this.showQuickInsertPanel();
                 break;
             case 'select-all':
                 this.selectAll();
@@ -24670,6 +24679,8 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             { label: 'Show Properties Panel', action: () => this.togglePanel('properties'), category: 'Panels' },
             { label: 'Show Components Panel', action: () => this.togglePanel('components'), category: 'Panels' },
             { label: 'Show Characters Panel', action: () => this.togglePanel('chars'), category: 'Panels' },
+            // Quick Insert
+            { label: 'Quick Insert...', action: () => this.showQuickInsertPanel(), category: 'Insert', shortcut: 'Ctrl+I' },
             // Nice to Have Features
             { label: 'Version History...', action: () => this.showVersionHistory(), category: 'Window' },
             { label: 'Dev Mode (Code Export)', action: () => this.showDevModePanel(), category: 'Window' },
@@ -24810,6 +24821,340 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         
         renderResults();
         input.focus();
+    }
+
+    // ==========================================
+    // QUICK INSERT PANEL (Ctrl+I)
+    // ==========================================
+    
+    showQuickInsertPanel() {
+        // Gather all components from all libraries
+        const allComponents = [];
+        
+        // Get components from component library manager
+        for (const library of componentLibraryManager.getAllLibraries()) {
+            for (const component of library.getAllComponents()) {
+                allComponents.push({
+                    label: component.name,
+                    category: library.name,
+                    description: component.description || '',
+                    tags: component.tags || [],
+                    icon: component.icon || library.icon || '📦',
+                    component: component,
+                    library: library
+                });
+            }
+        }
+        
+        // Add basic shapes as "Quick Shapes"
+        const quickShapes = [
+            { label: 'Rectangle', icon: '▭', action: () => this._insertQuickShape('rectangle') },
+            { label: 'Ellipse', icon: '○', action: () => this._insertQuickShape('ellipse') },
+            { label: 'Line', icon: '─', action: () => this._insertQuickShape('line') },
+            { label: 'Frame', icon: '⬚', action: () => this._insertQuickShape('frame') },
+            { label: 'Text', icon: 'T', action: () => this._insertQuickShape('text') },
+        ];
+        
+        // Create modal
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-overlay quick-insert-overlay';
+        dialog.innerHTML = `
+            <div class="quick-insert-panel">
+                <div class="quick-insert-input-wrapper">
+                    <input type="text" class="quick-insert-input" placeholder="Search components to insert..." autofocus>
+                </div>
+                <div class="quick-insert-results"></div>
+            </div>
+        `;
+        
+        document.body.appendChild(dialog);
+        
+        const input = dialog.querySelector('.quick-insert-input');
+        const results = dialog.querySelector('.quick-insert-results');
+        let selectedIndex = 0;
+        let filteredItems = [];
+        
+        const buildFilteredList = (query) => {
+            const items = [];
+            const lowerQuery = query.toLowerCase();
+            
+            // Add quick shapes first if no query or matches
+            for (const shape of quickShapes) {
+                if (!query || shape.label.toLowerCase().includes(lowerQuery)) {
+                    items.push({ ...shape, category: 'Quick Shapes', type: 'shape' });
+                }
+            }
+            
+            // Add components
+            for (const comp of allComponents) {
+                if (!query || 
+                    comp.label.toLowerCase().includes(lowerQuery) ||
+                    comp.category.toLowerCase().includes(lowerQuery) ||
+                    comp.description.toLowerCase().includes(lowerQuery) ||
+                    comp.tags.some(t => t.toLowerCase().includes(lowerQuery))) {
+                    items.push({ ...comp, type: 'component' });
+                }
+            }
+            
+            // Sort: prioritize matches at start of label
+            if (query) {
+                items.sort((a, b) => {
+                    const aStarts = a.label.toLowerCase().startsWith(lowerQuery);
+                    const bStarts = b.label.toLowerCase().startsWith(lowerQuery);
+                    if (aStarts && !bStarts) return -1;
+                    if (!aStarts && bStarts) return 1;
+                    return 0;
+                });
+            }
+            
+            return items;
+        };
+        
+        const renderResults = () => {
+            results.innerHTML = '';
+            const grouped = {};
+            
+            const maxResults = 30;
+            filteredItems.slice(0, maxResults).forEach((item, idx) => {
+                if (!grouped[item.category]) grouped[item.category] = [];
+                grouped[item.category].push({ ...item, idx });
+            });
+            
+            if (Object.keys(grouped).length === 0) {
+                results.innerHTML = '<div class="quick-insert-empty">No components found</div>';
+                return;
+            }
+            
+            Object.entries(grouped).forEach(([category, items]) => {
+                const categoryEl = document.createElement('div');
+                categoryEl.className = 'quick-insert-category';
+                categoryEl.textContent = category;
+                results.appendChild(categoryEl);
+                
+                items.forEach(item => {
+                    const el = document.createElement('div');
+                    el.className = `quick-insert-item${item.idx === selectedIndex ? ' selected' : ''}`;
+                    el.dataset.itemIndex = item.idx;
+                    el.innerHTML = `
+                        <span class="quick-insert-icon">${item.icon || '📦'}</span>
+                        <span class="quick-insert-label">${item.label}</span>
+                        ${item.description ? `<span class="quick-insert-desc">${item.description}</span>` : ''}
+                    `;
+                    results.appendChild(el);
+                });
+            });
+        };
+        
+        const insertItem = (item) => {
+            closeDialog();
+            
+            if (item.type === 'shape') {
+                // Quick shape - execute action
+                if (item.action) item.action();
+            } else if (item.type === 'component') {
+                // Component - insert at center or cursor position
+                this._insertComponent(item.component, item.library);
+            }
+        };
+        
+        // Event delegation for clicks
+        results.addEventListener('click', (e) => {
+            const el = e.target.closest('.quick-insert-item');
+            if (el) {
+                const idx = parseInt(el.dataset.itemIndex, 10);
+                const item = filteredItems[idx];
+                if (item) insertItem(item);
+            }
+        });
+        
+        results.addEventListener('mouseover', (e) => {
+            const el = e.target.closest('.quick-insert-item');
+            if (el) {
+                const idx = parseInt(el.dataset.itemIndex, 10);
+                if (idx !== selectedIndex) {
+                    selectedIndex = idx;
+                    results.querySelectorAll('.quick-insert-item').forEach(item => {
+                        item.classList.toggle('selected', parseInt(item.dataset.itemIndex, 10) === selectedIndex);
+                    });
+                }
+            }
+        });
+        
+        const filterItems = (query) => {
+            filteredItems = buildFilteredList(query);
+            selectedIndex = 0;
+            renderResults();
+        };
+        
+        const closeDialog = () => {
+            dialog.remove();
+        };
+        
+        input.addEventListener('input', (e) => filterItems(e.target.value));
+        
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                selectedIndex = Math.min(selectedIndex + 1, Math.min(filteredItems.length - 1, 29));
+                renderResults();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                selectedIndex = Math.max(selectedIndex - 1, 0);
+                renderResults();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (filteredItems[selectedIndex]) {
+                    insertItem(filteredItems[selectedIndex]);
+                }
+            } else if (e.key === 'Escape') {
+                closeDialog();
+            }
+        });
+        
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) closeDialog();
+        });
+        
+        // Initialize with all items
+        filterItems('');
+        input.focus();
+    }
+    
+    /**
+     * Insert a quick shape at the center of the viewport
+     */
+    _insertQuickShape(shapeType) {
+        // Calculate center of visible viewport
+        const centerX = Math.floor(AppState.canvasWidth / 2);
+        const centerY = Math.floor(AppState.canvasHeight / 2);
+        
+        let obj;
+        switch (shapeType) {
+            case 'rectangle':
+                obj = new RectangleObject();
+                obj.x = centerX - 5;
+                obj.y = centerY - 3;
+                obj.width = 10;
+                obj.height = 6;
+                obj.strokeChar = AppState.strokeChar;
+                obj.strokeColor = AppState.strokeColor;
+                obj.lineStyle = AppState.lineStyle;
+                obj.name = `Rectangle ${Date.now() % 10000}`;
+                break;
+            case 'ellipse':
+                obj = new EllipseObject();
+                obj.x = centerX - 5;
+                obj.y = centerY - 3;
+                obj.radiusX = 5;
+                obj.radiusY = 3;
+                obj._updateBounds();
+                obj.strokeChar = AppState.strokeChar;
+                obj.strokeColor = AppState.strokeColor;
+                obj.name = `Ellipse ${Date.now() % 10000}`;
+                break;
+            case 'line':
+                obj = new LineObject();
+                obj.x1 = centerX - 5;
+                obj.y1 = centerY;
+                obj.x2 = centerX + 5;
+                obj.y2 = centerY;
+                obj.x = obj.x1;
+                obj.y = obj.y1;
+                obj.width = 11;
+                obj.height = 1;
+                obj.strokeChar = AppState.strokeChar;
+                obj.strokeColor = AppState.strokeColor;
+                obj.lineStyle = AppState.lineStyle;
+                obj.name = `Line ${Date.now() % 10000}`;
+                break;
+            case 'frame':
+                obj = new FrameObject(centerX - 10, centerY - 5, 20, 10);
+                obj.strokeColor = AppState.strokeColor;
+                obj.name = `Frame ${Date.now() % 10000}`;
+                break;
+            case 'text':
+                obj = new TextObject();
+                obj.x = centerX - 2;
+                obj.y = centerY;
+                obj.text = 'Text';
+                obj.width = 4;
+                obj.height = 1;
+                obj.strokeColor = AppState.strokeColor;
+                obj.name = `Text ${Date.now() % 10000}`;
+                break;
+        }
+        
+        if (obj) {
+            this.addObject(obj, true);
+            AppState.selectedObjects = [obj];
+            this.renderAllObjects();
+            this._updateStatus(`Inserted ${shapeType}`);
+        }
+    }
+    
+    /**
+     * Insert a component from the library
+     */
+    _insertComponent(component, library) {
+        // Calculate center of visible viewport
+        const centerX = Math.floor(AppState.canvasWidth / 2);
+        const centerY = Math.floor(AppState.canvasHeight / 2);
+        
+        // Get the component's objects and create copies
+        const objects = component.objects || [];
+        const createdObjects = [];
+        
+        if (objects.length === 0) {
+            this._updateStatus(`Component "${component.name}" has no objects`);
+            return;
+        }
+        
+        // Calculate bounds of all component objects
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const objData of objects) {
+            const x = objData.x || 0;
+            const y = objData.y || 0;
+            const w = objData.width || 1;
+            const h = objData.height || 1;
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            maxX = Math.max(maxX, x + w);
+            maxY = Math.max(maxY, y + h);
+        }
+        
+        const componentWidth = maxX - minX;
+        const componentHeight = maxY - minY;
+        const offsetX = centerX - Math.floor(componentWidth / 2) - minX;
+        const offsetY = centerY - Math.floor(componentHeight / 2) - minY;
+        
+        // Create objects from component data
+        for (const objData of objects) {
+            const obj = ObjectFactory.fromJSON({
+                ...objData,
+                x: (objData.x || 0) + offsetX,
+                y: (objData.y || 0) + offsetY,
+                id: uuid() // Generate new ID
+            });
+            
+            if (obj) {
+                obj.name = objData.name || `${component.name} part`;
+                this.addObject(obj, false); // Don't save undo for each object
+                createdObjects.push(obj);
+            }
+        }
+        
+        // If multiple objects, group them
+        if (createdObjects.length > 1) {
+            AppState.selectedObjects = createdObjects;
+            this.groupSelected();
+            // After grouping, the group is now selected
+        } else if (createdObjects.length === 1) {
+            AppState.selectedObjects = createdObjects;
+        }
+        
+        this.saveStateForUndo();
+        this.renderAllObjects();
+        this._updateStatus(`Inserted component "${component.name}"`);
     }
 
     // ==========================================
