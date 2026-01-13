@@ -24888,11 +24888,11 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         
         // Add basic shapes as "Quick Shapes"
         const quickShapes = [
-            { label: 'Rectangle', icon: '▭', action: () => this._insertQuickShape('rectangle') },
-            { label: 'Ellipse', icon: '○', action: () => this._insertQuickShape('ellipse') },
-            { label: 'Line', icon: '─', action: () => this._insertQuickShape('line') },
-            { label: 'Frame', icon: '⬚', action: () => this._insertQuickShape('frame') },
-            { label: 'Text', icon: 'T', action: () => this._insertQuickShape('text') },
+            { label: 'Rectangle', icon: '▭', shapeType: 'rectangle' },
+            { label: 'Ellipse', icon: '○', shapeType: 'ellipse' },
+            { label: 'Line', icon: '─', shapeType: 'line' },
+            { label: 'Frame', icon: '⬚', shapeType: 'frame' },
+            { label: 'Text', icon: 'T', shapeType: 'text' },
         ];
         
         // Create modal
@@ -24925,7 +24925,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                 }
             }
             
-            // Add components
+            // Add ALL components (not filtered by query when empty, but always shown)
             for (const comp of allComponents) {
                 if (!query || 
                     comp.label.toLowerCase().includes(lowerQuery) ||
@@ -24954,7 +24954,8 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             results.innerHTML = '';
             const grouped = {};
             
-            const maxResults = 30;
+            // Show more results initially to display all libraries
+            const maxResults = 100;
             filteredItems.slice(0, maxResults).forEach((item, idx) => {
                 if (!grouped[item.category]) grouped[item.category] = [];
                 grouped[item.category].push({ ...item, idx });
@@ -24985,16 +24986,11 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             });
         };
         
-        const insertItem = (item) => {
+        const startPlacementMode = (item) => {
             closeDialog();
             
-            if (item.type === 'shape') {
-                // Quick shape - execute action
-                if (item.action) item.action();
-            } else if (item.type === 'component') {
-                // Component - insert at center or cursor position
-                this._insertComponent(item.component, item.library);
-            }
+            // Enter placement mode - user clicks to place
+            this._startInsertPlacement(item);
         };
         
         // Event delegation for clicks
@@ -25003,7 +24999,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             if (el) {
                 const idx = parseInt(el.dataset.itemIndex, 10);
                 const item = filteredItems[idx];
-                if (item) insertItem(item);
+                if (item) startPlacementMode(item);
             }
         });
         
@@ -25035,7 +25031,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         input.addEventListener('keydown', (e) => {
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
-                selectedIndex = Math.min(selectedIndex + 1, Math.min(filteredItems.length - 1, 29));
+                selectedIndex = Math.min(selectedIndex + 1, Math.min(filteredItems.length - 1, 99));
                 renderResults();
             } else if (e.key === 'ArrowUp') {
                 e.preventDefault();
@@ -25044,7 +25040,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             } else if (e.key === 'Enter') {
                 e.preventDefault();
                 if (filteredItems[selectedIndex]) {
-                    insertItem(filteredItems[selectedIndex]);
+                    startPlacementMode(filteredItems[selectedIndex]);
                 }
             } else if (e.key === 'Escape') {
                 closeDialog();
@@ -25061,19 +25057,118 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
     }
     
     /**
+     * Start placement mode for inserting a shape or component
+     * User clicks on canvas to place, Escape to cancel
+     */
+    _startInsertPlacement(item) {
+        // Store the item to insert
+        this._pendingInsertItem = item;
+        
+        // Show placement cursor indicator
+        this._updateStatus(`Click on canvas to place ${item.label} (Escape to cancel)`);
+        
+        // Change cursor to crosshair
+        const viewport = $('#viewport');
+        if (viewport) {
+            viewport.style.cursor = 'crosshair';
+        }
+        
+        // Create preview element that follows mouse
+        const preview = document.createElement('div');
+        preview.className = 'insert-placement-preview';
+        preview.innerHTML = `<span class="insert-preview-icon">${item.icon || '📦'}</span><span class="insert-preview-label">${item.label}</span>`;
+        document.body.appendChild(preview);
+        this._insertPreviewElement = preview;
+        
+        // Mouse move handler to show preview position
+        const mouseMoveHandler = (e) => {
+            if (this._insertPreviewElement) {
+                this._insertPreviewElement.style.left = `${e.clientX + 15}px`;
+                this._insertPreviewElement.style.top = `${e.clientY + 15}px`;
+            }
+        };
+        
+        // Click handler to place the item
+        const clickHandler = (e) => {
+            // Only handle clicks on viewport/canvas
+            const viewport = $('#viewport');
+            if (!viewport || !viewport.contains(e.target)) return;
+            
+            // Get canvas coordinates from click position
+            const pos = this.pointerToCanvas(e);
+            
+            // Insert the item at this position
+            if (this._pendingInsertItem) {
+                if (this._pendingInsertItem.type === 'shape') {
+                    this._insertQuickShapeAt(this._pendingInsertItem.shapeType, pos.x, pos.y);
+                } else if (this._pendingInsertItem.type === 'component') {
+                    this._insertComponentAt(this._pendingInsertItem.component, this._pendingInsertItem.library, pos.x, pos.y);
+                }
+            }
+            
+            // Clean up placement mode
+            cancelPlacement();
+        };
+        
+        // Escape handler to cancel
+        const keyHandler = (e) => {
+            if (e.key === 'Escape') {
+                cancelPlacement();
+                this._updateStatus('Placement cancelled');
+            }
+        };
+        
+        const cancelPlacement = () => {
+            // Remove handlers
+            document.removeEventListener('mousemove', mouseMoveHandler);
+            document.removeEventListener('click', clickHandler);
+            document.removeEventListener('keydown', keyHandler);
+            
+            // Reset cursor
+            const viewport = $('#viewport');
+            if (viewport) {
+                viewport.style.cursor = '';
+            }
+            
+            // Remove preview element
+            if (this._insertPreviewElement) {
+                this._insertPreviewElement.remove();
+                this._insertPreviewElement = null;
+            }
+            
+            // Clear pending item
+            this._pendingInsertItem = null;
+        };
+        
+        // Add event listeners
+        document.addEventListener('mousemove', mouseMoveHandler);
+        document.addEventListener('click', clickHandler);
+        document.addEventListener('keydown', keyHandler);
+        
+        // Store cancel function for external access
+        this._cancelInsertPlacement = cancelPlacement;
+    }
+
+    /**
      * Insert a quick shape at the center of the viewport
      */
     _insertQuickShape(shapeType) {
         // Calculate center of visible viewport
         const centerX = Math.floor(AppState.canvasWidth / 2);
         const centerY = Math.floor(AppState.canvasHeight / 2);
-        
+        this._insertQuickShapeAt(shapeType, centerX, centerY);
+    }
+
+    /**
+     * Insert a quick shape at specified position
+     */
+    _insertQuickShapeAt(shapeType, x, y) {
         let obj;
         switch (shapeType) {
             case 'rectangle':
                 obj = new RectangleObject();
-                obj.x = centerX - 5;
-                obj.y = centerY - 3;
+                obj.x = x - 5;
+                obj.y = y - 3;
                 obj.width = 10;
                 obj.height = 6;
                 obj.strokeChar = AppState.strokeChar;
@@ -25083,8 +25178,8 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                 break;
             case 'ellipse':
                 obj = new EllipseObject();
-                obj.x = centerX - 5;
-                obj.y = centerY - 3;
+                obj.x = x - 5;
+                obj.y = y - 3;
                 obj.radiusX = 5;
                 obj.radiusY = 3;
                 obj._updateBounds();
@@ -25094,10 +25189,10 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                 break;
             case 'line':
                 obj = new LineObject();
-                obj.x1 = centerX - 5;
-                obj.y1 = centerY;
-                obj.x2 = centerX + 5;
-                obj.y2 = centerY;
+                obj.x1 = x - 5;
+                obj.y1 = y;
+                obj.x2 = x + 5;
+                obj.y2 = y;
                 obj.x = obj.x1;
                 obj.y = obj.y1;
                 obj.width = 11;
@@ -25108,14 +25203,14 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                 obj.name = `Line ${Date.now() % 10000}`;
                 break;
             case 'frame':
-                obj = new FrameObject(centerX - 10, centerY - 5, 20, 10);
+                obj = new FrameObject(x - 10, y - 5, 20, 10);
                 obj.strokeColor = AppState.strokeColor;
                 obj.name = `Frame ${Date.now() % 10000}`;
                 break;
             case 'text':
                 obj = new TextObject();
-                obj.x = centerX - 2;
-                obj.y = centerY;
+                obj.x = x - 2;
+                obj.y = y;
                 obj.text = 'Text';
                 obj.width = 4;
                 obj.height = 1;
@@ -25133,13 +25228,19 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
     }
     
     /**
-     * Insert a component from the library
+     * Insert a component from the library at center
      */
     _insertComponent(component, library) {
         // Calculate center of visible viewport
         const centerX = Math.floor(AppState.canvasWidth / 2);
         const centerY = Math.floor(AppState.canvasHeight / 2);
-        
+        this._insertComponentAt(component, library, centerX, centerY);
+    }
+
+    /**
+     * Insert a component from the library at specified position
+     */
+    _insertComponentAt(component, library, x, y) {
         // Get the component's objects and create copies
         const objects = component.objects || [];
         const createdObjects = [];
@@ -25152,20 +25253,20 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         // Calculate bounds of all component objects
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         for (const objData of objects) {
-            const x = objData.x || 0;
-            const y = objData.y || 0;
+            const ox = objData.x || 0;
+            const oy = objData.y || 0;
             const w = objData.width || 1;
             const h = objData.height || 1;
-            minX = Math.min(minX, x);
-            minY = Math.min(minY, y);
-            maxX = Math.max(maxX, x + w);
-            maxY = Math.max(maxY, y + h);
+            minX = Math.min(minX, ox);
+            minY = Math.min(minY, oy);
+            maxX = Math.max(maxX, ox + w);
+            maxY = Math.max(maxY, oy + h);
         }
         
         const componentWidth = maxX - minX;
         const componentHeight = maxY - minY;
-        const offsetX = centerX - Math.floor(componentWidth / 2) - minX;
-        const offsetY = centerY - Math.floor(componentHeight / 2) - minY;
+        const offsetX = x - Math.floor(componentWidth / 2) - minX;
+        const offsetY = y - Math.floor(componentHeight / 2) - minY;
         
         // Create objects from component data
         for (const objData of objects) {
