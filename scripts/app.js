@@ -18596,10 +18596,10 @@ class Asciistrator extends EventEmitter {
         const { detectVersion, NativeDocument, ColorUtils, ConstraintMapping, TypeMapping } = await import('./io/native.js');
         const data = JSON.parse(text);
         
-        // Detect document version
+        // Detect document version (v2+ only)
         const version = detectVersion(data);
         if (!version) {
-            throw new Error('Not a valid native format document');
+            throw new Error('Not a valid v2+ native format document. Legacy v1 documents are no longer supported.');
         }
         
         console.log(`Loading document version ${version}`);
@@ -18614,16 +18614,8 @@ class Asciistrator extends EventEmitter {
         AppState.selectionContext.hoverTarget = null;
         AppState.selectionContext.dropIndicator = null;
         
-        // Check if this is v2 format (nested document structure)
-        const isV2 = version.startsWith('2.') || (data.document?.type === 'DOCUMENT');
-        
-        if (isV2) {
-            // Load v2 format (Figma-compatible nested structure)
-            await this._loadFromNativeFormatV2(data, ColorUtils, ConstraintMapping, TypeMapping);
-        } else {
-            // Load v1 format (legacy flat structure)
-            await this._loadFromNativeFormatV1(data);
-        }
+        // Load v2 format (Figma-compatible nested structure)
+        await this._loadFromNativeFormatV2(data, ColorUtils, ConstraintMapping, TypeMapping);
         
         // Clear undo/redo stacks for fresh document
         AppState.undoStack = [];
@@ -18764,10 +18756,10 @@ class Asciistrator extends EventEmitter {
             strokeColor: node.ascii?.strokeColor || (node.strokes?.[0]?.color ? ColorUtils.figmaToHex(node.strokes[0].color) : null),
             fillColor: node.ascii?.fillColor || (node.fills?.[0]?.color ? ColorUtils.figmaToHex(node.fills[0].color) : null),
             
-            // Constraints (convert back to v1 naming)
+            // Constraints (convert Figma naming to internal)
             constraints: {
-                horizontal: ConstraintMapping.toV1.horizontal[node.constraints?.horizontal] || 'left',
-                vertical: ConstraintMapping.toV1.vertical[node.constraints?.vertical] || 'top'
+                horizontal: ConstraintMapping.toInternal.horizontal[node.constraints?.horizontal] || 'left',
+                vertical: ConstraintMapping.toInternal.vertical[node.constraints?.vertical] || 'top'
             },
             
             clipContent: node.clipsContent || false
@@ -18785,8 +18777,8 @@ class Asciistrator extends EventEmitter {
                     bottom: node.paddingBottom || 0,
                     left: node.paddingLeft || 0
                 },
-                alignment: this._mapFigmaCounterAlignmentToV1(node.counterAxisAlignItems),
-                distribution: node._distribution || this._mapFigmaPrimaryAlignmentToV1(node.primaryAxisAlignItems),
+                alignment: this._mapFigmaCounterAlignmentToInternal(node.counterAxisAlignItems),
+                distribution: node._distribution || this._mapFigmaPrimaryAlignmentToInternal(node.primaryAxisAlignItems),
                 wrap: node.layoutWrap === 'WRAP',
                 wrapSpacing: node.counterAxisSpacing || 0,
                 counterSpacing: node.counterAxisSpacing || 0,
@@ -18952,9 +18944,9 @@ class Asciistrator extends EventEmitter {
     }
     
     /**
-     * Map Figma counter axis alignment to v1 alignment
+     * Map Figma counter axis alignment to internal alignment
      */
-    _mapFigmaCounterAlignmentToV1(alignment) {
+    _mapFigmaCounterAlignmentToInternal(alignment) {
         switch (alignment) {
             case 'MIN': return 'start';
             case 'CENTER': return 'center';
@@ -18966,75 +18958,14 @@ class Asciistrator extends EventEmitter {
     }
     
     /**
-     * Map Figma primary axis alignment to v1 distribution
+     * Map Figma primary axis alignment to internal distribution
      */
-    _mapFigmaPrimaryAlignmentToV1(alignment) {
+    _mapFigmaPrimaryAlignmentToInternal(alignment) {
         switch (alignment) {
             case 'SPACE_BETWEEN': return 'space-between';
             case 'SPACE_AROUND': return 'space-around';
             case 'SPACE_EVENLY': return 'space-evenly';
             default: return 'packed';
-        }
-    }
-    
-    /**
-     * Load v1 format document (legacy flat structure)
-     */
-    async _loadFromNativeFormatV1(data) {
-        // Restore document settings
-        if (data.document) {
-            if (data.document.width) AppState.canvasWidth = data.document.width;
-            if (data.document.height) AppState.canvasHeight = data.document.height;
-        }
-        
-        // Restore layers
-        if (data.layers && data.layers.length > 0) {
-            // Create layer map for object assignment
-            const layerMap = new Map();
-            
-            // Restore or create layers
-            AppState.layers = data.layers.map((layerData, index) => {
-                const layer = {
-                    id: layerData.id !== undefined ? layerData.id : index,
-                    name: layerData.name || `Layer ${index + 1}`,
-                    visible: layerData.visible !== false,
-                    locked: layerData.locked || false,
-                    opacity: layerData.opacity || 1,
-                    buffer: new AsciiBuffer(AppState.canvasWidth, AppState.canvasHeight),
-                    objects: []
-                };
-                layerMap.set(layer.id, layer);
-                return layer;
-            });
-            
-            // Restore objects to their layers
-            if (data.objects && Array.isArray(data.objects)) {
-                for (const objData of data.objects) {
-                    const obj = this._createObjectFromJSON(objData);
-                    if (obj) {
-                        // Find the layer for this object
-                        const layerId = objData.layerId !== undefined ? objData.layerId : AppState.layers[0]?.id;
-                        const layer = layerMap.get(layerId) || AppState.layers[0];
-                        if (layer) {
-                            layer.objects.push(obj);
-                        }
-                    }
-                }
-            }
-            
-            // Set active layer to first layer
-            AppState.activeLayerId = AppState.layers[0]?.id || 0;
-        } else {
-            // No layers in document, create default layer
-            AppState.layers = [{
-                id: 0,
-                name: 'Layer 1',
-                visible: true,
-                locked: false,
-                buffer: new AsciiBuffer(AppState.canvasWidth, AppState.canvasHeight),
-                objects: []
-            }];
-            AppState.activeLayerId = 0;
         }
     }
     
