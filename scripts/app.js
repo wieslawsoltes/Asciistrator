@@ -24834,16 +24834,25 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         
         input.addEventListener('input', (e) => filterCommands(e.target.value));
         
+        const scrollToSelected = () => {
+            const selectedItem = results.querySelector('.command-palette-item.selected');
+            if (selectedItem) {
+                selectedItem.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+        };
+
         input.addEventListener('keydown', (e) => {
             const maxResults = input.value.trim() ? 20 : 50;
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
                 selectedIndex = Math.min(selectedIndex + 1, Math.min(filteredCommands.length - 1, maxResults - 1));
                 renderResults();
+                scrollToSelected();
             } else if (e.key === 'ArrowUp') {
                 e.preventDefault();
                 selectedIndex = Math.max(selectedIndex - 1, 0);
                 renderResults();
+                scrollToSelected();
             } else if (e.key === 'Enter') {
                 e.preventDefault();
                 if (filteredCommands[selectedIndex]) {
@@ -25028,15 +25037,24 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         
         input.addEventListener('input', (e) => filterItems(e.target.value));
         
+        const scrollToSelected = () => {
+            const selectedItem = results.querySelector('.quick-insert-item.selected');
+            if (selectedItem) {
+                selectedItem.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+        };
+
         input.addEventListener('keydown', (e) => {
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
                 selectedIndex = Math.min(selectedIndex + 1, Math.min(filteredItems.length - 1, 99));
                 renderResults();
+                scrollToSelected();
             } else if (e.key === 'ArrowUp') {
                 e.preventDefault();
                 selectedIndex = Math.max(selectedIndex - 1, 0);
                 renderResults();
+                scrollToSelected();
             } else if (e.key === 'Enter') {
                 e.preventDefault();
                 if (filteredItems[selectedIndex]) {
@@ -25270,7 +25288,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         
         // Create objects from component data
         for (const objData of objects) {
-            const obj = ObjectFactory.fromJSON({
+            const obj = this._createObjectFromJSON({
                 ...objData,
                 x: (objData.x || 0) + offsetX,
                 y: (objData.y || 0) + offsetY,
