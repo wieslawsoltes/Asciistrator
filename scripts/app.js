@@ -10429,6 +10429,14 @@ class SelectTool extends Tool {
         obj.x = pos.x + dx;
         obj.y = pos.y + dy;
         
+        // Invalidate bounds cache so getBounds() returns updated values
+        if (obj.invalidateBounds) {
+            obj.invalidateBounds();
+        } else if (obj._boundsCacheValid !== undefined) {
+            obj._boundsCacheValid = false;
+            obj._boundsCache = null;
+        }
+        
         // Update line endpoints
         if (pos.x1 !== undefined) {
             obj.x1 = pos.x1 + dx;
@@ -10621,6 +10629,14 @@ class SelectTool extends Tool {
                 
                 if (obj._updateBounds) obj._updateBounds();
                 if (obj._updateSnapPoints) obj._updateSnapPoints();
+                
+                // Invalidate bounds cache so getBounds() returns updated values
+                if (obj.invalidateBounds) {
+                    obj.invalidateBounds();
+                } else if (obj._boundsCacheValid !== undefined) {
+                    obj._boundsCacheValid = false;
+                    obj._boundsCache = null;
+                }
                 
                 // Apply constraints to children if this is a container
                 if (obj.children && obj.children.length > 0) {
