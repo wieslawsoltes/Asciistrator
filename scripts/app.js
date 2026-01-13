@@ -12713,7 +12713,19 @@ class Asciistrator extends EventEmitter {
                     buffer.setChar(x, y, char, fg);
                 }
             },
+            drawText: (x, y, text, color, z) => {
+                // Draw text character by character with clipping
+                for (let i = 0; i < text.length; i++) {
+                    const cx = x + i;
+                    if (cx >= clipBounds.x && cx < clipBounds.x + clipBounds.width &&
+                        y >= clipBounds.y && y < clipBounds.y + clipBounds.height) {
+                        buffer.setChar(cx, y, text[i], color);
+                    }
+                }
+            },
             getCell: (x, y) => buffer.getCell(x, y),
+            getChar: (x, y) => buffer.getChar ? buffer.getChar(x, y) : (buffer.chars[y] ? buffer.chars[y][x] : ' '),
+            inBounds: (x, y) => buffer.inBounds ? buffer.inBounds(x, y) : (x >= 0 && x < buffer.width && y >= 0 && y < buffer.height),
             chars: buffer.chars,
             colors: buffer.colors
         };
