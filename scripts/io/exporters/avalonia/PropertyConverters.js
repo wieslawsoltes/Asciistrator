@@ -1129,5 +1129,4 @@ export const propertyConverter = new PropertyConverter();
 // DEFAULT EXPORT
 // ==========================================
 
-export { ExtendedConverterTypes };
 export default PropertyConverter;
