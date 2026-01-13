@@ -126,6 +126,48 @@ export {
 } from './AvaloniaExportDialog.js';
 
 // ==========================================
+// LAYOUT-AWARE EXPORT SYSTEM
+// ==========================================
+
+// Layout Export Engines
+export {
+    // Base engines
+    LayoutExportEngine,
+    ContainerExportEngine,
+    StringContainerExportEngine,
+    ASTContainerExportEngine,
+    // Layout constants
+    LayoutMode,
+    PrimaryAxisAlign,
+    CounterAxisAlign,
+    LayoutWrap,
+    SizingMode,
+    ContainerType,
+    // Transformers
+    CSSLayoutTransformer,
+    XAMLLayoutTransformer,
+    SVGLayoutTransformer,
+    XAMLPanelType,
+    XAMLAlignment,
+    // Container engines
+    HTMLContainerExportEngine,
+    SVGContainerExportEngine,
+    XAMLContainerExportEngine,
+    // Factories
+    createLayoutTransformer,
+    createContainerEngine,
+    getLayoutCapabilities
+} from './exporters/layout/index.js';
+
+// Layout-Aware Export Manager
+export {
+    LayoutAwareExportResult,
+    LayoutExportConfig,
+    LayoutAwareExportManager,
+    layoutExportManager
+} from './LayoutAwareExportManager.js';
+
+// ==========================================
 // UNIFIED IMPORT/EXPORT INTERFACE
 // ==========================================
 
