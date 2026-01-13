@@ -4626,11 +4626,2342 @@ const AppState = {
     // Palettes
     activePalette: 'standard',
     
+    // Render mode
+    renderMode: 'ascii', // 'ascii', 'outline', 'shape', 'scratch', 'rough'
+    outlineView: false,  // Legacy flag - kept for compatibility
+    
     // Document
     document: null,
     modified: false,
     filename: 'untitled.asc'
 };
+
+// ==========================================
+// PLUGGABLE RENDER MODE SYSTEM
+// ==========================================
+
+/**
+ * Base class for render modes
+ * Each render mode defines how objects are drawn to the ASCII buffer
+ */
+class RenderMode {
+    constructor(name, displayName) {
+        this.name = name;
+        this.displayName = displayName;
+        this.description = '';
+    }
+    
+    /**
+     * Render a single object to the buffer
+     * @param {SceneObject} obj - The object to render
+     * @param {AsciiBuffer} buffer - Target buffer
+     * @param {Object} options - Additional render options
+     */
+    renderObject(obj, buffer, options = {}) {
+        // Default: call object's native render method
+        obj.render(buffer);
+    }
+    
+    /**
+     * Called before rendering all objects
+     * @param {AsciiBuffer} buffer - Target buffer
+     */
+    preRender(buffer) {
+        // Override in subclasses for setup
+    }
+    
+    /**
+     * Called after rendering all objects
+     * @param {AsciiBuffer} buffer - Target buffer
+     */
+    postRender(buffer) {
+        // Override in subclasses for cleanup
+    }
+    
+    /**
+     * Get render options for this mode
+     */
+    getOptions() {
+        return {};
+    }
+}
+
+/**
+ * ASCII Render Mode (Default)
+ * Uses the object's native render() method for ASCII art output
+ */
+class AsciiRenderMode extends RenderMode {
+    constructor() {
+        super('ascii', 'ASCII');
+        this.description = 'Standard ASCII art rendering with box drawing characters';
+    }
+    
+    renderObject(obj, buffer, options = {}) {
+        obj.render(buffer);
+    }
+}
+
+/**
+ * Outline Render Mode (Figma-style)
+ * Shows only the wireframe/outline of objects without fill
+ * Uses a single color for all strokes
+ */
+class OutlineRenderMode extends RenderMode {
+    constructor() {
+        super('outline', 'Outline');
+        this.description = 'Wireframe view showing object outlines only';
+        this.outlineColor = '#0099ff'; // Figma-style blue
+        this.outlineChar = '·';         // Dot character for outlines
+    }
+    
+    renderObject(obj, buffer, options = {}) {
+        if (!obj.visible) return;
+        
+        // Get object bounds
+        const bounds = obj.getBounds ? obj.getBounds() : { 
+            x: obj.x, 
+            y: obj.y, 
+            width: obj.width || 1, 
+            height: obj.height || 1 
+        };
+        
+        // Render based on object type
+        const type = obj.type || obj.constructor.name;
+        
+        switch (type) {
+            case 'line':
+            case 'LineObject':
+                this._renderLineOutline(obj, buffer);
+                break;
+                
+            case 'rect':
+            case 'RectObject':
+            case 'rectangle':
+                this._renderRectOutline(bounds, buffer);
+                break;
+                
+            case 'ellipse':
+            case 'EllipseObject':
+            case 'circle':
+                this._renderEllipseOutline(obj, buffer);
+                break;
+                
+            case 'path':
+            case 'PathObject':
+            case 'BezierPath':
+                this._renderPathOutline(obj, buffer);
+                break;
+                
+            case 'text':
+            case 'TextObject':
+                this._renderTextOutline(obj, buffer);
+                break;
+                
+            case 'frame':
+            case 'FrameObject':
+            case 'group':
+            case 'GroupObject':
+                this._renderFrameOutline(obj, buffer);
+                break;
+                
+            case 'process':
+            case 'ProcessShape':
+            case 'terminal':
+            case 'TerminalShape':
+            case 'decision':
+            case 'DecisionShape':
+            case 'data':
+            case 'DataShape':
+            case 'connector':
+            case 'ConnectorObject':
+                this._renderFlowchartOutline(obj, buffer);
+                break;
+                
+            default:
+                // Fallback: render bounding box outline
+                this._renderRectOutline(bounds, buffer);
+        }
+    }
+    
+    _renderLineOutline(obj, buffer) {
+        // Draw line using outline character
+        const x1 = Math.round(obj.x1 ?? obj.x);
+        const y1 = Math.round(obj.y1 ?? obj.y);
+        const x2 = Math.round(obj.x2 ?? (obj.x + (obj.width || 1)));
+        const y2 = Math.round(obj.y2 ?? (obj.y + (obj.height || 1)));
+        
+        // Bresenham's line algorithm
+        const dx = Math.abs(x2 - x1);
+        const dy = Math.abs(y2 - y1);
+        const sx = x1 < x2 ? 1 : -1;
+        const sy = y1 < y2 ? 1 : -1;
+        let err = dx - dy;
+        let x = x1, y = y1;
+        
+        while (true) {
+            buffer.setChar(x, y, '─', this.outlineColor);
+            if (x === x2 && y === y2) break;
+            const e2 = 2 * err;
+            if (e2 > -dy) { err -= dy; x += sx; }
+            if (e2 < dx) { err += dx; y += sy; }
+        }
+    }
+    
+    _renderRectOutline(bounds, buffer) {
+        const x = Math.round(bounds.x);
+        const y = Math.round(bounds.y);
+        const w = Math.max(1, Math.round(bounds.width));
+        const h = Math.max(1, Math.round(bounds.height));
+        
+        // Draw corners
+        buffer.setChar(x, y, '┌', this.outlineColor);
+        buffer.setChar(x + w - 1, y, '┐', this.outlineColor);
+        buffer.setChar(x, y + h - 1, '└', this.outlineColor);
+        buffer.setChar(x + w - 1, y + h - 1, '┘', this.outlineColor);
+        
+        // Top and bottom edges
+        for (let i = 1; i < w - 1; i++) {
+            buffer.setChar(x + i, y, '─', this.outlineColor);
+            buffer.setChar(x + i, y + h - 1, '─', this.outlineColor);
+        }
+        
+        // Left and right edges
+        for (let j = 1; j < h - 1; j++) {
+            buffer.setChar(x, y + j, '│', this.outlineColor);
+            buffer.setChar(x + w - 1, y + j, '│', this.outlineColor);
+        }
+    }
+    
+    _renderEllipseOutline(obj, buffer) {
+        const cx = Math.round(obj.x + (obj.width || obj.radiusX * 2) / 2);
+        const cy = Math.round(obj.y + (obj.height || obj.radiusY * 2) / 2);
+        const rx = Math.max(1, Math.round((obj.width || obj.radiusX * 2) / 2));
+        const ry = Math.max(1, Math.round((obj.height || obj.radiusY * 2) / 2));
+        
+        // Midpoint ellipse algorithm
+        let x = 0, y = ry;
+        let p1 = ry * ry - rx * rx * ry + 0.25 * rx * rx;
+        
+        // Region 1
+        while (ry * ry * x < rx * rx * y) {
+            this._plotEllipsePoints(buffer, cx, cy, x, y);
+            x++;
+            if (p1 < 0) {
+                p1 += 2 * ry * ry * x + ry * ry;
+            } else {
+                y--;
+                p1 += 2 * ry * ry * x - 2 * rx * rx * y + ry * ry;
+            }
+        }
+        
+        // Region 2
+        let p2 = ry * ry * (x + 0.5) * (x + 0.5) + rx * rx * (y - 1) * (y - 1) - rx * rx * ry * ry;
+        while (y >= 0) {
+            this._plotEllipsePoints(buffer, cx, cy, x, y);
+            y--;
+            if (p2 > 0) {
+                p2 -= 2 * rx * rx * y + rx * rx;
+            } else {
+                x++;
+                p2 += 2 * ry * ry * x - 2 * rx * rx * y + rx * rx;
+            }
+        }
+    }
+    
+    _plotEllipsePoints(buffer, cx, cy, x, y) {
+        const char = '○';
+        buffer.setChar(cx + x, cy + y, char, this.outlineColor);
+        buffer.setChar(cx - x, cy + y, char, this.outlineColor);
+        buffer.setChar(cx + x, cy - y, char, this.outlineColor);
+        buffer.setChar(cx - x, cy - y, char, this.outlineColor);
+    }
+    
+    _renderPathOutline(obj, buffer) {
+        // Get path points and draw them
+        if (obj.points && obj.points.length > 1) {
+            for (let i = 0; i < obj.points.length - 1; i++) {
+                const p1 = obj.points[i];
+                const p2 = obj.points[i + 1];
+                this._drawLineSegment(buffer, p1.x, p1.y, p2.x, p2.y);
+            }
+            // Close path if needed
+            if (obj.closed && obj.points.length > 2) {
+                const first = obj.points[0];
+                const last = obj.points[obj.points.length - 1];
+                this._drawLineSegment(buffer, last.x, last.y, first.x, first.y);
+            }
+        } else {
+            // Fallback to bounding box
+            const bounds = obj.getBounds();
+            this._renderRectOutline(bounds, buffer);
+        }
+    }
+    
+    _drawLineSegment(buffer, x1, y1, x2, y2) {
+        x1 = Math.round(x1); y1 = Math.round(y1);
+        x2 = Math.round(x2); y2 = Math.round(y2);
+        
+        const dx = Math.abs(x2 - x1);
+        const dy = Math.abs(y2 - y1);
+        const sx = x1 < x2 ? 1 : -1;
+        const sy = y1 < y2 ? 1 : -1;
+        let err = dx - dy;
+        
+        let x = x1, y = y1;
+        while (true) {
+            // Choose character based on direction
+            let char = '·';
+            if (dx > dy * 2) char = '─';
+            else if (dy > dx * 2) char = '│';
+            else char = (sx === sy) ? '╲' : '╱';
+            
+            buffer.setChar(x, y, char, this.outlineColor);
+            if (x === x2 && y === y2) break;
+            const e2 = 2 * err;
+            if (e2 > -dy) { err -= dy; x += sx; }
+            if (e2 < dx) { err += dx; y += sy; }
+        }
+    }
+    
+    _renderTextOutline(obj, buffer) {
+        // Draw text bounding box
+        const bounds = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y, width: obj.text?.length || 1, height: 1 };
+        this._renderRectOutline(bounds, buffer);
+        
+        // Also draw text baseline indicator
+        const text = obj.text || '';
+        for (let i = 0; i < text.length; i++) {
+            buffer.setChar(obj.x + i, obj.y, '▁', this.outlineColor);
+        }
+    }
+    
+    _renderFrameOutline(obj, buffer) {
+        const bounds = obj.getBounds();
+        this._renderRectOutline(bounds, buffer);
+        
+        // Draw frame name if present
+        if (obj.name || obj.title) {
+            const name = (obj.name || obj.title).substring(0, bounds.width - 2);
+            for (let i = 0; i < name.length; i++) {
+                buffer.setChar(bounds.x + 1 + i, bounds.y - 1, name[i], this.outlineColor);
+            }
+        }
+    }
+    
+    _renderFlowchartOutline(obj, buffer) {
+        const bounds = obj.getBounds();
+        const type = obj.type;
+        
+        if (type === 'decision' || type === 'DecisionShape') {
+            // Diamond outline
+            const cx = bounds.x + Math.floor(bounds.width / 2);
+            const cy = bounds.y + Math.floor(bounds.height / 2);
+            const rx = Math.floor(bounds.width / 2);
+            const ry = Math.floor(bounds.height / 2);
+            
+            // Draw diamond shape
+            for (let i = 0; i <= rx; i++) {
+                const yOff = Math.round(ry * (1 - i / rx));
+                buffer.setChar(cx - i, cy - yOff, '◇', this.outlineColor);
+                buffer.setChar(cx + i, cy - yOff, '◇', this.outlineColor);
+                buffer.setChar(cx - i, cy + yOff, '◇', this.outlineColor);
+                buffer.setChar(cx + i, cy + yOff, '◇', this.outlineColor);
+            }
+        } else if (type === 'connector' || type === 'ConnectorObject') {
+            // Draw connector line
+            this._renderLineOutline(obj, buffer);
+            // Draw arrow head
+            if (obj.endArrow) {
+                const x2 = obj.x2 ?? (obj.x + obj.width);
+                const y2 = obj.y2 ?? (obj.y + obj.height);
+                buffer.setChar(Math.round(x2), Math.round(y2), '▶', this.outlineColor);
+            }
+        } else {
+            // Default: rectangle outline
+            this._renderRectOutline(bounds, buffer);
+        }
+    }
+}
+
+/**
+ * Shape Render Mode
+ * Renders objects using HTML5 Canvas for true vector graphics
+ * Draws actual shapes (rectangles, circles, lines) instead of ASCII
+ */
+class ShapeRenderMode extends RenderMode {
+    constructor() {
+        super('shape', 'Shape');
+        this.description = 'True vector graphics rendering with Canvas';
+        this.canvas = null;
+        this.ctx = null;
+        this.charWidth = 8.4;
+        this.charHeight = 14;
+        this.paddingLeft = 16;
+        this.paddingTop = 16;
+        
+        // Rendering settings
+        this.cornerRadius = 3;
+        this.strokeWidth = 2;
+        this.shadowBlur = 4;
+        this.shadowColor = 'rgba(0,0,0,0.15)';
+    }
+    
+    /**
+     * Initialize canvas on first use
+     */
+    _initCanvas() {
+        if (this.canvas) return;
+        
+        this.canvas = document.getElementById('vector-canvas');
+        if (!this.canvas) {
+            // Create canvas if it doesn't exist
+            const wrapper = document.getElementById('canvas-wrapper');
+            if (wrapper) {
+                this.canvas = document.createElement('canvas');
+                this.canvas.id = 'vector-canvas';
+                this.canvas.className = 'vector-canvas';
+                wrapper.appendChild(this.canvas);
+            }
+        }
+        
+        if (this.canvas) {
+            this.ctx = this.canvas.getContext('2d');
+        }
+    }
+    
+    /**
+     * Update canvas dimensions to match ASCII canvas exactly
+     */
+    _updateCanvasDimensions() {
+        if (!this.canvas) return;
+        
+        const asciiCanvas = document.getElementById('ascii-canvas');
+        if (asciiCanvas) {
+            const cs = getComputedStyle(asciiCanvas);
+            this.paddingLeft = parseFloat(cs.paddingLeft) || 16;
+            this.paddingTop = parseFloat(cs.paddingTop) || 16;
+            
+            // Get font size (zoomed)
+            const fontSize = parseFloat(cs.fontSize) || 14;
+            this.charHeight = fontSize;
+            
+            // Measure character width at current zoom level
+            const measure = document.createElement('span');
+            measure.style.cssText = `position:absolute;visibility:hidden;font-family:${cs.fontFamily};font-size:${fontSize}px;white-space:pre;`;
+            measure.textContent = 'X';
+            document.body.appendChild(measure);
+            this.charWidth = measure.getBoundingClientRect().width || (fontSize * 0.6);
+            document.body.removeChild(measure);
+            
+            // Get the actual ASCII canvas size (offsetWidth/Height gives actual element size,
+            // not the visually transformed size from getBoundingClientRect)
+            const canvasWidth = asciiCanvas.offsetWidth;
+            const canvasHeight = asciiCanvas.offsetHeight;
+            
+            // Use device pixel ratio for crisp rendering
+            const dpr = window.devicePixelRatio || 1;
+            
+            // Match canvas size to ASCII canvas element exactly
+            this.canvas.width = canvasWidth * dpr;
+            this.canvas.height = canvasHeight * dpr;
+            this.canvas.style.width = canvasWidth + 'px';
+            this.canvas.style.height = canvasHeight + 'px';
+            
+            // Reset transform and apply dpr scale
+            this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+    }
+    
+    /**
+     * Convert character coordinates to pixel coordinates
+     */
+    _charToPixel(charX, charY) {
+        return {
+            x: this.paddingLeft + charX * this.charWidth,
+            y: this.paddingTop + charY * this.charHeight
+        };
+    }
+    
+    /**
+     * Parse color string to canvas-compatible format
+     */
+    _parseColor(color, defaultColor = '#888888') {
+        if (!color) return defaultColor;
+        if (typeof color === 'string') return color;
+        return defaultColor;
+    }
+    
+    /**
+     * Pre-render: Clear canvas and show it
+     */
+    preRender(buffer) {
+        this._initCanvas();
+        if (this.canvas) {
+            this.canvas.classList.add('active');
+            this._updateCanvasDimensions();
+            
+            if (this.ctx) {
+                // Clear with transparent background (ASCII still shows through)
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                
+                // Draw a subtle background for the canvas area
+                this.ctx.fillStyle = 'rgba(30, 30, 35, 0.95)';
+                const contentWidth = AppState.canvasWidth * this.charWidth;
+                const contentHeight = AppState.canvasHeight * this.charHeight;
+                this.ctx.fillRect(this.paddingLeft, this.paddingTop, contentWidth, contentHeight);
+            }
+        }
+    }
+    
+    /**
+     * Post-render: Render preview objects, selection indicators, guides, and snap guides on canvas
+     */
+    postRender(buffer) {
+        if (!this.ctx) return;
+        this._renderPreviewObjects();
+        this._renderUserGuides();
+        this._renderSnapGuides();
+        this._renderSelectionIndicators();
+    }
+    
+    /**
+     * Render preview objects (for tool previews in canvas mode)
+     */
+    _renderPreviewObjects() {
+        const renderer = window.Asciistrator?.app?.renderer;
+        if (!renderer) return;
+        
+        const previewObjects = renderer.getPreviewObjects();
+        if (!previewObjects || previewObjects.length === 0) return;
+        
+        // Save context state
+        this.ctx.save();
+        
+        // Apply a slight transparency to indicate preview state
+        this.ctx.globalAlpha = 0.7;
+        
+        for (const obj of previewObjects) {
+            this.renderObject(obj, null, { isPreview: true });
+        }
+        
+        // Restore context
+        this.ctx.restore();
+    }
+    
+    /**
+     * Render user-created guides on canvas
+     */
+    _renderUserGuides() {
+        if (!AppState.guides || AppState.guides.length === 0) return;
+        
+        const guideColor = '#f24822';  // Red-orange like Figma
+        
+        for (const guide of AppState.guides) {
+            if (!guide.visible) continue;
+            
+            this.ctx.strokeStyle = guideColor;
+            this.ctx.lineWidth = 1;
+            this.ctx.setLineDash([4, 4]);
+            
+            if (guide.axis === 'vertical') {
+                const x = this.paddingLeft + guide.position * this.charWidth + this.charWidth / 2;
+                this.ctx.beginPath();
+                this.ctx.moveTo(x, 0);
+                this.ctx.lineTo(x, this.canvas.height);
+                this.ctx.stroke();
+            } else {
+                const y = this.paddingTop + guide.position * this.charHeight + this.charHeight / 2;
+                this.ctx.beginPath();
+                this.ctx.moveTo(0, y);
+                this.ctx.lineTo(this.canvas.width, y);
+                this.ctx.stroke();
+            }
+            
+            this.ctx.setLineDash([]);
+        }
+    }
+    
+    /**
+     * Render smart snap guides on canvas during move/resize
+     */
+    _renderSnapGuides() {
+        // Access the current snap result from the select tool via global app
+        const selectTool = window.Asciistrator?.app?.toolManager?.tools?.get('select');
+        if (!selectTool?.lastSnapResult || !AppState.smartGuides?.enabled) return;
+        
+        const snapResult = selectTool.lastSnapResult;
+        
+        // Render guide lines
+        if (AppState.smartGuides.showGuides && snapResult.guides) {
+            for (const guide of snapResult.guides) {
+                // Color based on guide type
+                let color;
+                if (guide.type === 'user-guide') {
+                    color = '#f24822';  // Red-orange for user guides
+                } else if (guide.type === 'center') {
+                    color = '#ff00ff';  // Magenta for center guides
+                } else {
+                    color = '#00ffff';  // Cyan for alignment guides
+                }
+                
+                this.ctx.strokeStyle = color;
+                this.ctx.lineWidth = 1;
+                this.ctx.setLineDash([]);
+                
+                if (guide.axis === 'vertical') {
+                    const x = this.paddingLeft + guide.position * this.charWidth + this.charWidth / 2;
+                    const startY = this.paddingTop + guide.start * this.charHeight;
+                    const endY = this.paddingTop + (guide.end + 1) * this.charHeight;
+                    
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(x, startY);
+                    this.ctx.lineTo(x, endY);
+                    this.ctx.stroke();
+                    
+                    // Draw end markers
+                    this._drawGuideMarker(x, startY, 'down');
+                    this._drawGuideMarker(x, endY, 'up');
+                } else {
+                    const y = this.paddingTop + guide.position * this.charHeight + this.charHeight / 2;
+                    const startX = this.paddingLeft + guide.start * this.charWidth;
+                    const endX = this.paddingLeft + (guide.end + 1) * this.charWidth;
+                    
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(startX, y);
+                    this.ctx.lineTo(endX, y);
+                    this.ctx.stroke();
+                    
+                    // Draw end markers
+                    this._drawGuideMarker(startX, y, 'right');
+                    this._drawGuideMarker(endX, y, 'left');
+                }
+            }
+        }
+        
+        // Render distance indicators
+        if (AppState.smartGuides.showDistances && snapResult.distances) {
+            const distColor = '#ff9500';  // Orange for distances
+            
+            for (const dist of snapResult.distances) {
+                this.ctx.strokeStyle = distColor;
+                this.ctx.fillStyle = distColor;
+                this.ctx.lineWidth = 1;
+                this.ctx.setLineDash([2, 2]);
+                
+                if (dist.axis === 'horizontal') {
+                    const y = this.paddingTop + dist.y1 * this.charHeight + this.charHeight / 2;
+                    const x1 = this.paddingLeft + dist.x1 * this.charWidth;
+                    const x2 = this.paddingLeft + dist.x2 * this.charWidth;
+                    
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(x1, y);
+                    this.ctx.lineTo(x2, y);
+                    this.ctx.stroke();
+                    
+                    // Draw distance label
+                    const midX = (x1 + x2) / 2;
+                    this._drawDistanceLabel(midX, y - 10, dist.distance.toString());
+                } else {
+                    const x = this.paddingLeft + dist.x1 * this.charWidth + this.charWidth / 2;
+                    const y1 = this.paddingTop + dist.y1 * this.charHeight;
+                    const y2 = this.paddingTop + dist.y2 * this.charHeight;
+                    
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(x, y1);
+                    this.ctx.lineTo(x, y2);
+                    this.ctx.stroke();
+                    
+                    // Draw distance label
+                    const midY = (y1 + y2) / 2;
+                    this._drawDistanceLabel(x + 8, midY, dist.distance.toString());
+                }
+                
+                this.ctx.setLineDash([]);
+            }
+        }
+    }
+    
+    /**
+     * Draw a guide end marker
+     */
+    _drawGuideMarker(x, y, direction) {
+        const size = 4;
+        this.ctx.beginPath();
+        
+        switch (direction) {
+            case 'up':
+                this.ctx.moveTo(x - size, y);
+                this.ctx.lineTo(x, y - size);
+                this.ctx.lineTo(x + size, y);
+                break;
+            case 'down':
+                this.ctx.moveTo(x - size, y);
+                this.ctx.lineTo(x, y + size);
+                this.ctx.lineTo(x + size, y);
+                break;
+            case 'left':
+                this.ctx.moveTo(x, y - size);
+                this.ctx.lineTo(x - size, y);
+                this.ctx.lineTo(x, y + size);
+                break;
+            case 'right':
+                this.ctx.moveTo(x, y - size);
+                this.ctx.lineTo(x + size, y);
+                this.ctx.lineTo(x, y + size);
+                break;
+        }
+        
+        this.ctx.stroke();
+    }
+    
+    /**
+     * Draw a distance label with background
+     */
+    _drawDistanceLabel(x, y, text) {
+        this.ctx.font = `${this.charHeight * 0.7}px system-ui, -apple-system, sans-serif`;
+        const metrics = this.ctx.measureText(text);
+        const padding = 3;
+        
+        // Draw background
+        this.ctx.fillStyle = 'rgba(40, 40, 50, 0.9)';
+        this.ctx.fillRect(
+            x - metrics.width / 2 - padding,
+            y - this.charHeight * 0.35 - padding,
+            metrics.width + padding * 2,
+            this.charHeight * 0.7 + padding * 2
+        );
+        
+        // Draw text
+        this.ctx.fillStyle = '#ff9500';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText(text, x, y);
+    }
+    
+    /**
+     * Render selection indicators in Figma style
+     */
+    _renderSelectionIndicators() {
+        if (AppState.selectedObjects.length === 0) return;
+        
+        const selColor = '#0d99ff';  // Figma blue
+        const handleColor = '#ffffff';
+        const handleSize = 8;
+        
+        for (const obj of AppState.selectedObjects) {
+            const bounds = obj.getBounds();
+            const pos = this._charToPixel(bounds.x, bounds.y);
+            const w = bounds.width * this.charWidth;
+            const h = bounds.height * this.charHeight;
+            
+            // Draw selection rectangle
+            this.ctx.strokeStyle = selColor;
+            this.ctx.lineWidth = 2;
+            this.ctx.setLineDash([]);
+            this.ctx.strokeRect(pos.x - 1, pos.y - 1, w + 2, h + 2);
+            
+            // Draw resize handles
+            const handles = [
+                { x: pos.x - handleSize/2, y: pos.y - handleSize/2 },              // NW
+                { x: pos.x + w/2 - handleSize/2, y: pos.y - handleSize/2 },        // N
+                { x: pos.x + w - handleSize/2, y: pos.y - handleSize/2 },          // NE
+                { x: pos.x + w - handleSize/2, y: pos.y + h/2 - handleSize/2 },    // E
+                { x: pos.x + w - handleSize/2, y: pos.y + h - handleSize/2 },      // SE
+                { x: pos.x + w/2 - handleSize/2, y: pos.y + h - handleSize/2 },    // S
+                { x: pos.x - handleSize/2, y: pos.y + h - handleSize/2 },          // SW
+                { x: pos.x - handleSize/2, y: pos.y + h/2 - handleSize/2 },        // W
+            ];
+            
+            for (const handle of handles) {
+                // Handle background
+                this.ctx.fillStyle = handleColor;
+                this.ctx.fillRect(handle.x, handle.y, handleSize, handleSize);
+                // Handle border
+                this.ctx.strokeStyle = selColor;
+                this.ctx.lineWidth = 1;
+                this.ctx.strokeRect(handle.x, handle.y, handleSize, handleSize);
+            }
+        }
+        
+        // Draw multi-selection bounding box if multiple objects selected
+        if (AppState.selectedObjects.length > 1) {
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (const obj of AppState.selectedObjects) {
+                const bounds = obj.getBounds();
+                const pos = this._charToPixel(bounds.x, bounds.y);
+                const w = bounds.width * this.charWidth;
+                const h = bounds.height * this.charHeight;
+                minX = Math.min(minX, pos.x);
+                minY = Math.min(minY, pos.y);
+                maxX = Math.max(maxX, pos.x + w);
+                maxY = Math.max(maxY, pos.y + h);
+            }
+            
+            // Dashed outer bounding box
+            this.ctx.strokeStyle = selColor;
+            this.ctx.lineWidth = 1;
+            this.ctx.setLineDash([4, 4]);
+            this.ctx.strokeRect(minX - 4, minY - 4, maxX - minX + 8, maxY - minY + 8);
+            this.ctx.setLineDash([]);
+        }
+    }
+    
+    /**
+     * Render object using canvas
+     */
+    renderObject(obj, buffer, options = {}) {
+        if (!obj.visible || !this.ctx) return;
+        
+        const bounds = obj.getBounds ? obj.getBounds() : { 
+            x: obj.x, 
+            y: obj.y, 
+            width: obj.width || 1, 
+            height: obj.height || 1 
+        };
+        
+        const type = obj.type || obj.constructor.name;
+        const fillColor = this._parseColor(obj.fillColor || obj.backgroundColor, '#3d3d4a');
+        const strokeColor = this._parseColor(obj.strokeColor, '#6b6b7a');
+        
+        // Save context state
+        this.ctx.save();
+        
+        // Apply shadow for depth
+        this.ctx.shadowBlur = this.shadowBlur;
+        this.ctx.shadowColor = this.shadowColor;
+        this.ctx.shadowOffsetX = 1;
+        this.ctx.shadowOffsetY = 1;
+        
+        switch (type) {
+            case 'rect':
+            case 'RectObject':
+            case 'rectangle':
+                this._renderRect(bounds, fillColor, strokeColor);
+                break;
+                
+            case 'frame':
+            case 'FrameObject':
+                this._renderFrame(obj, bounds, fillColor, strokeColor);
+                break;
+                
+            case 'ellipse':
+            case 'EllipseObject':
+            case 'circle':
+                this._renderEllipse(obj, fillColor, strokeColor);
+                break;
+                
+            case 'line':
+            case 'LineObject':
+                this._renderLine(obj, strokeColor);
+                break;
+                
+            case 'text':
+            case 'TextObject':
+            case 'ascii-text':
+            case 'AsciiTextObject':
+                this._renderText(obj);
+                break;
+                
+            case 'path':
+            case 'PathObject':
+                this._renderPath(obj, fillColor, strokeColor);
+                break;
+                
+            case 'polygon':
+            case 'PolygonObject':
+                this._renderPolygon(obj, fillColor, strokeColor);
+                break;
+                
+            case 'star':
+            case 'StarObject':
+                this._renderStar(obj, fillColor, strokeColor);
+                break;
+                
+            case 'group':
+            case 'GroupObject':
+                // Groups are handled by recursive rendering
+                break;
+                
+            case 'process':
+            case 'ProcessShape':
+                this._renderRect(bounds, fillColor, strokeColor);
+                this._renderTextCentered(obj.label, bounds, strokeColor);
+                break;
+                
+            case 'decision':
+            case 'DecisionShape':
+                this._renderDiamond(bounds, fillColor, strokeColor);
+                this._renderTextCentered(obj.label, bounds, strokeColor);
+                break;
+                
+            case 'terminal':
+            case 'TerminalShape':
+                this._renderRoundedRect(bounds, Math.min(bounds.width, bounds.height) * this.charWidth / 2, fillColor, strokeColor);
+                this._renderTextCentered(obj.label, bounds, strokeColor);
+                break;
+                
+            case 'connector':
+            case 'ConnectorObject':
+                this._renderConnector(obj, strokeColor);
+                break;
+                
+            default:
+                // Fallback: draw as rectangle
+                this._renderRect(bounds, fillColor, strokeColor);
+        }
+        
+        // Restore context
+        this.ctx.restore();
+    }
+    
+    /**
+     * Render rectangle
+     */
+    _renderRect(bounds, fillColor, strokeColor) {
+        const pos = this._charToPixel(bounds.x, bounds.y);
+        const w = bounds.width * this.charWidth;
+        const h = bounds.height * this.charHeight;
+        
+        // Fill
+        this.ctx.fillStyle = fillColor;
+        this.ctx.beginPath();
+        this._roundRect(pos.x, pos.y, w, h, this.cornerRadius);
+        this.ctx.fill();
+        
+        // Stroke
+        this.ctx.strokeStyle = strokeColor;
+        this.ctx.lineWidth = this.strokeWidth;
+        this.ctx.stroke();
+    }
+    
+    /**
+     * Render rounded rectangle path
+     */
+    _roundRect(x, y, w, h, r) {
+        if (w < 2 * r) r = w / 2;
+        if (h < 2 * r) r = h / 2;
+        this.ctx.moveTo(x + r, y);
+        this.ctx.arcTo(x + w, y, x + w, y + h, r);
+        this.ctx.arcTo(x + w, y + h, x, y + h, r);
+        this.ctx.arcTo(x, y + h, x, y, r);
+        this.ctx.arcTo(x, y, x + w, y, r);
+        this.ctx.closePath();
+    }
+    
+    /**
+     * Render rounded rectangle with custom radius
+     */
+    _renderRoundedRect(bounds, radius, fillColor, strokeColor) {
+        const pos = this._charToPixel(bounds.x, bounds.y);
+        const w = bounds.width * this.charWidth;
+        const h = bounds.height * this.charHeight;
+        
+        this.ctx.fillStyle = fillColor;
+        this.ctx.beginPath();
+        this._roundRect(pos.x, pos.y, w, h, radius);
+        this.ctx.fill();
+        
+        this.ctx.strokeStyle = strokeColor;
+        this.ctx.lineWidth = this.strokeWidth;
+        this.ctx.stroke();
+    }
+    
+    /**
+     * Render frame with title
+     */
+    _renderFrame(obj, bounds, fillColor, strokeColor) {
+        const pos = this._charToPixel(bounds.x, bounds.y);
+        const w = bounds.width * this.charWidth;
+        const h = bounds.height * this.charHeight;
+        
+        // Draw frame background
+        this.ctx.fillStyle = fillColor;
+        this.ctx.beginPath();
+        this._roundRect(pos.x, pos.y, w, h, this.cornerRadius);
+        this.ctx.fill();
+        
+        // Draw frame border
+        this.ctx.strokeStyle = strokeColor;
+        this.ctx.lineWidth = this.strokeWidth;
+        this.ctx.stroke();
+        
+        // Draw title if present
+        if (obj.title || obj.name) {
+            const title = obj.title || obj.name;
+            this.ctx.font = `bold ${this.charHeight * 0.8}px system-ui, -apple-system, sans-serif`;
+            this.ctx.fillStyle = strokeColor;
+            this.ctx.fillText(title, pos.x + 4, pos.y - 4);
+        }
+    }
+    
+    /**
+     * Render ellipse/circle
+     */
+    _renderEllipse(obj, fillColor, strokeColor) {
+        const cx = obj.x + (obj.width || obj.radiusX * 2) / 2;
+        const cy = obj.y + (obj.height || obj.radiusY * 2) / 2;
+        const rx = (obj.width || obj.radiusX * 2) / 2;
+        const ry = (obj.height || obj.radiusY * 2) / 2;
+        
+        const center = this._charToPixel(cx, cy);
+        const radiusX = rx * this.charWidth;
+        const radiusY = ry * this.charHeight;
+        
+        this.ctx.fillStyle = fillColor;
+        this.ctx.beginPath();
+        this.ctx.ellipse(center.x, center.y, radiusX, radiusY, 0, 0, Math.PI * 2);
+        this.ctx.fill();
+        
+        this.ctx.strokeStyle = strokeColor;
+        this.ctx.lineWidth = this.strokeWidth;
+        this.ctx.stroke();
+    }
+    
+    /**
+     * Render line
+     */
+    _renderLine(obj, strokeColor) {
+        const x1 = obj.x1 ?? obj.x;
+        const y1 = obj.y1 ?? obj.y;
+        const x2 = obj.x2 ?? (obj.x + (obj.width || 1));
+        const y2 = obj.y2 ?? (obj.y + (obj.height || 1));
+        
+        const start = this._charToPixel(x1, y1);
+        const end = this._charToPixel(x2, y2);
+        
+        this.ctx.strokeStyle = strokeColor;
+        this.ctx.lineWidth = this.strokeWidth;
+        this.ctx.lineCap = 'round';
+        
+        this.ctx.beginPath();
+        this.ctx.moveTo(start.x + this.charWidth / 2, start.y + this.charHeight / 2);
+        this.ctx.lineTo(end.x + this.charWidth / 2, end.y + this.charHeight / 2);
+        this.ctx.stroke();
+    }
+    
+    /**
+     * Render text
+     */
+    _renderText(obj) {
+        const text = obj.text || '';
+        const lines = text.split('\n');
+        const color = this._parseColor(obj.color || obj.strokeColor, '#e0e0e0');
+        
+        this.ctx.font = `${this.charHeight}px "JetBrains Mono", "Fira Code", monospace`;
+        this.ctx.fillStyle = color;
+        this.ctx.textBaseline = 'top';
+        
+        for (let i = 0; i < lines.length; i++) {
+            const pos = this._charToPixel(obj.x, obj.y + i);
+            this.ctx.fillText(lines[i], pos.x, pos.y);
+        }
+    }
+    
+    /**
+     * Render centered text (for flowchart shapes)
+     */
+    _renderTextCentered(text, bounds, color) {
+        if (!text) return;
+        
+        const cx = bounds.x + bounds.width / 2;
+        const cy = bounds.y + bounds.height / 2;
+        const center = this._charToPixel(cx, cy);
+        
+        this.ctx.font = `${this.charHeight * 0.9}px "JetBrains Mono", "Fira Code", monospace`;
+        this.ctx.fillStyle = color;
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText(text, center.x, center.y);
+        this.ctx.textAlign = 'left';
+    }
+    
+    /**
+     * Render diamond shape (for decision flowchart)
+     */
+    _renderDiamond(bounds, fillColor, strokeColor) {
+        const pos = this._charToPixel(bounds.x, bounds.y);
+        const w = bounds.width * this.charWidth;
+        const h = bounds.height * this.charHeight;
+        const cx = pos.x + w / 2;
+        const cy = pos.y + h / 2;
+        
+        this.ctx.fillStyle = fillColor;
+        this.ctx.beginPath();
+        this.ctx.moveTo(cx, pos.y);           // Top
+        this.ctx.lineTo(pos.x + w, cy);       // Right
+        this.ctx.lineTo(cx, pos.y + h);       // Bottom
+        this.ctx.lineTo(pos.x, cy);           // Left
+        this.ctx.closePath();
+        this.ctx.fill();
+        
+        this.ctx.strokeStyle = strokeColor;
+        this.ctx.lineWidth = this.strokeWidth;
+        this.ctx.stroke();
+    }
+    
+    /**
+     * Render path
+     */
+    _renderPath(obj, fillColor, strokeColor) {
+        if (!obj.points || obj.points.length < 2) return;
+        
+        this.ctx.strokeStyle = strokeColor;
+        this.ctx.lineWidth = this.strokeWidth;
+        this.ctx.lineCap = 'round';
+        this.ctx.lineJoin = 'round';
+        
+        this.ctx.beginPath();
+        const first = this._charToPixel(obj.points[0].x, obj.points[0].y);
+        this.ctx.moveTo(first.x + this.charWidth / 2, first.y + this.charHeight / 2);
+        
+        for (let i = 1; i < obj.points.length; i++) {
+            const pt = this._charToPixel(obj.points[i].x, obj.points[i].y);
+            this.ctx.lineTo(pt.x + this.charWidth / 2, pt.y + this.charHeight / 2);
+        }
+        
+        if (obj.closed) {
+            this.ctx.closePath();
+            this.ctx.fillStyle = fillColor;
+            this.ctx.fill();
+        }
+        
+        this.ctx.stroke();
+    }
+    
+    /**
+     * Render polygon
+     */
+    _renderPolygon(obj, fillColor, strokeColor) {
+        const cx = obj.cx || obj.x;
+        const cy = obj.cy || obj.y;
+        const radius = obj.radius || Math.min(obj.width, obj.height) / 2;
+        const sides = obj.sides || 6;
+        
+        const center = this._charToPixel(cx, cy);
+        const radiusX = radius * this.charWidth;
+        const radiusY = radius * this.charHeight;
+        
+        this.ctx.beginPath();
+        for (let i = 0; i < sides; i++) {
+            const angle = (i / sides) * Math.PI * 2 - Math.PI / 2;
+            const x = center.x + radiusX * Math.cos(angle);
+            const y = center.y + radiusY * Math.sin(angle);
+            if (i === 0) {
+                this.ctx.moveTo(x, y);
+            } else {
+                this.ctx.lineTo(x, y);
+            }
+        }
+        this.ctx.closePath();
+        
+        this.ctx.fillStyle = fillColor;
+        this.ctx.fill();
+        
+        this.ctx.strokeStyle = strokeColor;
+        this.ctx.lineWidth = this.strokeWidth;
+        this.ctx.stroke();
+    }
+    
+    /**
+     * Render star
+     */
+    _renderStar(obj, fillColor, strokeColor) {
+        const cx = obj.cx || obj.x;
+        const cy = obj.cy || obj.y;
+        const outerRadius = obj.outerRadius || obj.radius || 5;
+        const innerRatio = obj.innerRatio || 0.5;
+        const points = obj.numPoints || obj.points || 5;
+        
+        const center = this._charToPixel(cx, cy);
+        const outerRX = outerRadius * this.charWidth;
+        const outerRY = outerRadius * this.charHeight;
+        const innerRX = outerRX * innerRatio;
+        const innerRY = outerRY * innerRatio;
+        
+        this.ctx.beginPath();
+        for (let i = 0; i < points * 2; i++) {
+            const angle = (i / (points * 2)) * Math.PI * 2 - Math.PI / 2;
+            const r = i % 2 === 0 ? 1 : innerRatio;
+            const x = center.x + outerRX * r * Math.cos(angle);
+            const y = center.y + outerRY * r * Math.sin(angle);
+            if (i === 0) {
+                this.ctx.moveTo(x, y);
+            } else {
+                this.ctx.lineTo(x, y);
+            }
+        }
+        this.ctx.closePath();
+        
+        this.ctx.fillStyle = fillColor;
+        this.ctx.fill();
+        
+        this.ctx.strokeStyle = strokeColor;
+        this.ctx.lineWidth = this.strokeWidth;
+        this.ctx.stroke();
+    }
+    
+    /**
+     * Render connector line with arrow
+     */
+    _renderConnector(obj, strokeColor) {
+        const x1 = obj.x1 ?? obj.x;
+        const y1 = obj.y1 ?? obj.y;
+        const x2 = obj.x2 ?? (obj.x + (obj.width || 1));
+        const y2 = obj.y2 ?? (obj.y + (obj.height || 1));
+        
+        const start = this._charToPixel(x1, y1);
+        const end = this._charToPixel(x2, y2);
+        
+        // Offset to center of character
+        const sx = start.x + this.charWidth / 2;
+        const sy = start.y + this.charHeight / 2;
+        const ex = end.x + this.charWidth / 2;
+        const ey = end.y + this.charHeight / 2;
+        
+        this.ctx.strokeStyle = strokeColor;
+        this.ctx.fillStyle = strokeColor;
+        this.ctx.lineWidth = this.strokeWidth;
+        this.ctx.lineCap = 'round';
+        
+        // Draw line
+        this.ctx.beginPath();
+        this.ctx.moveTo(sx, sy);
+        this.ctx.lineTo(ex, ey);
+        this.ctx.stroke();
+        
+        // Draw arrow head if needed
+        if (obj.endArrow !== false) {
+            const angle = Math.atan2(ey - sy, ex - sx);
+            const arrowSize = 8;
+            
+            this.ctx.beginPath();
+            this.ctx.moveTo(ex, ey);
+            this.ctx.lineTo(
+                ex - arrowSize * Math.cos(angle - Math.PI / 6),
+                ey - arrowSize * Math.sin(angle - Math.PI / 6)
+            );
+            this.ctx.lineTo(
+                ex - arrowSize * Math.cos(angle + Math.PI / 6),
+                ey - arrowSize * Math.sin(angle + Math.PI / 6)
+            );
+            this.ctx.closePath();
+            this.ctx.fill();
+        }
+    }
+}
+
+/**
+ * Scratch/Sketch Render Mode
+ * Hand-drawn style with rough edges and sketch-like appearance
+ */
+class ScratchRenderMode extends RenderMode {
+    constructor() {
+        super('scratch', 'Scratch');
+        this.description = 'Hand-drawn sketch style with rough edges';
+        this.sketchChars = ['~', '-', '_', '=', '+', '*'];
+        this.cornerChars = ['o', '*', '+', 'x'];
+    }
+    
+    renderObject(obj, buffer, options = {}) {
+        if (!obj.visible) return;
+        
+        const bounds = obj.getBounds ? obj.getBounds() : { 
+            x: obj.x, 
+            y: obj.y, 
+            width: obj.width || 1, 
+            height: obj.height || 1 
+        };
+        
+        const type = obj.type || obj.constructor.name;
+        const color = obj.strokeColor || '#888888';
+        
+        switch (type) {
+            case 'line':
+            case 'LineObject':
+                this._renderSketchLine(obj, buffer, color);
+                break;
+                
+            case 'rect':
+            case 'RectObject':
+            case 'rectangle':
+            case 'frame':
+            case 'FrameObject':
+                this._renderSketchRect(bounds, buffer, color);
+                break;
+                
+            case 'ellipse':
+            case 'EllipseObject':
+            case 'circle':
+                this._renderSketchEllipse(obj, buffer, color);
+                break;
+                
+            case 'text':
+            case 'TextObject':
+                // Render text normally but with underline
+                this._renderSketchText(obj, buffer);
+                break;
+                
+            default:
+                // Fallback to sketch rectangle
+                this._renderSketchRect(bounds, buffer, color);
+        }
+    }
+    
+    _getRandomChar(chars) {
+        return chars[Math.floor(Math.random() * chars.length)];
+    }
+    
+    _renderSketchLine(obj, buffer, color) {
+        const x1 = Math.round(obj.x1 ?? obj.x);
+        const y1 = Math.round(obj.y1 ?? obj.y);
+        const x2 = Math.round(obj.x2 ?? (obj.x + (obj.width || 1)));
+        const y2 = Math.round(obj.y2 ?? (obj.y + (obj.height || 1)));
+        
+        const dx = Math.abs(x2 - x1);
+        const dy = Math.abs(y2 - y1);
+        const sx = x1 < x2 ? 1 : -1;
+        const sy = y1 < y2 ? 1 : -1;
+        let err = dx - dy;
+        let x = x1, y = y1;
+        
+        const lineChars = dx > dy ? ['-', '~', '_'] : ['|', ':', '!'];
+        
+        while (true) {
+            buffer.setChar(x, y, this._getRandomChar(lineChars), color);
+            if (x === x2 && y === y2) break;
+            const e2 = 2 * err;
+            if (e2 > -dy) { err -= dy; x += sx; }
+            if (e2 < dx) { err += dx; y += sy; }
+        }
+    }
+    
+    _renderSketchRect(bounds, buffer, color) {
+        const x = Math.round(bounds.x);
+        const y = Math.round(bounds.y);
+        const w = Math.max(1, Math.round(bounds.width));
+        const h = Math.max(1, Math.round(bounds.height));
+        
+        // Sketch corners with random offset potential
+        buffer.setChar(x, y, this._getRandomChar(this.cornerChars), color);
+        buffer.setChar(x + w - 1, y, this._getRandomChar(this.cornerChars), color);
+        buffer.setChar(x, y + h - 1, this._getRandomChar(this.cornerChars), color);
+        buffer.setChar(x + w - 1, y + h - 1, this._getRandomChar(this.cornerChars), color);
+        
+        // Sketch horizontal edges
+        const hChars = ['-', '~', '_', '='];
+        for (let i = 1; i < w - 1; i++) {
+            buffer.setChar(x + i, y, this._getRandomChar(hChars), color);
+            buffer.setChar(x + i, y + h - 1, this._getRandomChar(hChars), color);
+        }
+        
+        // Sketch vertical edges
+        const vChars = ['|', ':', '!', '¦'];
+        for (let j = 1; j < h - 1; j++) {
+            buffer.setChar(x, y + j, this._getRandomChar(vChars), color);
+            buffer.setChar(x + w - 1, y + j, this._getRandomChar(vChars), color);
+        }
+    }
+    
+    _renderSketchEllipse(obj, buffer, color) {
+        const cx = Math.round(obj.x + (obj.width || obj.radiusX * 2) / 2);
+        const cy = Math.round(obj.y + (obj.height || obj.radiusY * 2) / 2);
+        const rx = Math.max(1, Math.round((obj.width || obj.radiusX * 2) / 2));
+        const ry = Math.max(1, Math.round((obj.height || obj.radiusY * 2) / 2));
+        
+        const chars = ['o', 'O', '0', 'c', 'C', '(', ')'];
+        
+        // Draw sketchy ellipse outline
+        for (let angle = 0; angle < 360; angle += 15) {
+            const rad = angle * Math.PI / 180;
+            const x = Math.round(cx + rx * Math.cos(rad));
+            const y = Math.round(cy + ry * Math.sin(rad));
+            buffer.setChar(x, y, this._getRandomChar(chars), color);
+        }
+    }
+    
+    _renderSketchText(obj, buffer) {
+        const text = obj.text || '';
+        const lines = text.split('\n');
+        const color = obj.color || obj.strokeColor || '#888888';
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            for (let j = 0; j < line.length; j++) {
+                buffer.setChar(obj.x + j, obj.y + i, line[j], color);
+            }
+            // Add sketchy underline
+            for (let j = 0; j < line.length; j++) {
+                buffer.setChar(obj.x + j, obj.y + i + 1, this._getRandomChar(['~', '_', '-']), color);
+            }
+        }
+    }
+}
+
+/**
+ * Rough Render Mode (roughjs-style)
+ * Simulates hand-drawn, sketchy graphics with wobble, double-strokes, and imperfect shapes
+ * Inspired by roughjs library but implemented purely in ASCII
+ */
+/**
+ * Rough Render Mode - Hand-drawn style vector rendering
+ * Extends ShapeRenderMode to use the same canvas but adds rough/sketchy effects
+ */
+class RoughRenderMode extends ShapeRenderMode {
+    constructor() {
+        super();
+        this.name = 'rough';
+        this.displayName = 'Rough';
+        this.description = 'Hand-drawn rough style with wobble and hatching';
+        
+        // Roughness settings
+        this.roughness = 1.5;        // Amount of wobble (0-3)
+        this.bowing = 1.0;           // How much lines bow (0-2)
+        this.strokeIterations = 2;   // Number of strokes per line
+        this.fillStyle = 'hachure';  // 'hachure', 'solid', 'zigzag', 'cross-hatch', 'dots'
+        this.hachureGap = 4;         // Gap between hachure lines in pixels
+        this.hachureAngle = -41;     // Angle of hachure lines in degrees
+        
+        // Override parent settings for rough style
+        this.cornerRadius = 0;       // No rounded corners in rough mode
+        this.strokeWidth = 1.5;
+        this.shadowBlur = 0;         // No shadows in rough mode
+        
+        // Seeded random for consistent rendering
+        this._seed = 0;
+    }
+    
+    /**
+     * Simple seeded random number generator for consistent rendering
+     */
+    _seededRandom() {
+        this._seed = (this._seed * 9301 + 49297) % 233280;
+        return this._seed / 233280;
+    }
+    
+    /**
+     * Reset seed for consistent object rendering
+     */
+    _resetSeed(obj) {
+        this._seed = ((obj.x || 0) * 1000 + (obj.y || 0) * 100 + (obj.id ? obj.id.charCodeAt(0) : 0)) % 233280;
+    }
+    
+    /**
+     * Get a random offset based on roughness
+     */
+    _getOffset(range) {
+        return (this._seededRandom() - 0.5) * range * this.roughness;
+    }
+    
+    /**
+     * Pre-render: Clear canvas and show it (override to remove shadow settings)
+     */
+    preRender(buffer) {
+        this._initCanvas();
+        if (this.canvas) {
+            this.canvas.classList.add('active');
+            this._updateCanvasDimensions();
+            
+            if (this.ctx) {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                
+                // Draw background
+                this.ctx.fillStyle = 'rgba(30, 30, 35, 0.95)';
+                const contentWidth = AppState.canvasWidth * this.charWidth;
+                const contentHeight = AppState.canvasHeight * this.charHeight;
+                this.ctx.fillRect(this.paddingLeft, this.paddingTop, contentWidth, contentHeight);
+            }
+        }
+    }
+    
+    /**
+     * Override renderObject to add rough effects
+     */
+    renderObject(obj, buffer, options = {}) {
+        if (!obj.visible || !this.ctx) return;
+        
+        this._resetSeed(obj);
+        
+        const bounds = obj.getBounds ? obj.getBounds() : { 
+            x: obj.x, 
+            y: obj.y, 
+            width: obj.width || 1, 
+            height: obj.height || 1 
+        };
+        
+        const type = obj.type || obj.constructor.name;
+        const fillColor = this._parseColor(obj.fillColor || obj.backgroundColor, null);
+        const strokeColor = this._parseColor(obj.strokeColor, '#6b6b7a');
+        
+        this.ctx.save();
+        this.ctx.lineCap = 'round';
+        this.ctx.lineJoin = 'round';
+        
+        switch (type) {
+            case 'rect':
+            case 'RectObject':
+            case 'rectangle':
+                this._renderRoughRect(bounds, fillColor, strokeColor);
+                break;
+                
+            case 'frame':
+            case 'FrameObject':
+                this._renderRoughFrame(obj, bounds, fillColor, strokeColor);
+                break;
+                
+            case 'ellipse':
+            case 'EllipseObject':
+            case 'circle':
+                this._renderRoughEllipse(obj, fillColor, strokeColor);
+                break;
+                
+            case 'line':
+            case 'LineObject':
+                this._renderRoughLine(obj, strokeColor);
+                break;
+                
+            case 'text':
+            case 'TextObject':
+            case 'ascii-text':
+            case 'AsciiTextObject':
+                this._renderRoughText(obj);
+                break;
+                
+            case 'path':
+            case 'PathObject':
+                this._renderRoughPath(obj, fillColor, strokeColor);
+                break;
+                
+            case 'polygon':
+            case 'PolygonObject':
+                this._renderRoughPolygon(obj, fillColor, strokeColor);
+                break;
+                
+            case 'star':
+            case 'StarObject':
+                this._renderRoughStar(obj, fillColor, strokeColor);
+                break;
+                
+            case 'process':
+            case 'ProcessShape':
+                this._renderRoughRect(bounds, fillColor, strokeColor);
+                this._renderRoughTextCentered(obj.label, bounds, strokeColor);
+                break;
+                
+            case 'decision':
+            case 'DecisionShape':
+                this._renderRoughDiamond(bounds, fillColor, strokeColor);
+                this._renderRoughTextCentered(obj.label, bounds, strokeColor);
+                break;
+                
+            case 'terminal':
+            case 'TerminalShape':
+                this._renderRoughPill(bounds, fillColor, strokeColor);
+                this._renderRoughTextCentered(obj.label, bounds, strokeColor);
+                break;
+                
+            case 'connector':
+            case 'ConnectorObject':
+                this._renderRoughConnector(obj, strokeColor);
+                break;
+                
+            default:
+                this._renderRoughRect(bounds, fillColor, strokeColor);
+        }
+        
+        this.ctx.restore();
+    }
+    
+    /**
+     * Draw a wobbly line between two pixel points
+     */
+    _drawWobblyLine(x1, y1, x2, y2, color, iteration = 0) {
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        
+        if (len < 1) return;
+        
+        this.ctx.strokeStyle = color;
+        this.ctx.lineWidth = this.strokeWidth;
+        
+        // Calculate bowing
+        const bowOffset = this.bowing * len * 0.02 * (iteration % 2 === 0 ? 1 : -1);
+        const perpX = -dy / len;
+        const perpY = dx / len;
+        const midX = (x1 + x2) / 2 + perpX * bowOffset + this._getOffset(3);
+        const midY = (y1 + y2) / 2 + perpY * bowOffset + this._getOffset(3);
+        
+        this.ctx.beginPath();
+        this.ctx.moveTo(x1 + this._getOffset(2), y1 + this._getOffset(2));
+        this.ctx.quadraticCurveTo(midX, midY, x2 + this._getOffset(2), y2 + this._getOffset(2));
+        this.ctx.stroke();
+    }
+    
+    /**
+     * Draw rough rectangle
+     */
+    _renderRoughRect(bounds, fillColor, strokeColor) {
+        const pos = this._charToPixel(bounds.x, bounds.y);
+        const w = bounds.width * this.charWidth;
+        const h = bounds.height * this.charHeight;
+        
+        // Fill first
+        if (fillColor) {
+            this._fillRough(pos.x, pos.y, w, h, fillColor);
+        }
+        
+        // Draw rough edges
+        for (let i = 0; i < this.strokeIterations; i++) {
+            // Top
+            this._drawWobblyLine(pos.x, pos.y, pos.x + w, pos.y, strokeColor, i);
+            // Right
+            this._drawWobblyLine(pos.x + w, pos.y, pos.x + w, pos.y + h, strokeColor, i);
+            // Bottom
+            this._drawWobblyLine(pos.x + w, pos.y + h, pos.x, pos.y + h, strokeColor, i);
+            // Left
+            this._drawWobblyLine(pos.x, pos.y + h, pos.x, pos.y, strokeColor, i);
+        }
+    }
+    
+    /**
+     * Fill with rough hachure or other style
+     */
+    _fillRough(x, y, w, h, color) {
+        this.ctx.save();
+        
+        // Clip to shape bounds
+        this.ctx.beginPath();
+        this.ctx.rect(x + 2, y + 2, w - 4, h - 4);
+        this.ctx.clip();
+        
+        this.ctx.strokeStyle = color;
+        this.ctx.lineWidth = 1;
+        
+        switch (this.fillStyle) {
+            case 'solid':
+                this.ctx.fillStyle = color;
+                this.ctx.globalAlpha = 0.3;
+                this.ctx.fillRect(x, y, w, h);
+                break;
+                
+            case 'dots':
+                this._fillDots(x, y, w, h, color);
+                break;
+                
+            case 'zigzag':
+                this._fillZigzag(x, y, w, h, color);
+                break;
+                
+            case 'cross-hatch':
+                this._fillHachure(x, y, w, h, color, this.hachureAngle);
+                this._fillHachure(x, y, w, h, color, -this.hachureAngle);
+                break;
+                
+            case 'hachure':
+            default:
+                this._fillHachure(x, y, w, h, color, this.hachureAngle);
+                break;
+        }
+        
+        this.ctx.restore();
+    }
+    
+    /**
+     * Fill with diagonal hachure lines
+     */
+    _fillHachure(x, y, w, h, color, angle) {
+        const gap = this.hachureGap;
+        const rad = angle * Math.PI / 180;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        
+        // Calculate how many lines we need
+        const diagonal = Math.sqrt(w * w + h * h);
+        const numLines = Math.ceil(diagonal / gap) * 2;
+        
+        this.ctx.globalAlpha = 0.6;
+        
+        for (let i = -numLines; i < numLines; i++) {
+            const offset = i * gap;
+            
+            // Line going through center with offset
+            const cx = x + w / 2;
+            const cy = y + h / 2;
+            
+            // Start and end points of the line (extended beyond bounds)
+            const lineX1 = cx + offset * cos - diagonal * sin + this._getOffset(2);
+            const lineY1 = cy + offset * sin + diagonal * cos + this._getOffset(2);
+            const lineX2 = cx + offset * cos + diagonal * sin + this._getOffset(2);
+            const lineY2 = cy + offset * sin - diagonal * cos + this._getOffset(2);
+            
+            this.ctx.beginPath();
+            this.ctx.moveTo(lineX1, lineY1);
+            this.ctx.lineTo(lineX2, lineY2);
+            this.ctx.stroke();
+        }
+    }
+    
+    /**
+     * Fill with dots
+     */
+    _fillDots(x, y, w, h, color) {
+        const gap = this.hachureGap * 1.5;
+        this.ctx.fillStyle = color;
+        this.ctx.globalAlpha = 0.7;
+        
+        for (let py = y + gap; py < y + h - gap; py += gap) {
+            for (let px = x + gap; px < x + w - gap; px += gap) {
+                if (this._seededRandom() > 0.2) {
+                    const radius = 1 + this._seededRandom() * 1.5;
+                    this.ctx.beginPath();
+                    this.ctx.arc(px + this._getOffset(2), py + this._getOffset(2), radius, 0, Math.PI * 2);
+                    this.ctx.fill();
+                }
+            }
+        }
+    }
+    
+    /**
+     * Fill with zigzag pattern
+     */
+    _fillZigzag(x, y, w, h, color) {
+        const gap = this.hachureGap;
+        this.ctx.globalAlpha = 0.6;
+        
+        for (let py = y + gap; py < y + h - gap; py += gap * 2) {
+            this.ctx.beginPath();
+            this.ctx.moveTo(x + 2, py);
+            
+            for (let px = x + gap; px < x + w - 2; px += gap) {
+                const zigY = py + (((px - x) / gap) % 2 === 0 ? -gap/2 : gap/2) + this._getOffset(2);
+                this.ctx.lineTo(px + this._getOffset(1), zigY);
+            }
+            this.ctx.stroke();
+        }
+    }
+    
+    /**
+     * Draw rough frame with title
+     */
+    _renderRoughFrame(obj, bounds, fillColor, strokeColor) {
+        this._renderRoughRect(bounds, fillColor, strokeColor);
+        
+        if (obj.title || obj.name) {
+            const title = obj.title || obj.name;
+            const pos = this._charToPixel(bounds.x + 1, bounds.y);
+            
+            this.ctx.font = `bold ${this.charHeight * 0.8}px system-ui, -apple-system, sans-serif`;
+            this.ctx.fillStyle = strokeColor;
+            this.ctx.fillText(title, pos.x + this._getOffset(1), pos.y - 4 + this._getOffset(1));
+        }
+    }
+    
+    /**
+     * Draw rough ellipse
+     */
+    _renderRoughEllipse(obj, fillColor, strokeColor) {
+        const cx = obj.x + (obj.width || obj.radiusX * 2) / 2;
+        const cy = obj.y + (obj.height || obj.radiusY * 2) / 2;
+        const rx = (obj.width || obj.radiusX * 2) / 2;
+        const ry = (obj.height || obj.radiusY * 2) / 2;
+        
+        const center = this._charToPixel(cx, cy);
+        const radiusX = rx * this.charWidth;
+        const radiusY = ry * this.charHeight;
+        
+        // Fill
+        if (fillColor) {
+            this.ctx.save();
+            this.ctx.beginPath();
+            this.ctx.ellipse(center.x, center.y, radiusX - 4, radiusY - 4, 0, 0, Math.PI * 2);
+            this.ctx.clip();
+            this._fillHachure(center.x - radiusX, center.y - radiusY, radiusX * 2, radiusY * 2, fillColor, this.hachureAngle);
+            this.ctx.restore();
+        }
+        
+        // Draw rough ellipse outline
+        this.ctx.strokeStyle = strokeColor;
+        this.ctx.lineWidth = this.strokeWidth;
+        
+        for (let iter = 0; iter < this.strokeIterations; iter++) {
+            this.ctx.beginPath();
+            
+            const steps = 24;
+            for (let i = 0; i <= steps; i++) {
+                const angle = (i / steps) * Math.PI * 2;
+                const px = center.x + radiusX * Math.cos(angle) + this._getOffset(3);
+                const py = center.y + radiusY * Math.sin(angle) + this._getOffset(3);
+                
+                if (i === 0) {
+                    this.ctx.moveTo(px, py);
+                } else {
+                    this.ctx.lineTo(px, py);
+                }
+            }
+            this.ctx.stroke();
+        }
+    }
+    
+    /**
+     * Draw rough line
+     */
+    _renderRoughLine(obj, strokeColor) {
+        const x1 = obj.x1 ?? obj.x;
+        const y1 = obj.y1 ?? obj.y;
+        const x2 = obj.x2 ?? (obj.x + (obj.width || 1));
+        const y2 = obj.y2 ?? (obj.y + (obj.height || 1));
+        
+        const start = this._charToPixel(x1, y1);
+        const end = this._charToPixel(x2, y2);
+        
+        // Center the line endpoints in the character cells
+        const sx = start.x + this.charWidth / 2;
+        const sy = start.y + this.charHeight / 2;
+        const ex = end.x + this.charWidth / 2;
+        const ey = end.y + this.charHeight / 2;
+        
+        for (let i = 0; i < this.strokeIterations; i++) {
+            this._drawWobblyLine(sx, sy, ex, ey, strokeColor, i);
+        }
+    }
+    
+    /**
+     * Draw rough text
+     */
+    _renderRoughText(obj) {
+        const text = obj.text || '';
+        const lines = text.split('\n');
+        const color = this._parseColor(obj.color || obj.strokeColor, '#e0e0e0');
+        
+        this.ctx.font = `${this.charHeight}px "JetBrains Mono", "Fira Code", monospace`;
+        this.ctx.fillStyle = color;
+        this.ctx.textBaseline = 'top';
+        
+        for (let i = 0; i < lines.length; i++) {
+            const pos = this._charToPixel(obj.x, obj.y + i);
+            // Add slight wobble to text
+            this.ctx.fillText(lines[i], pos.x + this._getOffset(1), pos.y + this._getOffset(1));
+        }
+    }
+    
+    /**
+     * Draw rough text centered in bounds
+     */
+    _renderRoughTextCentered(text, bounds, color) {
+        if (!text) return;
+        
+        const cx = bounds.x + bounds.width / 2;
+        const cy = bounds.y + bounds.height / 2;
+        const center = this._charToPixel(cx, cy);
+        
+        this.ctx.font = `${this.charHeight * 0.9}px "JetBrains Mono", "Fira Code", monospace`;
+        this.ctx.fillStyle = color;
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText(text, center.x + this._getOffset(1), center.y + this._getOffset(1));
+        this.ctx.textAlign = 'left';
+    }
+    
+    /**
+     * Draw rough diamond (for decision shapes)
+     */
+    _renderRoughDiamond(bounds, fillColor, strokeColor) {
+        const pos = this._charToPixel(bounds.x, bounds.y);
+        const w = bounds.width * this.charWidth;
+        const h = bounds.height * this.charHeight;
+        const cx = pos.x + w / 2;
+        const cy = pos.y + h / 2;
+        
+        // Fill
+        if (fillColor) {
+            this.ctx.save();
+            this.ctx.beginPath();
+            this.ctx.moveTo(cx, pos.y + 4);
+            this.ctx.lineTo(pos.x + w - 4, cy);
+            this.ctx.lineTo(cx, pos.y + h - 4);
+            this.ctx.lineTo(pos.x + 4, cy);
+            this.ctx.closePath();
+            this.ctx.clip();
+            this._fillHachure(pos.x, pos.y, w, h, fillColor, this.hachureAngle);
+            this.ctx.restore();
+        }
+        
+        // Draw rough edges
+        for (let i = 0; i < this.strokeIterations; i++) {
+            this._drawWobblyLine(cx, pos.y, pos.x + w, cy, strokeColor, i);
+            this._drawWobblyLine(pos.x + w, cy, cx, pos.y + h, strokeColor, i);
+            this._drawWobblyLine(cx, pos.y + h, pos.x, cy, strokeColor, i);
+            this._drawWobblyLine(pos.x, cy, cx, pos.y, strokeColor, i);
+        }
+    }
+    
+    /**
+     * Draw rough pill/rounded rectangle (for terminal shapes)
+     */
+    _renderRoughPill(bounds, fillColor, strokeColor) {
+        const pos = this._charToPixel(bounds.x, bounds.y);
+        const w = bounds.width * this.charWidth;
+        const h = bounds.height * this.charHeight;
+        const radius = Math.min(w, h) / 2;
+        
+        // Fill
+        if (fillColor) {
+            this.ctx.save();
+            this.ctx.beginPath();
+            this.ctx.roundRect(pos.x + 2, pos.y + 2, w - 4, h - 4, radius - 2);
+            this.ctx.clip();
+            this._fillHachure(pos.x, pos.y, w, h, fillColor, this.hachureAngle);
+            this.ctx.restore();
+        }
+        
+        // Draw rough rounded rectangle using arcs and lines
+        this.ctx.strokeStyle = strokeColor;
+        this.ctx.lineWidth = this.strokeWidth;
+        
+        for (let iter = 0; iter < this.strokeIterations; iter++) {
+            this.ctx.beginPath();
+            
+            // Top edge
+            this.ctx.moveTo(pos.x + radius + this._getOffset(2), pos.y + this._getOffset(2));
+            this.ctx.lineTo(pos.x + w - radius + this._getOffset(2), pos.y + this._getOffset(2));
+            
+            // Top-right corner
+            this.ctx.arc(pos.x + w - radius, pos.y + radius, radius + this._getOffset(1), -Math.PI/2, 0);
+            
+            // Right edge
+            this.ctx.lineTo(pos.x + w + this._getOffset(2), pos.y + h - radius + this._getOffset(2));
+            
+            // Bottom-right corner
+            this.ctx.arc(pos.x + w - radius, pos.y + h - radius, radius + this._getOffset(1), 0, Math.PI/2);
+            
+            // Bottom edge
+            this.ctx.lineTo(pos.x + radius + this._getOffset(2), pos.y + h + this._getOffset(2));
+            
+            // Bottom-left corner
+            this.ctx.arc(pos.x + radius, pos.y + h - radius, radius + this._getOffset(1), Math.PI/2, Math.PI);
+            
+            // Left edge
+            this.ctx.lineTo(pos.x + this._getOffset(2), pos.y + radius + this._getOffset(2));
+            
+            // Top-left corner
+            this.ctx.arc(pos.x + radius, pos.y + radius, radius + this._getOffset(1), Math.PI, -Math.PI/2);
+            
+            this.ctx.stroke();
+        }
+    }
+    
+    /**
+     * Draw rough path
+     */
+    _renderRoughPath(obj, fillColor, strokeColor) {
+        if (!obj.points || obj.points.length < 2) return;
+        
+        // Convert points to pixel coordinates
+        const pixelPoints = obj.points.map(p => {
+            const pos = this._charToPixel(p.x, p.y);
+            return { x: pos.x + this.charWidth / 2, y: pos.y + this.charHeight / 2 };
+        });
+        
+        // Draw each segment with wobble
+        for (let i = 0; i < pixelPoints.length - 1; i++) {
+            for (let iter = 0; iter < this.strokeIterations; iter++) {
+                this._drawWobblyLine(
+                    pixelPoints[i].x, pixelPoints[i].y,
+                    pixelPoints[i + 1].x, pixelPoints[i + 1].y,
+                    strokeColor, iter
+                );
+            }
+        }
+        
+        // Close path if needed
+        if (obj.closed && pixelPoints.length > 2) {
+            const first = pixelPoints[0];
+            const last = pixelPoints[pixelPoints.length - 1];
+            for (let iter = 0; iter < this.strokeIterations; iter++) {
+                this._drawWobblyLine(last.x, last.y, first.x, first.y, strokeColor, iter);
+            }
+        }
+    }
+    
+    /**
+     * Draw rough polygon
+     */
+    _renderRoughPolygon(obj, fillColor, strokeColor) {
+        const cx = obj.cx || obj.x;
+        const cy = obj.cy || obj.y;
+        const radius = obj.radius || Math.min(obj.width, obj.height) / 2;
+        const sides = obj.sides || 6;
+        
+        const center = this._charToPixel(cx, cy);
+        const radiusX = radius * this.charWidth;
+        const radiusY = radius * this.charHeight;
+        
+        // Calculate vertices
+        const vertices = [];
+        for (let i = 0; i < sides; i++) {
+            const angle = (i / sides) * Math.PI * 2 - Math.PI / 2;
+            vertices.push({
+                x: center.x + radiusX * Math.cos(angle),
+                y: center.y + radiusY * Math.sin(angle)
+            });
+        }
+        
+        // Fill
+        if (fillColor) {
+            this.ctx.save();
+            this.ctx.beginPath();
+            vertices.forEach((v, i) => {
+                if (i === 0) this.ctx.moveTo(v.x, v.y);
+                else this.ctx.lineTo(v.x, v.y);
+            });
+            this.ctx.closePath();
+            this.ctx.clip();
+            this._fillHachure(center.x - radiusX, center.y - radiusY, radiusX * 2, radiusY * 2, fillColor, this.hachureAngle);
+            this.ctx.restore();
+        }
+        
+        // Draw rough edges
+        for (let i = 0; i < vertices.length; i++) {
+            const p1 = vertices[i];
+            const p2 = vertices[(i + 1) % vertices.length];
+            
+            for (let iter = 0; iter < this.strokeIterations; iter++) {
+                this._drawWobblyLine(p1.x, p1.y, p2.x, p2.y, strokeColor, iter);
+            }
+        }
+    }
+    
+    /**
+     * Draw rough star
+     */
+    _renderRoughStar(obj, fillColor, strokeColor) {
+        const cx = obj.cx || obj.x;
+        const cy = obj.cy || obj.y;
+        const outerRadius = obj.outerRadius || obj.radius || 5;
+        const innerRatio = obj.innerRatio || 0.5;
+        const points = obj.numPoints || obj.points || 5;
+        
+        const center = this._charToPixel(cx, cy);
+        const outerRX = outerRadius * this.charWidth;
+        const outerRY = outerRadius * this.charHeight;
+        
+        // Calculate star vertices
+        const vertices = [];
+        for (let i = 0; i < points * 2; i++) {
+            const angle = (i / (points * 2)) * Math.PI * 2 - Math.PI / 2;
+            const r = i % 2 === 0 ? 1 : innerRatio;
+            vertices.push({
+                x: center.x + outerRX * r * Math.cos(angle),
+                y: center.y + outerRY * r * Math.sin(angle)
+            });
+        }
+        
+        // Fill
+        if (fillColor) {
+            this.ctx.save();
+            this.ctx.beginPath();
+            vertices.forEach((v, i) => {
+                if (i === 0) this.ctx.moveTo(v.x, v.y);
+                else this.ctx.lineTo(v.x, v.y);
+            });
+            this.ctx.closePath();
+            this.ctx.clip();
+            this._fillHachure(center.x - outerRX, center.y - outerRY, outerRX * 2, outerRY * 2, fillColor, this.hachureAngle);
+            this.ctx.restore();
+        }
+        
+        // Draw rough edges
+        for (let i = 0; i < vertices.length; i++) {
+            const p1 = vertices[i];
+            const p2 = vertices[(i + 1) % vertices.length];
+            
+            for (let iter = 0; iter < this.strokeIterations; iter++) {
+                this._drawWobblyLine(p1.x, p1.y, p2.x, p2.y, strokeColor, iter);
+            }
+        }
+    }
+    
+    /**
+     * Draw rough connector with arrow
+     */
+    _renderRoughConnector(obj, strokeColor) {
+        const x1 = obj.x1 ?? obj.x;
+        const y1 = obj.y1 ?? obj.y;
+        const x2 = obj.x2 ?? (obj.x + (obj.width || 1));
+        const y2 = obj.y2 ?? (obj.y + (obj.height || 1));
+        
+        const start = this._charToPixel(x1, y1);
+        const end = this._charToPixel(x2, y2);
+        
+        const sx = start.x + this.charWidth / 2;
+        const sy = start.y + this.charHeight / 2;
+        const ex = end.x + this.charWidth / 2;
+        const ey = end.y + this.charHeight / 2;
+        
+        // Draw line
+        for (let i = 0; i < this.strokeIterations; i++) {
+            this._drawWobblyLine(sx, sy, ex, ey, strokeColor, i);
+        }
+        
+        // Draw rough arrowhead
+        if (obj.endArrow !== false) {
+            const angle = Math.atan2(ey - sy, ex - sx);
+            const arrowSize = 10;
+            
+            const ax1 = ex - arrowSize * Math.cos(angle - Math.PI / 6);
+            const ay1 = ey - arrowSize * Math.sin(angle - Math.PI / 6);
+            const ax2 = ex - arrowSize * Math.cos(angle + Math.PI / 6);
+            const ay2 = ey - arrowSize * Math.sin(angle + Math.PI / 6);
+            
+            for (let i = 0; i < this.strokeIterations; i++) {
+                this._drawWobblyLine(ex, ey, ax1, ay1, strokeColor, i);
+                this._drawWobblyLine(ex, ey, ax2, ay2, strokeColor, i);
+            }
+        }
+    }
+    
+    /**
+     * Override selection indicators for rough hand-drawn style
+     */
+    _renderSelectionIndicators() {
+        if (AppState.selectedObjects.length === 0) return;
+        
+        const selColor = '#ff6b6b';  // Warm red for rough style
+        const handleColor = '#ffd93d'; // Yellow handles
+        const handleSize = 10;
+        
+        // Reset seed for consistent wobble
+        this._seed = 12345;
+        
+        for (const obj of AppState.selectedObjects) {
+            const bounds = obj.getBounds();
+            const pos = this._charToPixel(bounds.x, bounds.y);
+            const w = bounds.width * this.charWidth;
+            const h = bounds.height * this.charHeight;
+            
+            // Draw rough selection rectangle with multiple strokes
+            this.ctx.strokeStyle = selColor;
+            this.ctx.lineWidth = 2;
+            
+            for (let iter = 0; iter < 2; iter++) {
+                // Top edge
+                this._drawWobblyLine(pos.x - 2, pos.y - 2, pos.x + w + 2, pos.y - 2, selColor, iter);
+                // Right edge
+                this._drawWobblyLine(pos.x + w + 2, pos.y - 2, pos.x + w + 2, pos.y + h + 2, selColor, iter);
+                // Bottom edge
+                this._drawWobblyLine(pos.x + w + 2, pos.y + h + 2, pos.x - 2, pos.y + h + 2, selColor, iter);
+                // Left edge
+                this._drawWobblyLine(pos.x - 2, pos.y + h + 2, pos.x - 2, pos.y - 2, selColor, iter);
+            }
+            
+            // Draw rough circular handles
+            const handles = [
+                { x: pos.x, y: pos.y },                    // NW
+                { x: pos.x + w/2, y: pos.y },              // N
+                { x: pos.x + w, y: pos.y },                // NE
+                { x: pos.x + w, y: pos.y + h/2 },          // E
+                { x: pos.x + w, y: pos.y + h },            // SE
+                { x: pos.x + w/2, y: pos.y + h },          // S
+                { x: pos.x, y: pos.y + h },                // SW
+                { x: pos.x, y: pos.y + h/2 },              // W
+            ];
+            
+            for (const handle of handles) {
+                // Draw rough circle handle
+                this.ctx.fillStyle = handleColor;
+                this.ctx.strokeStyle = selColor;
+                this.ctx.lineWidth = 2;
+                
+                this.ctx.beginPath();
+                // Rough circle with wobble
+                const steps = 12;
+                for (let i = 0; i <= steps; i++) {
+                    const angle = (i / steps) * Math.PI * 2;
+                    const r = handleSize / 2 + this._getOffset(1);
+                    const hx = handle.x + r * Math.cos(angle) + this._getOffset(0.5);
+                    const hy = handle.y + r * Math.sin(angle) + this._getOffset(0.5);
+                    if (i === 0) this.ctx.moveTo(hx, hy);
+                    else this.ctx.lineTo(hx, hy);
+                }
+                this.ctx.closePath();
+                this.ctx.fill();
+                this.ctx.stroke();
+            }
+        }
+        
+        // Draw multi-selection rough bounding box
+        if (AppState.selectedObjects.length > 1) {
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (const obj of AppState.selectedObjects) {
+                const bounds = obj.getBounds();
+                const pos = this._charToPixel(bounds.x, bounds.y);
+                const w = bounds.width * this.charWidth;
+                const h = bounds.height * this.charHeight;
+                minX = Math.min(minX, pos.x);
+                minY = Math.min(minY, pos.y);
+                maxX = Math.max(maxX, pos.x + w);
+                maxY = Math.max(maxY, pos.y + h);
+            }
+            
+            // Rough dashed outer box
+            this.ctx.strokeStyle = selColor;
+            this.ctx.lineWidth = 1.5;
+            
+            const gap = 8;
+            // Top dashed line
+            for (let x = minX - 6; x < maxX + 6; x += gap * 2) {
+                this._drawWobblyLine(x, minY - 6, Math.min(x + gap, maxX + 6), minY - 6, selColor, 0);
+            }
+            // Bottom dashed line
+            for (let x = minX - 6; x < maxX + 6; x += gap * 2) {
+                this._drawWobblyLine(x, maxY + 6, Math.min(x + gap, maxX + 6), maxY + 6, selColor, 0);
+            }
+            // Left dashed line
+            for (let y = minY - 6; y < maxY + 6; y += gap * 2) {
+                this._drawWobblyLine(minX - 6, y, minX - 6, Math.min(y + gap, maxY + 6), selColor, 0);
+            }
+            // Right dashed line
+            for (let y = minY - 6; y < maxY + 6; y += gap * 2) {
+                this._drawWobblyLine(maxX + 6, y, maxX + 6, Math.min(y + gap, maxY + 6), selColor, 0);
+            }
+        }
+    }
+}
+
+/**
+ * Render Mode Manager
+ * Manages registration and switching between render modes
+ */
+class RenderModeManager {
+    constructor() {
+        this.modes = new Map();
+        this.activeMode = null;
+        
+        // Register built-in modes
+        this.register(new AsciiRenderMode());
+        this.register(new OutlineRenderMode());
+        this.register(new ShapeRenderMode());
+        this.register(new ScratchRenderMode());
+        this.register(new RoughRenderMode());
+        
+        // Set default
+        this.setMode('ascii');
+    }
+    
+    /**
+     * Register a new render mode
+     * @param {RenderMode} mode 
+     */
+    register(mode) {
+        this.modes.set(mode.name, mode);
+    }
+    
+    /**
+     * Unregister a render mode
+     * @param {string} name 
+     */
+    unregister(name) {
+        if (name !== 'ascii') { // Can't unregister default
+            this.modes.delete(name);
+        }
+    }
+    
+    /**
+     * Set the active render mode
+     * @param {string} name 
+     * @returns {boolean} Success
+     */
+    setMode(name) {
+        const mode = this.modes.get(name);
+        if (mode) {
+            // Check if switching away from a canvas-based mode
+            const canvasModes = ['shape', 'rough'];
+            const wasCanvasMode = this.activeMode && canvasModes.includes(this.activeMode.name);
+            const isCanvasMode = canvasModes.includes(name);
+            
+            // Hide vector canvas when switching away from canvas-based modes
+            if (wasCanvasMode && !isCanvasMode) {
+                const vectorCanvas = document.getElementById('vector-canvas');
+                if (vectorCanvas) {
+                    vectorCanvas.classList.remove('active');
+                }
+            }
+            
+            this.activeMode = mode;
+            AppState.renderMode = name;
+            // Update legacy flag for compatibility
+            AppState.outlineView = (name === 'outline');
+            return true;
+        }
+        return false;
+    }
+    
+    /**
+     * Get the active render mode
+     * @returns {RenderMode}
+     */
+    getMode() {
+        return this.activeMode;
+    }
+    
+    /**
+     * Get all registered modes
+     * @returns {Map<string, RenderMode>}
+     */
+    getAllModes() {
+        return this.modes;
+    }
+    
+    /**
+     * Get mode names for UI
+     * @returns {Array<{name: string, displayName: string, description: string}>}
+     */
+    getModeList() {
+        return Array.from(this.modes.values()).map(m => ({
+            name: m.name,
+            displayName: m.displayName,
+            description: m.description
+        }));
+    }
+    
+    /**
+     * Render an object using the active mode
+     * @param {SceneObject} obj 
+     * @param {AsciiBuffer} buffer 
+     * @param {Object} options 
+     */
+    renderObject(obj, buffer, options = {}) {
+        if (this.activeMode) {
+            this.activeMode.renderObject(obj, buffer, options);
+        } else {
+            // Fallback to native render
+            obj.render(buffer);
+        }
+    }
+    
+    /**
+     * Pre-render hook
+     * @param {AsciiBuffer} buffer 
+     */
+    preRender(buffer) {
+        if (this.activeMode) {
+            this.activeMode.preRender(buffer);
+        }
+    }
+    
+    /**
+     * Post-render hook
+     * @param {AsciiBuffer} buffer 
+     */
+    postRender(buffer) {
+        if (this.activeMode) {
+            this.activeMode.postRender(buffer);
+        }
+    }
+}
+
+// Global render mode manager instance
+const renderModeManager = new RenderModeManager();
 
 // ==========================================
 // ASCII CANVAS RENDERER
@@ -5507,6 +7838,34 @@ class AsciiCanvasRenderer extends EventEmitter {
      */
     clearPreview() {
         this.previewBuffer.clear();
+        // Also clear preview objects for canvas-based modes
+        this._previewObjects = [];
+    }
+    
+    /**
+     * Render a preview object using the current render mode
+     * For canvas-based modes, stores the object for rendering in postRender
+     * For ASCII modes, renders to the preview buffer
+     */
+    renderPreviewObject(obj) {
+        const canvasModes = ['shape', 'rough'];
+        if (canvasModes.includes(AppState.renderMode)) {
+            // Store for rendering in canvas mode's postRender
+            if (!this._previewObjects) this._previewObjects = [];
+            this._previewObjects.push(obj);
+        } else {
+            // For ASCII modes, render to preview buffer using object's render method
+            if (obj.render) {
+                obj.render(this.previewBuffer);
+            }
+        }
+    }
+    
+    /**
+     * Get preview objects for canvas-based render modes
+     */
+    getPreviewObjects() {
+        return this._previewObjects || [];
     }
     
     /**
@@ -6069,9 +8428,12 @@ class SelectTool extends Tool {
         breadcrumb.appendChild(exitBtn);
     }
     
-    onMouseDown(x, y, button, renderer, app) {
+    onMouseDown(x, y, button, renderer, app, event = null) {
         // Store app reference for use in property change handlers
         this.appRef = app;
+        
+        // Check for modifier keys for multi-selection
+        const isMultiSelectModifier = event && (event.ctrlKey || event.metaKey || event.shiftKey);
         
         if (button === 0) {
             // Check for double-click to enter container or edit text
@@ -6099,8 +8461,8 @@ class SelectTool extends Tool {
                 }
             }
             
-            // First check for resize handles
-            if (app && AppState.selectedObjects.length === 1) {
+            // First check for resize handles (only when no multi-select modifier)
+            if (!isMultiSelectModifier && app && AppState.selectedObjects.length === 1) {
                 const handleInfo = app._getResizeHandleAt(x, y);
                 if (handleInfo) {
                     this.isResizing = true;
@@ -6114,8 +8476,8 @@ class SelectTool extends Tool {
                 }
             }
             
-            // Check if clicking on already selected object to move it
-            if (AppState.selectedObjects.length > 0) {
+            // Check if clicking on already selected object to move it (not when using modifier)
+            if (!isMultiSelectModifier && AppState.selectedObjects.length > 0) {
                 for (const obj of AppState.selectedObjects) {
                     if (obj.containsPoint && obj.containsPoint(x, y)) {
                         this.isMoving = true;
@@ -6133,6 +8495,25 @@ class SelectTool extends Tool {
             // Try to select object at click position within current context
             const obj = this._findObjectAtPointInContext(x, y, app);
             if (obj) {
+                // Handle multi-selection with Ctrl/Shift/Cmd
+                if (isMultiSelectModifier) {
+                    const idx = AppState.selectedObjects.indexOf(obj);
+                    if (idx >= 0) {
+                        // Already selected - remove from selection
+                        AppState.selectedObjects.splice(idx, 1);
+                        this._updateStatus(`Deselected: ${obj.name || obj.type}`);
+                    } else {
+                        // Not selected - add to selection
+                        AppState.selectedObjects.push(obj);
+                        this._updateStatus(`Added to selection: ${obj.name || obj.type} (${AppState.selectedObjects.length} selected)`);
+                    }
+                    this._updatePropertiesPanel(AppState.selectedObjects.length === 1 ? AppState.selectedObjects[0] : null);
+                    if (app.renderAllObjects) app.renderAllObjects();
+                    if (app._updateLayerList) app._updateLayerList();
+                    return;
+                }
+                
+                // Normal single selection
                 AppState.selectedObjects = [obj];
                 this._updatePropertiesPanel(obj);
                 if (app.renderAllObjects) app.renderAllObjects();
@@ -6816,6 +9197,9 @@ class SelectTool extends Tool {
                     
                     this._updateStatus(`Moved ${AppState.selectedObjects.length} object(s) into ${dropTarget.name || dropTarget.type}`);
                 }
+            } else {
+                // No explicit drop target - check if objects have been dragged outside their parent frames
+                this._checkAndRemoveFromParentFrames(app);
             }
             
             // Reset dragging state
@@ -6848,6 +9232,75 @@ class SelectTool extends Tool {
                 this._updateStatus(`Moved ${AppState.selectedObjects.length} object(s)`);
             }
             if (app && app.renderAllObjects) app.renderAllObjects();
+        }
+    }
+    
+    /**
+     * Check if selected objects have been dragged outside their parent frames
+     * and remove them from the frame, moving to the grandparent container or root layer
+     */
+    _checkAndRemoveFromParentFrames(app) {
+        const objectsToReparent = [];
+        
+        for (const obj of AppState.selectedObjects) {
+            if (!obj.parentId) continue; // Not in a frame
+            
+            const parentFrame = this._findObjectById(obj.parentId, app);
+            if (!parentFrame) continue;
+            
+            // Get the object's bounds
+            const objBounds = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y, width: obj.width || 1, height: obj.height || 1 };
+            const frameBounds = parentFrame.getBounds ? parentFrame.getBounds() : { x: parentFrame.x, y: parentFrame.y, width: parentFrame.width, height: parentFrame.height };
+            
+            // Check if object is completely outside the parent frame
+            const isOutsideLeft = objBounds.x + objBounds.width <= frameBounds.x;
+            const isOutsideRight = objBounds.x >= frameBounds.x + frameBounds.width;
+            const isOutsideTop = objBounds.y + objBounds.height <= frameBounds.y;
+            const isOutsideBottom = objBounds.y >= frameBounds.y + frameBounds.height;
+            
+            if (isOutsideLeft || isOutsideRight || isOutsideTop || isOutsideBottom) {
+                objectsToReparent.push({
+                    obj,
+                    parentFrame,
+                    grandparentId: parentFrame.parentId
+                });
+            }
+        }
+        
+        // Reparent objects that are outside their frames
+        for (const { obj, parentFrame, grandparentId } of objectsToReparent) {
+            // Remove from current parent frame
+            parentFrame.removeChild(obj);
+            
+            if (grandparentId) {
+                // Move to grandparent container
+                const grandparent = this._findObjectById(grandparentId, app);
+                if (grandparent && grandparent.addChild) {
+                    grandparent.addChild(obj);
+                    this._updateStatus(`Moved ${obj.name || obj.type} out of ${parentFrame.name || 'frame'} into ${grandparent.name || grandparent.type}`);
+                }
+            } else {
+                // Move to root layer
+                const layer = app?._getActiveLayer?.();
+                if (layer && layer.objects) {
+                    layer.objects.push(obj);
+                    obj.parentId = null;
+                    this._updateStatus(`Moved ${obj.name || obj.type} out of ${parentFrame.name || 'frame'} to root`);
+                }
+            }
+        }
+        
+        // Relayout affected parent frames
+        const affectedParents = new Set(objectsToReparent.map(r => r.parentFrame));
+        for (const parent of affectedParents) {
+            if (parent.layoutChildren) {
+                parent.layoutChildren();
+            }
+        }
+        
+        // Update layer list if anything changed
+        if (objectsToReparent.length > 0 && app && app._updateLayerList) {
+            app._updateLayerList();
         }
     }
     
@@ -7476,7 +9929,15 @@ class PencilTool extends Tool {
         if (this.isDragging && this.currentPath) {
             this.currentPath.addPoint(x, y);
             
-            // Draw preview
+            // Store preview object for canvas rendering (clone current path state)
+            const previewPath = new PathObject();
+            previewPath.points = [...this.currentPath.points];
+            previewPath.strokeChar = this.currentPath.strokeChar;
+            previewPath.strokeColor = this.currentPath.strokeColor;
+            previewPath._updateBounds();
+            renderer.renderPreviewObject(previewPath);
+            
+            // Draw preview to ASCII buffer
             if (this.lastX !== -1) {
                 drawLine(renderer.previewBuffer, this.lastX, this.lastY, x, y, {
                     char: AppState.strokeChar,
@@ -7525,6 +9986,24 @@ class LineTool extends Tool {
     onMouseMove(x, y, renderer) {
         if (this.isDragging) {
             renderer.clearPreview();
+            
+            // Create preview object for canvas-based modes
+            const previewLine = new LineObject();
+            previewLine.x1 = this.startX;
+            previewLine.y1 = this.startY;
+            previewLine.x2 = x;
+            previewLine.y2 = y;
+            previewLine.x = Math.min(this.startX, x);
+            previewLine.y = Math.min(this.startY, y);
+            previewLine.width = Math.abs(x - this.startX) + 1;
+            previewLine.height = Math.abs(y - this.startY) + 1;
+            previewLine.strokeChar = AppState.strokeChar;
+            previewLine.strokeColor = AppState.strokeColor;
+            previewLine.lineStyle = AppState.lineStyle;
+            
+            renderer.renderPreviewObject(previewLine);
+            
+            // Also render to ASCII buffer for ASCII mode
             drawLine(renderer.previewBuffer, this.startX, this.startY, x, y, {
                 style: AppState.lineStyle,
                 color: AppState.strokeColor
@@ -7596,6 +10075,23 @@ class RectangleTool extends Tool {
             // Auto-fill if fillChar is set
             const shouldFill = AppState.fillChar && AppState.fillChar !== '';
             
+            // Create preview object for canvas-based modes
+            const previewRect = new RectangleObject();
+            previewRect.x = minX;
+            previewRect.y = minY;
+            previewRect.width = width;
+            previewRect.height = height;
+            previewRect.filled = shouldFill;
+            previewRect.strokeChar = AppState.strokeChar;
+            previewRect.fillChar = AppState.fillChar;
+            previewRect.strokeColor = AppState.strokeColor;
+            previewRect.fillColor = AppState.fillColor;
+            previewRect.lineStyle = AppState.lineStyle;
+            
+            // Render preview using current mode
+            renderer.renderPreviewObject(previewRect);
+            
+            // Also render to ASCII buffer for ASCII mode
             if (shouldFill) {
                 fillRect(renderer.previewBuffer, minX, minY, width, height, {
                     style: AppState.lineStyle,
@@ -7678,6 +10174,28 @@ class EllipseTool extends Tool {
             // Auto-fill if fillChar is set
             const shouldFill = AppState.fillChar && AppState.fillChar !== '';
             
+            // Create preview object for canvas-based modes
+            if (radius > 0) {
+                const aspectRatio = EllipseObject.ASPECT_RATIO;
+                const effectiveRadiusX = Math.round(radius * aspectRatio);
+                const effectiveRadiusY = Math.round(radius);
+                
+                const previewEllipse = new EllipseObject();
+                previewEllipse.x = cx - effectiveRadiusX;
+                previewEllipse.y = cy - effectiveRadiusY;
+                previewEllipse.radiusX = radius;
+                previewEllipse.radiusY = radius;
+                previewEllipse._updateBounds();
+                previewEllipse.filled = shouldFill;
+                previewEllipse.strokeChar = AppState.strokeChar;
+                previewEllipse.fillChar = AppState.fillChar;
+                previewEllipse.strokeColor = AppState.strokeColor;
+                previewEllipse.fillColor = AppState.fillColor;
+                
+                renderer.renderPreviewObject(previewEllipse);
+            }
+            
+            // Also render to ASCII buffer for ASCII mode
             if (shouldFill && radius > 0) {
                 fillCircle(renderer.previewBuffer, cx, cy, radius, {
                     fillChar: AppState.fillChar,
@@ -7765,7 +10283,17 @@ class FrameTool extends Tool {
             const width = Math.max(5, Math.abs(x - this.startX) + 1);
             const height = Math.max(3, Math.abs(y - this.startY) + 1);
             
-            // Draw frame preview with label
+            // Create preview object for canvas-based modes
+            const frame = new FrameObject(minX, minY, width, height);
+            frame.strokeColor = AppState.strokeColor;
+            frame.borderStyle = AppState.lineStyle === 'double' ? 'double' : 
+                               AppState.lineStyle === 'rounded' ? 'rounded' : 'single';
+            frame.name = 'Frame Preview';
+            
+            // Store preview object for canvas rendering
+            renderer.renderPreviewObject(frame);
+            
+            // Also draw to ASCII preview buffer for ASCII mode
             const previewColor = AppState.strokeColor || '#4a9eff';
             drawRect(renderer.previewBuffer, minX, minY, width, height, {
                 style: 'rounded',
@@ -7897,12 +10425,36 @@ class TextTool extends Tool {
             this.text = this.text.slice(0, -1);
             // Update preview
             renderer.clearPreview();
+            
+            // Create preview object for canvas modes
+            if (this.text.length > 0) {
+                const textObj = new TextObject();
+                textObj.x = this.textX;
+                textObj.y = this.textY;
+                textObj.width = this.text.length;
+                textObj.height = 1;
+                textObj.text = this.text;
+                textObj.strokeColor = AppState.strokeColor;
+                renderer.renderPreviewObject(textObj);
+            }
+            
             renderer.previewBuffer.drawText(this.textX, this.textY, this.text + '│', AppState.strokeColor);
             renderer.render();
         } else if (key.length === 1) {
             this.text += key;
             // Update preview
             renderer.clearPreview();
+            
+            // Create preview object for canvas modes
+            const textObj = new TextObject();
+            textObj.x = this.textX;
+            textObj.y = this.textY;
+            textObj.width = this.text.length;
+            textObj.height = 1;
+            textObj.text = this.text;
+            textObj.strokeColor = AppState.strokeColor;
+            renderer.renderPreviewObject(textObj);
+            
             renderer.previewBuffer.drawText(this.textX, this.textY, this.text + '│', AppState.strokeColor);
             renderer.render();
         }
@@ -8289,6 +10841,16 @@ class PolygonTool extends Tool {
         if (this.isDragging) {
             renderer.clearPreview();
             const radius = Math.sqrt(Math.pow(x - this.startX, 2) + Math.pow(y - this.startY, 2));
+            
+            // Create preview object for canvas modes
+            if (radius >= 1) {
+                const polygon = new PolygonObject(this.startX, this.startY, radius, this.sides);
+                polygon.strokeChar = AppState.strokeChar;
+                polygon.strokeColor = AppState.strokeColor;
+                polygon.lineStyle = AppState.lineStyle;
+                renderer.renderPreviewObject(polygon);
+            }
+            
             this._drawPolygon(renderer.previewBuffer, this.startX, this.startY, radius, this.sides);
             renderer.render();
         }
@@ -8367,6 +10929,15 @@ class StarTool extends Tool {
         if (this.isDragging) {
             renderer.clearPreview();
             const radius = Math.sqrt(Math.pow(x - this.startX, 2) + Math.pow(y - this.startY, 2));
+            
+            // Create preview object for canvas modes
+            if (radius >= 1) {
+                const star = new StarObject(this.startX, this.startY, radius, this.points, this.innerRatio);
+                star.strokeChar = AppState.strokeChar;
+                star.strokeColor = AppState.strokeColor;
+                renderer.renderPreviewObject(star);
+            }
+            
             this._drawStar(renderer.previewBuffer, this.startX, this.startY, radius);
             renderer.render();
         }
@@ -8562,6 +11133,15 @@ class BoxDrawTool extends Tool {
             const width = Math.abs(x - this.startX) + 1;
             const height = Math.abs(y - this.startY) + 1;
             
+            // Create preview object for canvas modes
+            if (width >= 2 && height >= 2) {
+                const rect = new RectangleObject(minX, minY, width, height);
+                rect.strokeChar = AppState.strokeChar;
+                rect.strokeColor = AppState.strokeColor;
+                rect.boxStyle = this.style;
+                renderer.renderPreviewObject(rect);
+            }
+            
             drawRect(renderer.previewBuffer, minX, minY, width, height, {
                 style: this.style,
                 color: AppState.strokeColor
@@ -8625,6 +11205,19 @@ class TableTool extends Tool {
     onMouseMove(x, y, renderer) {
         if (this.isDragging) {
             renderer.clearPreview();
+            const minX = Math.min(this.startX, x);
+            const minY = Math.min(this.startY, y);
+            const width = Math.abs(x - this.startX) + 1;
+            const height = Math.abs(y - this.startY) + 1;
+            
+            // Create preview object for canvas modes
+            if (width >= 5 && height >= 3) {
+                const table = new TableObject(minX, minY, width, height, this.cols, this.rows);
+                table.strokeChar = AppState.strokeChar;
+                table.strokeColor = AppState.strokeColor;
+                renderer.renderPreviewObject(table);
+            }
+            
             this._drawTable(renderer.previewBuffer, this.startX, this.startY, x, y);
             renderer.render();
         }
@@ -8758,6 +11351,46 @@ class FlowchartTool extends Tool {
     onMouseMove(x, y, renderer) {
         if (this.isDragging) {
             renderer.clearPreview();
+            
+            const minX = Math.min(this.startX, x);
+            const minY = Math.min(this.startY, y);
+            const width = Math.max(10, Math.abs(x - this.startX) + 1);
+            const height = Math.max(3, Math.abs(y - this.startY) + 1);
+            
+            // Create preview object for canvas modes
+            let shape;
+            switch (this.shapeType) {
+                case 'terminal':
+                    shape = new TerminalShape(minX, minY, width, height);
+                    break;
+                case 'decision':
+                    shape = new DecisionShape(minX, minY, width, Math.max(5, height));
+                    break;
+                case 'io':
+                    shape = new IOShape(minX, minY, width, height);
+                    break;
+                case 'document':
+                    shape = new DocumentShape(minX, minY, width, height);
+                    break;
+                case 'database':
+                    shape = new DatabaseShape(minX, minY, width, height);
+                    break;
+                case 'subprocess':
+                    shape = new SubprocessShape(minX, minY, width, height);
+                    break;
+                case 'process':
+                default:
+                    shape = new ProcessShape(minX, minY, width, height);
+                    break;
+            }
+            
+            if (shape) {
+                shape.strokeColor = AppState.strokeColor;
+                shape.strokeChar = AppState.strokeChar;
+                shape.lineStyle = AppState.lineStyle;
+                renderer.renderPreviewObject(shape);
+            }
+            
             this._drawShapePreview(renderer.previewBuffer, this.startX, this.startY, x, y);
             renderer.render();
         }
@@ -8943,6 +11576,9 @@ class ConnectorTool extends Tool {
         if (this.isDragging) {
             renderer.clearPreview();
             
+            // Check if ending on a shape
+            let endX = x, endY = y;
+            
             // Show snap point highlights for nearby shapes
             if (app) {
                 const obj = app.findObjectAt(x, y);
@@ -8951,9 +11587,30 @@ class ConnectorTool extends Tool {
                     if (snapPoint) {
                         // Highlight snap point
                         renderer.previewBuffer.setChar(snapPoint.x, snapPoint.y, '◉', '#00ff00');
+                        endX = snapPoint.x;
+                        endY = snapPoint.y;
                     }
                 }
             }
+            
+            // Create preview object for canvas modes
+            const connector = new FlowchartConnector();
+            connector.connectorStyle = this.connectorStyle;
+            connector.lineType = this.lineType;
+            connector.arrowEnd = this.arrowEnd;
+            connector.arrowStart = this.arrowStart;
+            connector.strokeColor = AppState.strokeColor;
+            connector.strokeChar = AppState.strokeChar;
+            connector.startX = this.startX;
+            connector.startY = this.startY;
+            connector.endX = endX;
+            connector.endY = endY;
+            
+            if (this.connectorStyle === 'orthogonal') {
+                connector._calculateOrthogonalRoute();
+            }
+            
+            renderer.renderPreviewObject(connector);
             
             this._drawConnectorPreview(renderer.previewBuffer, this.startX, this.startY, x, y);
             renderer.render();
@@ -9244,9 +11901,9 @@ class ToolManager extends EventEmitter {
         }
     }
     
-    handleMouseDown(x, y, button, renderer, app) {
+    handleMouseDown(x, y, button, renderer, app, event = null) {
         if (this.activeTool) {
-            this.activeTool.onMouseDown(x, y, button, renderer, app);
+            this.activeTool.onMouseDown(x, y, button, renderer, app, event);
         }
     }
     
@@ -9317,8 +11974,8 @@ class Asciistrator extends EventEmitter {
         this.renderer.setSyncCallback(() => this.syncToActiveLayer());
         
         // Connect renderer events to tool manager
-        this.renderer.on('mousedown', ({ x, y, button }) => {
-            this.toolManager.handleMouseDown(x, y, button, this.renderer, this);
+        this.renderer.on('mousedown', ({ x, y, button, event }) => {
+            this.toolManager.handleMouseDown(x, y, button, this.renderer, this, event);
         });
         
         this.renderer.on('mousemove', ({ x, y }) => {
@@ -9329,9 +11986,21 @@ class Asciistrator extends EventEmitter {
             this.toolManager.handleMouseUp(x, y, button, this.renderer, this);
         });
         
-        // Listen for transform changes to update rulers
+        // Listen for transform changes to update rulers and re-render for canvas modes
+        // Use requestAnimationFrame to avoid excessive re-renders during pan/zoom
+        let transformRenderPending = false;
         this.renderer.on('transform', () => {
             this._updateRulers();
+            
+            // For canvas-based render modes, we need to re-render to update dimensions
+            const canvasModes = ['shape', 'rough'];
+            if (canvasModes.includes(AppState.renderMode) && !transformRenderPending) {
+                transformRenderPending = true;
+                requestAnimationFrame(() => {
+                    this.renderAllObjects();
+                    transformRenderPending = false;
+                });
+            }
         });
         
         // Setup keyboard shortcuts
@@ -9443,8 +12112,11 @@ class Asciistrator extends EventEmitter {
             currentHandle = handle;
             document.body.style.cursor = handler.getCursor(handle);
             
-            // Show size indicator
+            // Show size indicator and initial preview
+            const canvasRect = canvas.getBoundingClientRect();
             handler.showSizeIndicator(AppState.canvasWidth, AppState.canvasHeight, e.clientX, e.clientY);
+            handler.showResizePreview(canvasRect, AppState.canvasWidth, AppState.canvasHeight, 
+                this.renderer.charWidth, this.renderer.charHeight);
         });
         
         // Handle resize move (document level for drag outside)
@@ -9458,8 +12130,11 @@ class Asciistrator extends EventEmitter {
                 this.renderer.charHeight
             );
             
-            // Update canvas size preview
+            // Update canvas size preview with visual overlay
+            const canvasRect = canvas.getBoundingClientRect();
             handler.showSizeIndicator(newSize.width, newSize.height, e.clientX, e.clientY);
+            handler.showResizePreview(canvasRect, newSize.width, newSize.height, 
+                this.renderer.charWidth, this.renderer.charHeight);
         });
         
         // Handle resize end
@@ -10532,6 +13207,32 @@ class Asciistrator extends EventEmitter {
                 }
             }
             
+            // Alt+number shortcuts for render modes (use e.code for macOS compatibility)
+            if (e.altKey && !e.ctrlKey && !e.metaKey && !isToolTyping) {
+                switch (e.code) {
+                    case 'Digit1':
+                        e.preventDefault();
+                        this.setRenderMode('ascii');
+                        return;
+                    case 'Digit2':
+                        e.preventDefault();
+                        this.setRenderMode('outline');
+                        return;
+                    case 'Digit3':
+                        e.preventDefault();
+                        this.setRenderMode('shape');
+                        return;
+                    case 'Digit4':
+                        e.preventDefault();
+                        this.setRenderMode('scratch');
+                        return;
+                    case 'Digit5':
+                        e.preventDefault();
+                        this.setRenderMode('rough');
+                        return;
+                }
+            }
+            
             // Pass key to active tool
             this.toolManager.handleKeyDown(e.key, this.renderer, this);
             
@@ -10870,6 +13571,23 @@ class Asciistrator extends EventEmitter {
             statusSnap.addEventListener('click', () => this.toggleSnapping());
             this._updateSnapStatus();
         }
+        
+        // Add click handler for render mode cycling
+        const statusRenderMode = $('#status-render-mode');
+        if (statusRenderMode) {
+            statusRenderMode.addEventListener('click', () => this.cycleRenderMode());
+            statusRenderMode.style.cursor = 'pointer';
+        }
+    }
+    
+    /**
+     * Cycle through render modes
+     */
+    cycleRenderMode() {
+        const modes = ['ascii', 'outline', 'shape', 'scratch', 'rough'];
+        const currentIndex = modes.indexOf(AppState.renderMode);
+        const nextIndex = (currentIndex + 1) % modes.length;
+        this.setRenderMode(modes[nextIndex]);
     }
     
     /**
@@ -10905,6 +13623,7 @@ class Asciistrator extends EventEmitter {
         const statusZoom = $('#status-zoom');
         const statusGrid = $('#status-grid');
         const statusCanvasSize = $('#status-canvas-size');
+        const statusRenderMode = $('#status-render-mode');
         
         if (statusObjects) {
             let objectCount = 0;
@@ -10928,6 +13647,11 @@ class Asciistrator extends EventEmitter {
         
         if (statusCanvasSize) {
             statusCanvasSize.textContent = `Canvas: ${AppState.canvasWidth}×${AppState.canvasHeight}`;
+        }
+        
+        if (statusRenderMode) {
+            const mode = renderModeManager.getMode();
+            statusRenderMode.textContent = mode ? mode.displayName : 'ASCII';
         }
         
         // Update zoom level display in header
@@ -11036,7 +13760,16 @@ class Asciistrator extends EventEmitter {
                     ]
                 },
                 { type: 'separator' },
-                { label: 'Outline View', action: 'outline-view', shortcut: 'Ctrl+Y' },
+                { 
+                    label: 'Render Mode',
+                    submenu: [
+                        { label: 'ASCII (Default)', action: 'render-mode-ascii', checked: () => AppState.renderMode === 'ascii', shortcut: 'Alt+1' },
+                        { label: 'Outline', action: 'render-mode-outline', checked: () => AppState.renderMode === 'outline', shortcut: 'Alt+2' },
+                        { label: 'Shape Style', action: 'render-mode-shape', checked: () => AppState.renderMode === 'shape', shortcut: 'Alt+3' },
+                        { label: 'Scratch', action: 'render-mode-scratch', checked: () => AppState.renderMode === 'scratch', shortcut: 'Alt+4' },
+                        { label: 'Rough', action: 'render-mode-rough', checked: () => AppState.renderMode === 'rough', shortcut: 'Alt+5' },
+                    ]
+                },
                 { label: 'Measure Tool', action: 'measure-tool', shortcut: 'M' },
                 { type: 'separator' },
                 { label: 'Zoom In', action: 'zoom-in', shortcut: 'Ctrl++' },
@@ -11645,6 +14378,22 @@ class Asciistrator extends EventEmitter {
                 break;
             case 'outline-view':
                 this.toggleOutlineView();
+                break;
+            // Render Mode actions
+            case 'render-mode-ascii':
+                this.setRenderMode('ascii');
+                break;
+            case 'render-mode-outline':
+                this.setRenderMode('outline');
+                break;
+            case 'render-mode-shape':
+                this.setRenderMode('shape');
+                break;
+            case 'render-mode-scratch':
+                this.setRenderMode('scratch');
+                break;
+            case 'render-mode-rough':
+                this.setRenderMode('rough');
                 break;
             case 'measure-tool':
                 this.activateMeasureTool();
@@ -12428,11 +15177,87 @@ class Asciistrator extends EventEmitter {
         }
     }
     
-    // Add object to active layer
+    /**
+     * Find deepest frame that contains the given point (object's origin/start position)
+     */
+    _findContainingFrame(bounds, excludeObj = null) {
+        const activeLayer = AppState.layers.find(l => l.id === AppState.activeLayerId);
+        if (!activeLayer?.objects) return null;
+        
+        // Use the top-left corner of the object (where drawing started)
+        const pointX = bounds.x;
+        const pointY = bounds.y;
+        
+        const findInObjects = (objects, depth = 0) => {
+            let bestMatch = null;
+            let bestDepth = -1;
+            
+            for (const obj of objects) {
+                if (obj === excludeObj) continue;
+                if (obj.type !== 'frame' || !obj.visible) continue;
+                
+                const frameBounds = obj.getBounds();
+                
+                // Check if frame contains the object's starting point
+                if (pointX >= frameBounds.x && 
+                    pointY >= frameBounds.y &&
+                    pointX < frameBounds.x + frameBounds.width &&
+                    pointY < frameBounds.y + frameBounds.height) {
+                    
+                    // This frame contains the starting point - check if it's deeper than current best
+                    if (depth > bestDepth) {
+                        bestMatch = obj;
+                        bestDepth = depth;
+                    }
+                    
+                    // Check nested frames for even deeper match
+                    if (obj.children && obj.children.length > 0) {
+                        const nestedMatch = findInObjects(obj.children, depth + 1);
+                        if (nestedMatch) {
+                            bestMatch = nestedMatch;
+                            bestDepth = depth + 1;
+                        }
+                    }
+                }
+            }
+            
+            return bestMatch;
+        };
+        
+        return findInObjects(activeLayer.objects);
+    }
+    
+    // Add object to active layer or current container
     addObject(obj, saveUndo = false) {
         if (saveUndo) {
             this.saveStateForUndo();
         }
+        
+        // Check if we're inside a container (frame) - add as child
+        const ctx = AppState.selectionContext;
+        if (ctx.currentContainer && ctx.currentContainer.addChild) {
+            ctx.currentContainer.addChild(obj);
+            this._spatialIndexDirty = true;
+            this.renderAllObjects();
+            this._updateStatusBar();
+            this._updateLayerList();
+            return;
+        }
+        
+        // Auto-detect: if the object is fully inside a frame, add it as a child of that frame
+        const objBounds = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y, width: obj.width || 1, height: obj.height || 1 };
+        const containingFrame = this._findContainingFrame(objBounds, obj);
+        
+        if (containingFrame && containingFrame.addChild) {
+            containingFrame.addChild(obj);
+            this._spatialIndexDirty = true;
+            this.renderAllObjects();
+            this._updateStatusBar();
+            this._updateLayerList();
+            return;
+        }
+        
+        // Otherwise add to active layer
         const activeLayer = AppState.layers.find(l => l.id === AppState.activeLayerId);
         if (!activeLayer) return;
         if (!activeLayer.objects) activeLayer.objects = [];
@@ -12577,12 +15402,15 @@ class Asciistrator extends EventEmitter {
         // Clear main buffer once
         mainBuffer.clear();
         
+        // Pre-render hook for render mode
+        renderModeManager.preRender(mainBuffer);
+        
         // Helper function to recursively render an object and its children
         const renderObjectHierarchy = (obj, buffer, clipBounds = null) => {
             if (!obj.visible) return;
             
-            // Render the object itself
-            obj.render(buffer);
+            // Render the object using the active render mode
+            renderModeManager.renderObject(obj, buffer);
             
             // Render children if any
             if (obj.children && obj.children.length > 0) {
@@ -12672,6 +15500,9 @@ class Asciistrator extends EventEmitter {
             }
         }
         
+        // Post-render hook for render mode
+        renderModeManager.postRender(mainBuffer);
+        
         // Render current editing container highlight
         this._renderContainerEditingIndicator();
         
@@ -12696,7 +15527,46 @@ class Asciistrator extends EventEmitter {
      * Render an object with clipping to specified bounds
      */
     _renderWithClipping(obj, buffer, clipBounds) {
-        // Create a temporary clipped render
+        // For canvas-based render modes, use canvas clipping
+        const activeMode = renderModeManager.activeMode;
+        const isCanvasMode = activeMode && ['shape', 'rough'].includes(activeMode.name);
+        
+        if (isCanvasMode && activeMode.ctx) {
+            // Use canvas clipping
+            const ctx = activeMode.ctx;
+            ctx.save();
+            
+            // Set up clipping region in pixel coordinates
+            const clipX = activeMode.paddingLeft + clipBounds.x * activeMode.charWidth;
+            const clipY = activeMode.paddingTop + clipBounds.y * activeMode.charHeight;
+            const clipW = clipBounds.width * activeMode.charWidth;
+            const clipH = clipBounds.height * activeMode.charHeight;
+            
+            ctx.beginPath();
+            ctx.rect(clipX, clipY, clipW, clipH);
+            ctx.clip();
+            
+            // Render the object using render mode
+            renderModeManager.renderObject(obj, buffer);
+            
+            // Render children recursively with same clipping
+            if (obj.children && obj.children.length > 0) {
+                for (const child of obj.children) {
+                    if (child.visible) {
+                        // Recursively render with clipping (clipping is already set)
+                        renderModeManager.renderObject(child, buffer);
+                        if (child.children && child.children.length > 0) {
+                            this._renderWithClipping(child, buffer, clipBounds);
+                        }
+                    }
+                }
+            }
+            
+            ctx.restore();
+            return;
+        }
+        
+        // ASCII mode: Create a temporary clipped render
         // For simplicity, we render normally but check bounds
         const tempBuffer = {
             width: buffer.width,
@@ -13085,6 +15955,13 @@ class Asciistrator extends EventEmitter {
         // Always clear preview buffer first to remove old selection indicators
         const buffer = this.renderer.previewBuffer;
         buffer.clear();
+        
+        // Skip ASCII selection rendering for canvas-based render modes
+        // Those modes handle selection rendering in their own postRender
+        const canvasModes = ['shape', 'rough'];
+        if (canvasModes.includes(AppState.renderMode)) {
+            return;
+        }
         
         if (AppState.selectedObjects.length === 0) return;
         
@@ -15905,7 +18782,34 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
     
     copy() {
         if (AppState.selectedObjects.length > 0) {
-            AppState.clipboard = AppState.selectedObjects.map(obj => obj.toJSON());
+            // Calculate bounding box of selection to normalize positions
+            let minX = Infinity, minY = Infinity;
+            for (const obj of AppState.selectedObjects) {
+                const bounds = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y };
+                minX = Math.min(minX, bounds.x);
+                minY = Math.min(minY, bounds.y);
+            }
+            
+            // Store objects with positions normalized to top-left of selection
+            AppState.clipboard = AppState.selectedObjects.map(obj => {
+                const json = obj.toJSON();
+                // Normalize position relative to selection's top-left
+                if (json.x !== undefined) json.x -= minX;
+                if (json.y !== undefined) json.y -= minY;
+                // Handle line objects which use x1,y1,x2,y2
+                if (json.x1 !== undefined) json.x1 -= minX;
+                if (json.y1 !== undefined) json.y1 -= minY;
+                if (json.x2 !== undefined) json.x2 -= minX;
+                if (json.y2 !== undefined) json.y2 -= minY;
+                // Handle center-based objects (polygon, star)
+                if (json.cx !== undefined) json.cx -= minX;
+                if (json.cy !== undefined) json.cy -= minY;
+                return json;
+            });
+            
+            // Store the original bounds for reference
+            AppState.clipboardBounds = { minX, minY };
+            
             this._updateStatus(`Copied ${AppState.clipboard.length} object(s)`);
         }
     }
@@ -15913,13 +18817,37 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
     paste() {
         if (AppState.clipboard && AppState.clipboard.length > 0) {
             this.saveStateForUndo();
+            
+            // Determine paste position: use cursor position if available, otherwise use a default offset
+            let pasteX = 5;
+            let pasteY = 5;
+            
+            // Try to use the current cursor/mouse position from renderer
+            if (this.renderer && this.renderer.cursorX !== undefined) {
+                pasteX = this.renderer.cursorX;
+                pasteY = this.renderer.cursorY;
+            } else {
+                // Fallback: paste near center of visible canvas area
+                pasteX = Math.floor(AppState.canvasWidth / 4);
+                pasteY = Math.floor(AppState.canvasHeight / 4);
+            }
+            
             AppState.selectedObjects = [];
             for (const json of AppState.clipboard) {
                 const obj = this._createObjectFromJSON(json);
                 if (obj) {
-                    // Offset pasted objects slightly
-                    obj.x += 2;
-                    obj.y += 1;
+                    // Position relative to paste location (objects already normalized to 0,0)
+                    if (obj.x !== undefined) obj.x += pasteX;
+                    if (obj.y !== undefined) obj.y += pasteY;
+                    // Handle line objects
+                    if (obj.x1 !== undefined) obj.x1 += pasteX;
+                    if (obj.y1 !== undefined) obj.y1 += pasteY;
+                    if (obj.x2 !== undefined) obj.x2 += pasteX;
+                    if (obj.y2 !== undefined) obj.y2 += pasteY;
+                    // Handle center-based objects
+                    if (obj.cx !== undefined) obj.cx += pasteX;
+                    if (obj.cy !== undefined) obj.cy += pasteY;
+                    
                     obj.id = uuid();
                     this.addObject(obj);
                     AppState.selectedObjects.push(obj);
@@ -17375,6 +20303,12 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             { label: 'Measure Tool', action: () => this.activateMeasureTool(), category: 'View', shortcut: 'M' },
             { label: 'Measure Between Objects', action: () => this.showMeasureBetweenObjects(), category: 'View', shortcut: '' },
             { label: 'Toggle Outline View', action: () => this.toggleOutlineView(), category: 'View', shortcut: '' },
+            // Render Modes
+            { label: 'Render Mode: ASCII', action: () => this.setRenderMode('ascii'), category: 'View', shortcut: 'Alt+1' },
+            { label: 'Render Mode: Outline', action: () => this.setRenderMode('outline'), category: 'View', shortcut: 'Alt+2' },
+            { label: 'Render Mode: Shape Style', action: () => this.setRenderMode('shape'), category: 'View', shortcut: 'Alt+3' },
+            { label: 'Render Mode: Scratch', action: () => this.setRenderMode('scratch'), category: 'View', shortcut: 'Alt+4' },
+            { label: 'Render Mode: Rough', action: () => this.setRenderMode('rough'), category: 'View', shortcut: 'Alt+5' },
             // Select by type
             { label: 'Select All Rectangles', action: () => this.selectByType('rectangle'), category: 'Select' },
             { label: 'Select All Ellipses', action: () => this.selectByType('ellipse'), category: 'Select' },
@@ -18829,32 +21763,72 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
     }
 
     // ==========================================
-    // OUTLINE VIEW
+    // RENDER MODE SWITCHING
     // ==========================================
     
+    /**
+     * Toggle outline view (legacy method - now uses render mode system)
+     */
     toggleOutlineView() {
-        AppState.outlineView = !AppState.outlineView;
-        this.renderAllObjects();
-        this._updateStatus(`Outline view ${AppState.outlineView ? 'enabled' : 'disabled'}`);
+        const currentMode = AppState.renderMode;
+        if (currentMode === 'outline') {
+            this.setRenderMode('ascii');
+        } else {
+            this.setRenderMode('outline');
+        }
     }
     
-    renderOutlineMode(obj, buffer) {
-        // Render object as outline only (no fill)
-        const bounds = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y, width: obj.width || 1, height: obj.height || 1 };
-        
-        // Draw simple outline rectangle
-        const char = '·';
-        
-        // Top and bottom edges
-        for (let x = bounds.x; x < bounds.x + bounds.width; x++) {
-            buffer.setChar(x, bounds.y, char);
-            buffer.setChar(x, bounds.y + bounds.height - 1, char);
+    /**
+     * Set the active render mode
+     * @param {string} modeName - 'ascii', 'outline', 'shape', 'scratch', or 'rough'
+     */
+    setRenderMode(modeName) {
+        const success = renderModeManager.setMode(modeName);
+        if (success) {
+            this.renderAllObjects();
+            const mode = renderModeManager.getMode();
+            this._updateStatus(`Render mode: ${mode.displayName}`);
+            this._updateRenderModeMenu();
+            this._updateStatusBar(); // Update status bar with new mode
+        } else {
+            this._updateStatus(`Unknown render mode: ${modeName}`);
         }
+    }
+    
+    /**
+     * Get available render modes for UI
+     * @returns {Array}
+     */
+    getRenderModes() {
+        return renderModeManager.getModeList();
+    }
+    
+    /**
+     * Update render mode menu checkmarks
+     */
+    _updateRenderModeMenu() {
+        const currentMode = AppState.renderMode;
         
-        // Left and right edges
-        for (let y = bounds.y; y < bounds.y + bounds.height; y++) {
-            buffer.setChar(bounds.x, y, char);
-            buffer.setChar(bounds.x + bounds.width - 1, y, char);
+        // Update menu items if they exist
+        const menuItems = document.querySelectorAll('[data-render-mode]');
+        menuItems.forEach(item => {
+            const modeName = item.dataset.renderMode;
+            const checkmark = item.querySelector('.menu-checkmark, .checkmark');
+            if (checkmark) {
+                checkmark.style.visibility = modeName === currentMode ? 'visible' : 'hidden';
+            }
+            item.classList.toggle('active', modeName === currentMode);
+        });
+    }
+    
+    /**
+     * @deprecated Use setRenderMode('outline') instead
+     */
+    renderOutlineMode(obj, buffer) {
+        // Legacy method - now handled by OutlineRenderMode class
+        const outlineMode = renderModeManager.modes.get('outline');
+        if (outlineMode) {
+            outlineMode.renderObject(obj, buffer);
         }
     }
 

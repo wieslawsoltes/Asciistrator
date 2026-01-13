@@ -158,6 +158,8 @@
                         <pre id="ascii-canvas" class="ascii-canvas"></pre>
                         <!-- Selection overlay -->
                         <svg id="overlay" class="overlay"></svg>
+                        <!-- Vector render canvas for Shape mode -->
+                        <canvas id="vector-canvas" class="vector-canvas"></canvas>
                     </div>
                 </div>
 
@@ -514,6 +516,8 @@
                 <span id="status-tool">Select</span>
             </div>
             <div class="status-right">
+                <span id="status-render-mode" class="clickable hide-mobile-sm" title="Click to change render mode">ASCII</span>
+                <span class="separator hide-mobile-sm">|</span>
                 <span id="status-objects" class="hide-mobile-sm">Objects: 0</span>
                 <span class="separator hide-mobile-sm">|</span>
                 <span id="status-layers" class="hide-mobile-sm">Layers: 1</span>

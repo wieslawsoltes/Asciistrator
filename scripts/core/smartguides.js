@@ -853,22 +853,148 @@ class CanvasResizeHandler {
             indicator = document.createElement('div');
             indicator.id = 'canvas-size-indicator';
             indicator.style.position = 'fixed';
-            indicator.style.background = 'rgba(0, 0, 0, 0.8)';
+            indicator.style.background = 'rgba(0, 0, 0, 0.85)';
             indicator.style.color = this.sizeIndicatorColor;
-            indicator.style.padding = '4px 8px';
-            indicator.style.borderRadius = '4px';
-            indicator.style.fontSize = '12px';
-            indicator.style.fontFamily = 'monospace';
-            indicator.style.zIndex = '1000';
+            indicator.style.padding = '6px 12px';
+            indicator.style.borderRadius = '6px';
+            indicator.style.fontSize = '13px';
+            indicator.style.fontFamily = 'system-ui, -apple-system, monospace';
+            indicator.style.zIndex = '1001';
             indicator.style.pointerEvents = 'none';
             indicator.style.whiteSpace = 'nowrap';
+            indicator.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+            indicator.style.border = '1px solid rgba(255,255,255,0.1)';
             document.body.appendChild(indicator);
         }
         
-        indicator.textContent = `${width} × ${height}`;
-        indicator.style.left = `${x + 15}px`;
-        indicator.style.top = `${y + 15}px`;
+        // Calculate changes from start
+        const widthDelta = width - this.startWidth;
+        const heightDelta = height - this.startHeight;
+        const widthDeltaStr = widthDelta >= 0 ? `+${widthDelta}` : `${widthDelta}`;
+        const heightDeltaStr = heightDelta >= 0 ? `+${heightDelta}` : `${heightDelta}`;
+        
+        // Show both current size and change
+        const deltaInfo = (widthDelta !== 0 || heightDelta !== 0) 
+            ? `<span style="color: #888; margin-left: 8px">(${widthDeltaStr}, ${heightDeltaStr})</span>` 
+            : '';
+        
+        indicator.innerHTML = `<strong style="color: #4dabf7">${width}</strong> × <strong style="color: #4dabf7">${height}</strong>${deltaInfo}`;
+        indicator.style.left = `${x + 20}px`;
+        indicator.style.top = `${y + 20}px`;
         indicator.style.display = 'block';
+    }
+    
+    /**
+     * Show visual preview overlay of new canvas size
+     * @param {DOMRect} canvasRect - Current canvas bounding rect
+     * @param {number} newWidth - New width in characters
+     * @param {number} newHeight - New height in characters
+     * @param {number} charWidth - Character width in pixels
+     * @param {number} charHeight - Character height in pixels
+     */
+    showResizePreview(canvasRect, newWidth, newHeight, charWidth, charHeight) {
+        let preview = document.getElementById('canvas-resize-preview');
+        if (!preview) {
+            preview = document.createElement('div');
+            preview.id = 'canvas-resize-preview';
+            preview.style.position = 'fixed';
+            preview.style.border = '2px dashed #4dabf7';
+            preview.style.background = 'rgba(77, 171, 247, 0.1)';
+            preview.style.pointerEvents = 'none';
+            preview.style.zIndex = '999';
+            preview.style.borderRadius = '4px';
+            preview.style.transition = 'none';
+            document.body.appendChild(preview);
+        }
+        
+        // Calculate new pixel dimensions
+        // Get padding from the ascii-canvas element
+        const asciiCanvas = document.getElementById('ascii-canvas');
+        let paddingH = 32; // default
+        let paddingV = 32;
+        if (asciiCanvas) {
+            const cs = getComputedStyle(asciiCanvas);
+            paddingH = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+            paddingV = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+        }
+        
+        const newPixelWidth = newWidth * charWidth + paddingH + 2; // +2 for border
+        const newPixelHeight = newHeight * charHeight + paddingV + 2;
+        
+        // Position based on resize handle
+        let previewLeft = canvasRect.left;
+        let previewTop = canvasRect.top;
+        
+        // Adjust position for handles that move the origin
+        switch (this.resizeHandle) {
+            case 'w':
+            case 'nw':
+            case 'sw':
+                previewLeft = canvasRect.right - newPixelWidth;
+                break;
+        }
+        switch (this.resizeHandle) {
+            case 'n':
+            case 'nw':
+            case 'ne':
+                previewTop = canvasRect.bottom - newPixelHeight;
+                break;
+        }
+        
+        preview.style.left = `${previewLeft}px`;
+        preview.style.top = `${previewTop}px`;
+        preview.style.width = `${newPixelWidth}px`;
+        preview.style.height = `${newPixelHeight}px`;
+        preview.style.display = 'block';
+        
+        // Add dimension labels at corners
+        this._updatePreviewLabels(preview, newWidth, newHeight, newPixelWidth, newPixelHeight);
+    }
+    
+    /**
+     * Update dimension labels on preview
+     */
+    _updatePreviewLabels(preview, width, height, pixelWidth, pixelHeight) {
+        let labelW = preview.querySelector('.preview-label-w');
+        let labelH = preview.querySelector('.preview-label-h');
+        
+        const labelStyle = `
+            position: absolute;
+            background: rgba(0,0,0,0.8);
+            color: #4dabf7;
+            padding: 2px 6px;
+            font-size: 11px;
+            font-family: monospace;
+            border-radius: 3px;
+            white-space: nowrap;
+        `;
+        
+        if (!labelW) {
+            labelW = document.createElement('div');
+            labelW.className = 'preview-label-w';
+            labelW.style.cssText = labelStyle + 'bottom: -20px; left: 50%; transform: translateX(-50%);';
+            preview.appendChild(labelW);
+        }
+        
+        if (!labelH) {
+            labelH = document.createElement('div');
+            labelH.className = 'preview-label-h';
+            labelH.style.cssText = labelStyle + 'right: -30px; top: 50%; transform: translateY(-50%) rotate(-90deg);';
+            preview.appendChild(labelH);
+        }
+        
+        labelW.textContent = `${width} chars`;
+        labelH.textContent = `${height} rows`;
+    }
+    
+    /**
+     * Hide resize preview overlay
+     */
+    hideResizePreview() {
+        const preview = document.getElementById('canvas-resize-preview');
+        if (preview) {
+            preview.style.display = 'none';
+        }
     }
     
     /**
@@ -879,6 +1005,8 @@ class CanvasResizeHandler {
         if (indicator) {
             indicator.style.display = 'none';
         }
+        // Also hide the resize preview
+        this.hideResizePreview();
     }
     
     /**

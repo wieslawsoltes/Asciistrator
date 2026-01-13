@@ -748,6 +748,20 @@ body {
     pointer-events: none;
 }
 
+/* Vector canvas for Shape render mode */
+.vector-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    display: none;
+    z-index: 10;
+}
+
+.vector-canvas.active {
+    display: block;
+}
+
 /* Scrollbars - custom implementation for zoomed canvas */
 .scrollbar {
     display: block;
