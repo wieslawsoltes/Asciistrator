@@ -291,6 +291,218 @@ const SizingMode = {
 };
 
 // ==========================================
+// BLEND MODES (Figma-style)
+// ==========================================
+
+/**
+ * Blend modes for compositing layers/objects
+ * Note: ASCII rendering is limited, but we track these for export compatibility
+ */
+const BlendMode = {
+    // Normal
+    PASS_THROUGH: 'passThrough',  // For groups - children inherit parent's blend
+    NORMAL: 'normal',
+    
+    // Darken
+    DARKEN: 'darken',
+    MULTIPLY: 'multiply',
+    COLOR_BURN: 'colorBurn',
+    LINEAR_BURN: 'linearBurn',
+    
+    // Lighten
+    LIGHTEN: 'lighten',
+    SCREEN: 'screen',
+    COLOR_DODGE: 'colorDodge',
+    LINEAR_DODGE: 'linearDodge',
+    
+    // Contrast
+    OVERLAY: 'overlay',
+    SOFT_LIGHT: 'softLight',
+    HARD_LIGHT: 'hardLight',
+    
+    // Inversion
+    DIFFERENCE: 'difference',
+    EXCLUSION: 'exclusion',
+    
+    // Component
+    HUE: 'hue',
+    SATURATION: 'saturation',
+    COLOR: 'color',
+    LUMINOSITY: 'luminosity'
+};
+
+// ==========================================
+// EFFECT TYPES (Figma-style)
+// ==========================================
+
+/**
+ * Effect types for visual effects
+ */
+const EffectType = {
+    DROP_SHADOW: 'dropShadow',
+    INNER_SHADOW: 'innerShadow',
+    LAYER_BLUR: 'layerBlur',
+    BACKGROUND_BLUR: 'backgroundBlur'
+};
+
+/**
+ * Create a default effect configuration
+ */
+function createEffect(type) {
+    switch (type) {
+        case EffectType.DROP_SHADOW:
+            return {
+                type: EffectType.DROP_SHADOW,
+                visible: true,
+                color: { r: 0, g: 0, b: 0, a: 0.25 },
+                offset: { x: 0, y: 4 },
+                blur: 4,
+                spread: 0
+            };
+        case EffectType.INNER_SHADOW:
+            return {
+                type: EffectType.INNER_SHADOW,
+                visible: true,
+                color: { r: 0, g: 0, b: 0, a: 0.25 },
+                offset: { x: 0, y: 4 },
+                blur: 4,
+                spread: 0
+            };
+        case EffectType.LAYER_BLUR:
+            return {
+                type: EffectType.LAYER_BLUR,
+                visible: true,
+                blur: 4
+            };
+        case EffectType.BACKGROUND_BLUR:
+            return {
+                type: EffectType.BACKGROUND_BLUR,
+                visible: true,
+                blur: 4
+            };
+        default:
+            return null;
+    }
+}
+
+// ==========================================
+// STROKE PROPERTIES (Figma-style)
+// ==========================================
+
+/**
+ * Stroke alignment relative to path
+ */
+const StrokeAlign = {
+    CENTER: 'center',
+    INSIDE: 'inside',
+    OUTSIDE: 'outside'
+};
+
+/**
+ * Stroke cap style for line endpoints
+ */
+const StrokeCap = {
+    NONE: 'none',
+    ROUND: 'round',
+    SQUARE: 'square',
+    ARROW: 'arrow'       // Extended for ASCII diagrams
+};
+
+/**
+ * Stroke join style for path corners
+ */
+const StrokeJoin = {
+    MITER: 'miter',
+    ROUND: 'round',
+    BEVEL: 'bevel'
+};
+
+/**
+ * Create a default stroke configuration
+ */
+function createStroke() {
+    return {
+        color: null,             // Stroke color (null = default/white)
+        weight: 1,               // Stroke thickness (for future use)
+        align: StrokeAlign.CENTER,
+        cap: StrokeCap.NONE,
+        join: StrokeJoin.MITER,
+        dashPattern: [],         // e.g. [4, 2] for dashed
+        dashOffset: 0,
+        miterLimit: 4,
+        visible: true,
+        opacity: 1
+    };
+}
+
+// ==========================================
+// FILL PROPERTIES (Figma-style)
+// ==========================================
+
+/**
+ * Fill types
+ */
+const FillType = {
+    SOLID: 'solid',
+    GRADIENT_LINEAR: 'gradientLinear',
+    GRADIENT_RADIAL: 'gradientRadial',
+    GRADIENT_ANGULAR: 'gradientAngular',
+    GRADIENT_DIAMOND: 'gradientDiamond',
+    IMAGE: 'image',
+    PATTERN: 'pattern'       // Extended for ASCII patterns
+};
+
+/**
+ * Image scaling mode
+ */
+const ImageScaleMode = {
+    FILL: 'fill',
+    FIT: 'fit',
+    CROP: 'crop',
+    TILE: 'tile'
+};
+
+/**
+ * Create a default fill configuration
+ */
+function createFill(type = FillType.SOLID) {
+    const base = {
+        type: type,
+        visible: true,
+        opacity: 1,
+        blendMode: BlendMode.NORMAL
+    };
+    
+    switch (type) {
+        case FillType.SOLID:
+            return {
+                ...base,
+                color: null  // null = transparent/none
+            };
+        case FillType.GRADIENT_LINEAR:
+        case FillType.GRADIENT_RADIAL:
+        case FillType.GRADIENT_ANGULAR:
+        case FillType.GRADIENT_DIAMOND:
+            return {
+                ...base,
+                gradientStops: [
+                    { position: 0, color: { r: 255, g: 255, b: 255, a: 1 } },
+                    { position: 1, color: { r: 0, g: 0, b: 0, a: 1 } }
+                ],
+                gradientTransform: { angle: 0, scale: 1 }
+            };
+        case FillType.PATTERN:
+            return {
+                ...base,
+                patternChar: '.',
+                patternScale: 1
+            };
+        default:
+            return base;
+    }
+}
+
+// ==========================================
 // CONSTRAINTS SYSTEM (Figma-style)
 // ==========================================
 
@@ -556,6 +768,41 @@ class SceneObject {
         this.locked = false;
         this.opacity = 1;
         
+        // Blend mode (Figma-style)
+        this.blendMode = BlendMode.NORMAL;
+        
+        // Enhanced stroke properties (Figma-style)
+        this.stroke = {
+            color: null,
+            weight: 1,
+            align: StrokeAlign.CENTER,
+            cap: StrokeCap.NONE,
+            join: StrokeJoin.MITER,
+            dashPattern: [],
+            dashOffset: 0,
+            miterLimit: 4,
+            visible: true,
+            opacity: 1
+        };
+        
+        // Multiple fills support (Figma-style - array of fills)
+        this.fills = [];  // Array of fill objects, rendered bottom to top
+        
+        // Effects (Figma-style - array of effects)
+        this.effects = [];  // Array: dropShadow, innerShadow, layerBlur, backgroundBlur
+        
+        // Corner radius (Figma-style - individual corners)
+        this.cornerRadius = {
+            topLeft: 0,
+            topRight: 0,
+            bottomRight: 0,
+            bottomLeft: 0,
+            independent: false  // When true, each corner has its own radius
+        };
+        
+        // Export settings
+        this.exportSettings = [];  // Array of export configs
+        
         // Layer reference
         this.layerId = null;
         
@@ -615,8 +862,31 @@ class SceneObject {
      * Add a child object
      */
     addChild(obj, index = -1) {
+        // Prevent adding to self
+        if (obj.id === this.id) return;
+        
+        // Check if already a child of this container
+        const existingIndex = this.children.indexOf(obj);
+        if (existingIndex !== -1) {
+            // Already in this container - just reorder if needed
+            if (index >= 0 && index !== existingIndex) {
+                this.children.splice(existingIndex, 1);
+                const adjustedIndex = index > existingIndex ? index - 1 : index;
+                if (adjustedIndex >= 0 && adjustedIndex < this.children.length) {
+                    this.children.splice(adjustedIndex, 0, obj);
+                } else {
+                    this.children.push(obj);
+                }
+            }
+            // Update layout if needed
+            if (this.autoLayout.enabled) {
+                this.layoutChildren();
+            }
+            return;
+        }
+        
         // Remove from previous parent
-        if (obj.parentId) {
+        if (obj.parentId && obj.parentId !== this.id) {
             const oldParent = this._findParentById?.(obj.parentId);
             if (oldParent) {
                 oldParent.removeChild(obj);
@@ -1151,6 +1421,12 @@ class SceneObject {
             visible: this.visible,
             locked: this.locked,
             opacity: this.opacity,
+            blendMode: this.blendMode,
+            stroke: this.stroke,
+            fills: this.fills,
+            effects: this.effects,
+            cornerRadius: this.cornerRadius,
+            exportSettings: this.exportSettings,
             layerId: this.layerId,
             parentId: this.parentId,
             autoLayout: this.autoLayout,
@@ -1182,6 +1458,17 @@ class SceneObject {
         const obj = new SceneObject(json.type);
         Object.assign(obj, json);
         
+        // Ensure new properties have defaults if not in JSON
+        if (!obj.blendMode) obj.blendMode = BlendMode.NORMAL;
+        if (!obj.stroke) obj.stroke = createStroke();
+        if (!obj.fills) obj.fills = [];
+        if (!obj.effects) obj.effects = [];
+        if (!obj.cornerRadius || typeof obj.cornerRadius !== 'object') {
+            const r = typeof obj.cornerRadius === 'number' ? obj.cornerRadius : 0;
+            obj.cornerRadius = { topLeft: r, topRight: r, bottomRight: r, bottomLeft: r, independent: false };
+        }
+        if (!obj.exportSettings) obj.exportSettings = [];
+        
         // Restore children
         if (json.children && json.children.length > 0) {
             obj.children = json.children.map(childJson => {
@@ -1207,9 +1494,30 @@ class RectangleObject extends SceneObject {
         this.y = y;
         this.width = width;
         this.height = height;
-        this.cornerRadius = 0;
         this.filled = false;
         this.boxStyle = null; // single, double, rounded - for box drawing style
+        
+        // Override cornerRadius with Figma-style per-corner values
+        this.cornerRadius = {
+            topLeft: 0,
+            topRight: 0,
+            bottomRight: 0,
+            bottomLeft: 0,
+            independent: false
+        };
+    }
+    
+    /**
+     * Get maximum corner radius (for style detection)
+     */
+    getMaxCornerRadius() {
+        if (typeof this.cornerRadius === 'number') return this.cornerRadius;
+        return Math.max(
+            this.cornerRadius.topLeft || 0,
+            this.cornerRadius.topRight || 0,
+            this.cornerRadius.bottomRight || 0,
+            this.cornerRadius.bottomLeft || 0
+        );
     }
     
     render(buffer) {
@@ -1219,7 +1527,7 @@ class RectangleObject extends SceneObject {
         let style = this.lineStyle;
         if (this.boxStyle) {
             style = this.boxStyle;
-        } else if (this.cornerRadius > 0) {
+        } else if (this.getMaxCornerRadius() > 0) {
             style = 'rounded';
         }
         
@@ -5425,7 +5733,11 @@ class Tool {
         this.isActive = true;
     }
     
-    deactivate() {
+    deactivate(renderer, app) {
+        // Call onDeactivate hook if implemented (for committing pending work)
+        if (this.onDeactivate) {
+            this.onDeactivate(renderer, app);
+        }
         this.isActive = false;
         this.isDragging = false;
     }
@@ -5478,6 +5790,36 @@ class SelectTool extends Tool {
         // Return root objects from active layer
         const layer = app?._getActiveLayer?.();
         return layer?.objects || [];
+    }
+    
+    /**
+     * Get snap targets for smart guides - context-aware
+     * Returns objects at the same hierarchy level as the moving object
+     */
+    _getSnapTargets(movingObj, app) {
+        const ctx = AppState.selectionContext;
+        const otherObjects = [];
+        
+        if (ctx.currentContainer && ctx.currentContainer.children) {
+            // Inside a container - snap to siblings and container edges
+            for (const sibling of ctx.currentContainer.children) {
+                if (sibling !== movingObj && !AppState.selectedObjects.includes(sibling) && sibling.visible) {
+                    otherObjects.push(sibling);
+                }
+            }
+        } else {
+            // At root level - snap to all visible root objects
+            for (const layer of AppState.layers) {
+                if (!layer.visible || !layer.objects) continue;
+                for (const obj of layer.objects) {
+                    if (obj !== movingObj && !AppState.selectedObjects.includes(obj) && obj.visible) {
+                        otherObjects.push(obj);
+                    }
+                }
+            }
+        }
+        
+        return otherObjects;
     }
     
     /**
@@ -5809,11 +6151,32 @@ class SelectTool extends Tool {
             
             // Clicked on empty space - check if we should exit current container
             if (AppState.selectionContext.currentContainer) {
-                // Check if clicked outside current container
-                if (!AppState.selectionContext.currentContainer.containsPoint(x, y)) {
+                const container = AppState.selectionContext.currentContainer;
+                // Check if clicked outside current container bounds
+                const bounds = container.getBounds?.() || { x: container.x, y: container.y, width: container.width, height: container.height };
+                const isOutsideContainer = x < bounds.x || x >= bounds.x + bounds.width || 
+                                           y < bounds.y || y >= bounds.y + bounds.height;
+                
+                if (isOutsideContainer) {
+                    // Exit container and try to select at root level
                     this._exitContainer(app);
+                    
+                    // Try to find and select an object at the click point at the new level
+                    const objAtNewLevel = this._findObjectAtPointInContext(x, y, app);
+                    if (objAtNewLevel) {
+                        AppState.selectedObjects = [objAtNewLevel];
+                        this._updatePropertiesPanel(objAtNewLevel);
+                        if (app.renderAllObjects) app.renderAllObjects();
+                        this._updateStatus(`Selected: ${objAtNewLevel.name || objAtNewLevel.type}`);
+                    }
                     return;
                 }
+                
+                // Clicked inside container but on empty space - just clear selection
+                AppState.selectedObjects = [];
+                this._updateStatus('Selection cleared');
+                if (app.renderAllObjects) app.renderAllObjects();
+                return;
             }
             
             // Start marquee selection
@@ -6056,23 +6419,24 @@ class SelectTool extends Tool {
             if (AppState.smartGuides.enabled) {
                 const proposedBounds = { x: newX, y: newY, width: newW, height: newH };
                 
-                // Get other objects for snapping
-                const otherObjects = [];
-                for (const layer of AppState.layers) {
-                    if (!layer.visible || !layer.objects) continue;
-                    for (const o of layer.objects) {
-                        if (o !== obj && o.visible) {
-                            otherObjects.push(o);
-                        }
-                    }
-                }
+                // Get other objects for snapping - context-aware for frame editing
+                const otherObjects = this._getSnapTargets(obj, app);
+                
+                // Get container bounds if editing inside a frame
+                const ctx = AppState.selectionContext;
+                const containerBounds = ctx.currentContainer ? 
+                    (ctx.currentContainer.getBounds?.() || { x: ctx.currentContainer.x, y: ctx.currentContainer.y, 
+                        width: ctx.currentContainer.width, height: ctx.currentContainer.height }) : null;
                 
                 this.smartGuides.updateConfig(AppState.smartGuides);
+                // Pass user guides for snapping
+                this.smartGuides.setUserGuides(AppState.guides);
                 const snapResult = this.smartGuides.calculateSnap(
                     proposedBounds,
                     otherObjects,
-                    AppState.canvasWidth,
-                    AppState.canvasHeight
+                    containerBounds?.width || AppState.canvasWidth,
+                    containerBounds?.height || AppState.canvasHeight,
+                    containerBounds
                 );
                 
                 // Apply snap adjustments based on which handle is being used
@@ -6176,26 +6540,27 @@ class SelectTool extends Tool {
                     height: currentBounds.height
                 };
                 
-                // Get all other objects (not selected) for snapping
-                const otherObjects = [];
-                for (const layer of AppState.layers) {
-                    if (!layer.visible || !layer.objects) continue;
-                    for (const obj of layer.objects) {
-                        if (!AppState.selectedObjects.includes(obj) && obj.visible) {
-                            otherObjects.push(obj);
-                        }
-                    }
-                }
+                // Get context-aware snap targets (siblings in current context)
+                const otherObjects = this._getSnapTargets(firstObj, app);
+                
+                // Get container bounds if editing inside a frame
+                const ctx = AppState.selectionContext;
+                const containerBounds = ctx.currentContainer ? 
+                    (ctx.currentContainer.getBounds?.() || { x: ctx.currentContainer.x, y: ctx.currentContainer.y, 
+                        width: ctx.currentContainer.width, height: ctx.currentContainer.height }) : null;
                 
                 // Sync smart guides config with AppState
                 this.smartGuides.updateConfig(AppState.smartGuides);
+                // Pass user guides for snapping
+                this.smartGuides.setUserGuides(AppState.guides);
                 
                 // Calculate snap
                 const snapResult = this.smartGuides.calculateSnap(
                     proposedBounds,
                     otherObjects,
-                    AppState.canvasWidth,
-                    AppState.canvasHeight
+                    containerBounds?.width || AppState.canvasWidth,
+                    containerBounds?.height || AppState.canvasHeight,
+                    containerBounds
                 );
                 
                 // Adjust deltas based on snap
@@ -6283,19 +6648,19 @@ class SelectTool extends Tool {
         
         // Draw corners with highlight
         const corner = '*';
-        buffer.setCell(x - 1, y - 1, corner, '#4CAF50', null);
-        buffer.setCell(x + w, y - 1, corner, '#4CAF50', null);
-        buffer.setCell(x - 1, y + h, corner, '#4CAF50', null);
-        buffer.setCell(x + w, y + h, corner, '#4CAF50', null);
+        buffer.setChar(x - 1, y - 1, corner, '#4CAF50');
+        buffer.setChar(x + w, y - 1, corner, '#4CAF50');
+        buffer.setChar(x - 1, y + h, corner, '#4CAF50');
+        buffer.setChar(x + w, y + h, corner, '#4CAF50');
         
         // Draw edge highlights
         for (let i = 0; i < w; i++) {
-            buffer.setCell(x + i, y - 1, '─', '#4CAF50', null);
-            buffer.setCell(x + i, y + h, '─', '#4CAF50', null);
+            buffer.setChar(x + i, y - 1, '─', '#4CAF50');
+            buffer.setChar(x + i, y + h, '─', '#4CAF50');
         }
         for (let j = 0; j < h; j++) {
-            buffer.setCell(x - 1, y + j, '│', '#4CAF50', null);
-            buffer.setCell(x + w, y + j, '│', '#4CAF50', null);
+            buffer.setChar(x - 1, y + j, '│', '#4CAF50');
+            buffer.setChar(x + w, y + j, '│', '#4CAF50');
         }
     }
     
@@ -6356,9 +6721,9 @@ class SelectTool extends Tool {
         
         for (let i = 0; i < indicatorLength; i++) {
             if (isHorizontal) {
-                buffer.setCell(indicatorX, indicatorY + i, char, color, null);
+                buffer.setChar(indicatorX, indicatorY + i, char, color);
             } else {
-                buffer.setCell(indicatorX + i, indicatorY, char, color, null);
+                buffer.setChar(indicatorX + i, indicatorY, char, color);
             }
         }
     }
@@ -6713,8 +7078,172 @@ class SelectTool extends Tool {
             }
         }
         
+        // Update Auto Layout properties
+        const autoLayoutGroup = $('#prop-auto-layout-group');
+        if (autoLayoutGroup) {
+            // Show auto layout section for container types (frames, groups, or objects with autoLayout enabled)
+            const canHaveAutoLayout = obj.type === 'frame' || obj.type === 'group' || obj.type === 'rectangle' || obj.type === 'rect';
+            autoLayoutGroup.style.display = canHaveAutoLayout ? 'block' : 'none';
+            
+            if (canHaveAutoLayout) {
+                const enabledInput = $('#prop-auto-layout-enabled');
+                const directionInput = $('#prop-auto-layout-direction');
+                const spacingInput = $('#prop-auto-layout-spacing');
+                const paddingInput = $('#prop-auto-layout-padding');
+                const alignmentInput = $('#prop-auto-layout-alignment');
+                const distributionInput = $('#prop-auto-layout-distribution');
+                const wrapInput = $('#prop-auto-layout-wrap');
+                
+                if (enabledInput) enabledInput.checked = obj.autoLayout?.enabled || false;
+                if (directionInput) directionInput.value = obj.autoLayout?.direction || 'vertical';
+                if (spacingInput) spacingInput.value = obj.autoLayout?.spacing ?? 1;
+                if (paddingInput) {
+                    // Use single padding value (average if complex)
+                    const p = obj.autoLayout?.padding;
+                    if (typeof p === 'object') {
+                        paddingInput.value = p.top ?? 1;
+                    } else {
+                        paddingInput.value = p ?? 1;
+                    }
+                }
+                if (alignmentInput) alignmentInput.value = obj.autoLayout?.alignment || 'start';
+                if (distributionInput) distributionInput.value = obj.autoLayout?.distribution || 'packed';
+                if (wrapInput) wrapInput.checked = obj.autoLayout?.wrap || false;
+            }
+        }
+        
+        // Update Appearance properties (Figma-style)
+        const opacityInput = $('#prop-opacity');
+        const opacityValue = $('#prop-opacity-value');
+        const blendModeInput = $('#prop-blend-mode');
+        
+        if (opacityInput) {
+            const opacityPercent = Math.round((obj.opacity ?? 1) * 100);
+            opacityInput.value = opacityPercent;
+            if (opacityValue) opacityValue.textContent = `${opacityPercent}%`;
+        }
+        if (blendModeInput) {
+            blendModeInput.value = obj.blendMode || 'normal';
+        }
+        
+        // Update Stroke properties (Figma-style)
+        const strokeWeightInput = $('#prop-stroke-weight');
+        const strokeAlignInput = $('#prop-stroke-align');
+        const strokeCapInput = $('#prop-stroke-cap');
+        const strokeJoinInput = $('#prop-stroke-join');
+        const strokeDashInput = $('#prop-stroke-dash');
+        
+        if (strokeWeightInput) strokeWeightInput.value = obj.stroke?.weight ?? 1;
+        if (strokeAlignInput) strokeAlignInput.value = obj.stroke?.align || 'center';
+        if (strokeCapInput) strokeCapInput.value = obj.stroke?.cap || 'none';
+        if (strokeJoinInput) strokeJoinInput.value = obj.stroke?.join || 'miter';
+        if (strokeDashInput) {
+            const dashPattern = obj.stroke?.dashPattern || [];
+            strokeDashInput.value = dashPattern.join(',');
+        }
+        
+        // Update Corner Radius properties (Figma-style)
+        const cornerGroup = $('#prop-corner-group');
+        const cornerAllInput = $('#prop-corner-all');
+        const cornerIndependentInput = $('#prop-corner-independent');
+        const cornerIndividualDiv = $('#prop-corner-individual');
+        const cornerTLInput = $('#prop-corner-tl');
+        const cornerTRInput = $('#prop-corner-tr');
+        const cornerBLInput = $('#prop-corner-bl');
+        const cornerBRInput = $('#prop-corner-br');
+        
+        // Show corner radius for rectangles and frames
+        const hasCornerRadius = obj.type === 'rectangle' || obj.type === 'frame';
+        if (cornerGroup) {
+            cornerGroup.style.display = hasCornerRadius ? 'block' : 'none';
+            
+            if (hasCornerRadius) {
+                const cr = obj.cornerRadius || { topLeft: 0, topRight: 0, bottomRight: 0, bottomLeft: 0, independent: false };
+                const isIndependent = cr.independent || false;
+                
+                if (cornerIndependentInput) {
+                    cornerIndependentInput.checked = isIndependent;
+                }
+                if (cornerIndividualDiv) {
+                    cornerIndividualDiv.style.display = isIndependent ? 'block' : 'none';
+                }
+                
+                // Calculate "all" value (use max if independent)
+                const allRadius = isIndependent 
+                    ? Math.max(cr.topLeft || 0, cr.topRight || 0, cr.bottomRight || 0, cr.bottomLeft || 0)
+                    : (cr.topLeft || 0);
+                
+                if (cornerAllInput) cornerAllInput.value = allRadius;
+                if (cornerTLInput) cornerTLInput.value = cr.topLeft || 0;
+                if (cornerTRInput) cornerTRInput.value = cr.topRight || 0;
+                if (cornerBLInput) cornerBLInput.value = cr.bottomLeft || 0;
+                if (cornerBRInput) cornerBRInput.value = cr.bottomRight || 0;
+            }
+        }
+        
+        // Update Effects list (Figma-style)
+        this._updateEffectsList(obj);
+        
         // Update UI component properties
         this._updateUIComponentProperties(obj);
+    }
+    
+    /**
+     * Update the effects list in properties panel
+     */
+    _updateEffectsList(obj) {
+        const effectsList = $('#prop-effects-list');
+        if (!effectsList) return;
+        
+        effectsList.innerHTML = '';
+        const effects = obj.effects || [];
+        
+        if (effects.length === 0) {
+            effectsList.innerHTML = '<div style="color: var(--ui-muted); font-size: 11px; padding: 4px;">No effects</div>';
+            return;
+        }
+        
+        effects.forEach((effect, index) => {
+            const effectRow = document.createElement('div');
+            effectRow.className = 'property-row';
+            effectRow.style.cssText = 'display: flex; align-items: center; gap: 4px;';
+            
+            // Visibility toggle
+            const visBtn = document.createElement('button');
+            visBtn.className = 'icon-btn small';
+            visBtn.textContent = effect.visible ? '👁' : '👁‍🗨';
+            visBtn.title = 'Toggle visibility';
+            visBtn.onclick = () => {
+                effect.visible = !effect.visible;
+                this._updateEffectsList(obj);
+            };
+            
+            // Effect type label
+            const typeLabel = document.createElement('span');
+            typeLabel.style.cssText = 'flex: 1; font-size: 11px;';
+            const typeNames = {
+                'dropShadow': '🌑 Drop Shadow',
+                'innerShadow': '🌓 Inner Shadow',
+                'layerBlur': '🌫️ Layer Blur',
+                'backgroundBlur': '🔲 Background Blur'
+            };
+            typeLabel.textContent = typeNames[effect.type] || effect.type;
+            
+            // Remove button
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'icon-btn small';
+            removeBtn.textContent = '×';
+            removeBtn.title = 'Remove effect';
+            removeBtn.onclick = () => {
+                obj.effects.splice(index, 1);
+                this._updateEffectsList(obj);
+            };
+            
+            effectRow.appendChild(visBtn);
+            effectRow.appendChild(typeLabel);
+            effectRow.appendChild(removeBtn);
+            effectsList.appendChild(effectRow);
+        });
     }
     
     _updateUIComponentProperties(obj) {
@@ -7294,52 +7823,99 @@ class TextTool extends Tool {
         this.app = null; // Will be set when tool is used
     }
     
-    onMouseDown(x, y, button, renderer) {
+    /**
+     * Commit the current text as an object
+     */
+    _commitText(renderer, app) {
+        if (this.text.length > 0) {
+            // Create TextObject instead of drawing directly
+            const textObj = new TextObject();
+            textObj.x = this.textX;
+            textObj.y = this.textY;
+            textObj.width = this.text.length;
+            textObj.height = 1;
+            textObj.text = this.text;
+            textObj.strokeColor = AppState.strokeColor;
+            textObj.name = `Text ${Date.now() % 10000}`;
+            
+            // Add to active layer
+            if (app && app.addObject) {
+                app.addObject(textObj, true);
+            } else {
+                // Fallback: draw directly
+                renderer.buffer.drawText(this.textX, this.textY, this.text, AppState.strokeColor);
+            }
+        }
+        this.text = '';
+        renderer.clearPreview();
+        renderer.render();
+    }
+    
+    onMouseDown(x, y, button, renderer, app) {
         if (button === 0) {
+            // If already typing, commit current text first (Figma behavior)
+            if (this.isTyping && this.text.length > 0) {
+                this._commitText(renderer, app);
+            }
+            
+            // Start new text at click position
             this.textX = x;
             this.textY = y;
             this.isTyping = true;
             this.text = '';
+            
+            // Show cursor at new position
+            renderer.clearPreview();
+            renderer.previewBuffer.drawText(this.textX, this.textY, '│', AppState.strokeColor);
+            renderer.render();
         }
     }
     
     onKeyDown(key, renderer, app) {
         if (!this.isTyping) return;
         
-        if (key === 'Enter' || key === 'Escape') {
+        if (key === 'Enter') {
+            // Commit text and start new line below (Figma: Enter commits and stays in text mode)
             if (this.text.length > 0) {
-                // Create TextObject instead of drawing directly
-                const textObj = new TextObject();
-                textObj.x = this.textX;
-                textObj.y = this.textY;
-                textObj.width = this.text.length;
-                textObj.height = 1;
-                textObj.text = this.text;
-                textObj.strokeColor = AppState.strokeColor;
-                textObj.name = `Text ${Date.now() % 10000}`;
-                
-                // Add to active layer
-                if (app && app.addObject) {
-                    app.addObject(textObj, true);
-                } else {
-                    // Fallback: draw directly
-                    renderer.buffer.drawText(this.textX, this.textY, this.text, AppState.strokeColor);
-                    renderer.render();
-                }
+                this._commitText(renderer, app);
+            }
+            // Move cursor to next line for continued typing
+            this.textY += 1;
+            this.text = '';
+            renderer.clearPreview();
+            renderer.previewBuffer.drawText(this.textX, this.textY, '│', AppState.strokeColor);
+            renderer.render();
+        } else if (key === 'Escape') {
+            // Escape commits and exits text mode
+            if (this.text.length > 0) {
+                this._commitText(renderer, app);
             }
             this.isTyping = false;
             renderer.clearPreview();
             renderer.render();
         } else if (key === 'Backspace') {
             this.text = this.text.slice(0, -1);
+            // Update preview
+            renderer.clearPreview();
+            renderer.previewBuffer.drawText(this.textX, this.textY, this.text + '│', AppState.strokeColor);
+            renderer.render();
         } else if (key.length === 1) {
             this.text += key;
+            // Update preview
+            renderer.clearPreview();
+            renderer.previewBuffer.drawText(this.textX, this.textY, this.text + '│', AppState.strokeColor);
+            renderer.render();
         }
-        
-        // Update preview
-        renderer.clearPreview();
-        renderer.previewBuffer.drawText(this.textX, this.textY, this.text + '│', AppState.strokeColor);
-        renderer.render();
+    }
+    
+    /**
+     * Called when tool is deactivated - commit any pending text
+     */
+    onDeactivate(renderer, app) {
+        if (this.isTyping && this.text.length > 0) {
+            this._commitText(renderer, app);
+        }
+        this.isTyping = false;
     }
 }
 
@@ -8598,6 +9174,8 @@ class ToolManager extends EventEmitter {
         
         this.tools = new Map();
         this.activeTool = null;
+        this.renderer = null;  // Will be set by app
+        this.app = null;       // Will be set by app
         
         // Register all tools
         this.register(new SelectTool());
@@ -8626,13 +9204,22 @@ class ToolManager extends EventEmitter {
         this.setActiveTool('select');
     }
     
+    /**
+     * Set renderer and app references for tool deactivation
+     */
+    setContext(renderer, app) {
+        this.renderer = renderer;
+        this.app = app;
+    }
+    
     register(tool) {
         this.tools.set(tool.name, tool);
     }
     
     setActiveTool(name) {
         if (this.activeTool) {
-            this.activeTool.deactivate();
+            // Call deactivate with context so tools can commit pending work
+            this.activeTool.deactivate(this.renderer, this.app);
         }
         
         this.activeTool = this.tools.get(name);
@@ -8722,6 +9309,9 @@ class Asciistrator extends EventEmitter {
         
         this.renderer = new AsciiCanvasRenderer(canvasContainer);
         this.toolManager = new ToolManager();
+        
+        // Set context for tool deactivation (needed for TextTool to commit)
+        this.toolManager.setContext(this.renderer, this);
         
         // Set up layer sync callback
         this.renderer.setSyncCallback(() => this.syncToActiveLayer());
@@ -9173,8 +9763,14 @@ class Asciistrator extends EventEmitter {
             AppState.guides = [];
         }
         
+        // Currently selected guide for manipulation
+        AppState.selectedGuide = null;
+        
         // Setup guide creation from rulers
         this._setupRulerGuideCreation();
+        
+        // Setup guide interaction (select, move, delete)
+        this._setupGuideInteraction();
         
         // Track mouse position for ruler indicators
         const viewport = $('#viewport');
@@ -9214,7 +9810,7 @@ class Asciistrator extends EventEmitter {
             isDraggingGuide = true;
             guideType = type;
             
-            // Create temporary guide line
+            // Create temporary guide line (Figma style)
             guideElement = document.createElement('div');
             guideElement.className = `guide-line guide-${type}`;
             guideElement.style.position = 'fixed';
@@ -9232,6 +9828,9 @@ class Asciistrator extends EventEmitter {
                 guideElement.style.top = '0';
                 guideElement.style.left = `${e.clientX}px`;
             }
+            
+            // Set initial position label
+            this._updateGuideDragLabel(guideElement, e, type);
             
             document.body.appendChild(guideElement);
             document.body.style.cursor = type === 'horizontal' ? 'row-resize' : 'col-resize';
@@ -9262,6 +9861,9 @@ class Asciistrator extends EventEmitter {
             } else {
                 guideElement.style.left = `${e.clientX}px`;
             }
+            
+            // Update position label
+            this._updateGuideDragLabel(guideElement, e, guideType);
         });
         
         // Finish guide creation
@@ -9309,6 +9911,31 @@ class Asciistrator extends EventEmitter {
             guideType = null;
             document.body.style.cursor = '';
         });
+    }
+    
+    /**
+     * Update the position label on a guide being dragged
+     */
+    _updateGuideDragLabel(element, e, type) {
+        const viewport = $('#viewport');
+        if (!viewport || !this.renderer) return;
+        
+        const viewportRect = viewport.getBoundingClientRect();
+        const charWidth = this.renderer.charWidth;
+        const charHeight = this.renderer.charHeight;
+        const panX = this.renderer.panX;
+        const panY = this.renderer.panY;
+        
+        let canvasPos;
+        if (type === 'horizontal') {
+            const viewportY = e.clientY - viewportRect.top;
+            canvasPos = Math.round((viewportY - panY) / charHeight);
+        } else {
+            const viewportX = e.clientX - viewportRect.left;
+            canvasPos = Math.round((viewportX - panX) / charWidth);
+        }
+        
+        element.setAttribute('data-position', canvasPos);
     }
     
     /**
@@ -9378,6 +10005,9 @@ class Asciistrator extends EventEmitter {
         
         // Update selection indicators on rulers
         this._updateRulerSelectionIndicators();
+        
+        // Render guide markers on rulers
+        this._renderGuideMarkersOnRulers();
     }
     
     _renderHorizontalRuler(element) {
@@ -9609,6 +10239,50 @@ class Asciistrator extends EventEmitter {
                 this.rulerVSelection.style.display = 'block';
             } else {
                 this.rulerVSelection.style.display = 'none';
+            }
+        }
+    }
+    
+    /**
+     * Render guide markers on rulers (Figma-style triangular markers)
+     */
+    _renderGuideMarkersOnRulers() {
+        // Remove existing guide markers
+        if (this.rulerH) {
+            this.rulerH.querySelectorAll('.ruler-guide-marker').forEach(el => el.remove());
+        }
+        if (this.rulerV) {
+            this.rulerV.querySelectorAll('.ruler-guide-marker').forEach(el => el.remove());
+        }
+        
+        if (!AppState.guides || AppState.guides.length === 0 || !this.renderer) return;
+        
+        const charWidth = this.renderer.charWidth;
+        const charHeight = this.renderer.charHeight;
+        const panX = this.renderer.panX;
+        const panY = this.renderer.panY;
+        
+        for (const guide of AppState.guides) {
+            const isSelected = AppState.selectedGuide && AppState.selectedGuide.id === guide.id;
+            const marker = document.createElement('div');
+            marker.className = 'ruler-guide-marker';
+            marker.dataset.guideId = guide.id;
+            
+            if (isSelected) {
+                marker.classList.add('selected');
+            }
+            
+            if (guide.type === 'vertical' && this.rulerH) {
+                // Vertical guide marker on horizontal ruler
+                const pixelX = guide.position * charWidth + panX;
+                marker.style.left = `${pixelX}px`;
+                this.rulerH.appendChild(marker);
+            } else if (guide.type === 'horizontal' && this.rulerV) {
+                // Horizontal guide marker on vertical ruler
+                const pixelY = guide.position * charHeight + panY;
+                marker.style.top = `${pixelY}px`;
+                marker.classList.add('horizontal');
+                this.rulerV.appendChild(marker);
             }
         }
     }
@@ -11327,6 +12001,260 @@ class Asciistrator extends EventEmitter {
             });
         }
         
+        // Auto Layout inputs
+        const autoLayoutEnabled = $('#prop-auto-layout-enabled');
+        const autoLayoutDirection = $('#prop-auto-layout-direction');
+        const autoLayoutSpacing = $('#prop-auto-layout-spacing');
+        const autoLayoutPadding = $('#prop-auto-layout-padding');
+        const autoLayoutAlignment = $('#prop-auto-layout-alignment');
+        const autoLayoutDistribution = $('#prop-auto-layout-distribution');
+        const autoLayoutWrap = $('#prop-auto-layout-wrap');
+        
+        const updateAutoLayout = (prop, value) => {
+            if (AppState.selectedObjects.length > 0) {
+                const obj = AppState.selectedObjects[0];
+                if (!obj.autoLayout) {
+                    obj.autoLayout = {
+                        enabled: false,
+                        direction: 'vertical',
+                        spacing: 1,
+                        padding: { top: 1, right: 1, bottom: 1, left: 1 },
+                        alignment: 'start',
+                        distribution: 'packed',
+                        wrap: false
+                    };
+                }
+                
+                if (prop === 'padding') {
+                    // Apply padding to all sides
+                    obj.autoLayout.padding = { top: value, right: value, bottom: value, left: value };
+                } else {
+                    obj.autoLayout[prop] = value;
+                }
+                
+                // Re-layout children if auto layout is enabled
+                if (obj.autoLayout.enabled && obj.layoutChildren) {
+                    obj.layoutChildren();
+                }
+                
+                self._spatialIndexDirty = true;
+                self.renderAllObjects();
+                self._updateStatus(`Auto Layout ${prop}: ${value}`);
+            }
+        };
+        
+        if (autoLayoutEnabled) {
+            autoLayoutEnabled.addEventListener('change', (e) => {
+                updateAutoLayout('enabled', e.target.checked);
+            });
+        }
+        
+        if (autoLayoutDirection) {
+            autoLayoutDirection.addEventListener('change', (e) => {
+                updateAutoLayout('direction', e.target.value);
+            });
+        }
+        
+        if (autoLayoutSpacing) {
+            autoLayoutSpacing.addEventListener('change', (e) => {
+                updateAutoLayout('spacing', parseInt(e.target.value) || 0);
+            });
+        }
+        
+        if (autoLayoutPadding) {
+            autoLayoutPadding.addEventListener('change', (e) => {
+                updateAutoLayout('padding', parseInt(e.target.value) || 0);
+            });
+        }
+        
+        if (autoLayoutAlignment) {
+            autoLayoutAlignment.addEventListener('change', (e) => {
+                updateAutoLayout('alignment', e.target.value);
+            });
+        }
+        
+        if (autoLayoutDistribution) {
+            autoLayoutDistribution.addEventListener('change', (e) => {
+                updateAutoLayout('distribution', e.target.value);
+            });
+        }
+        
+        if (autoLayoutWrap) {
+            autoLayoutWrap.addEventListener('change', (e) => {
+                updateAutoLayout('wrap', e.target.checked);
+            });
+        }
+        
+        // Appearance inputs (Figma-style)
+        const opacityInput = $('#prop-opacity');
+        const opacityValue = $('#prop-opacity-value');
+        const blendModeInput = $('#prop-blend-mode');
+        
+        if (opacityInput) {
+            opacityInput.addEventListener('input', (e) => {
+                const percent = parseInt(e.target.value) || 100;
+                if (opacityValue) opacityValue.textContent = `${percent}%`;
+                if (AppState.selectedObjects.length > 0) {
+                    AppState.selectedObjects[0].opacity = percent / 100;
+                    self.renderAllObjects();
+                }
+            });
+        }
+        
+        if (blendModeInput) {
+            blendModeInput.addEventListener('change', (e) => {
+                if (AppState.selectedObjects.length > 0) {
+                    AppState.selectedObjects[0].blendMode = e.target.value;
+                    self.renderAllObjects();
+                }
+            });
+        }
+        
+        // Stroke inputs (Figma-style)
+        const strokeWeightInput = $('#prop-stroke-weight');
+        const strokeAlignInput = $('#prop-stroke-align');
+        const strokeCapInput = $('#prop-stroke-cap');
+        const strokeJoinInput = $('#prop-stroke-join');
+        const strokeDashInput = $('#prop-stroke-dash');
+        
+        const updateStroke = (prop, value) => {
+            if (AppState.selectedObjects.length > 0) {
+                const obj = AppState.selectedObjects[0];
+                if (!obj.stroke) {
+                    obj.stroke = createStroke();
+                }
+                obj.stroke[prop] = value;
+                self.renderAllObjects();
+            }
+        };
+        
+        if (strokeWeightInput) {
+            strokeWeightInput.addEventListener('change', (e) => {
+                updateStroke('weight', parseInt(e.target.value) || 1);
+            });
+        }
+        
+        if (strokeAlignInput) {
+            strokeAlignInput.addEventListener('change', (e) => {
+                updateStroke('align', e.target.value);
+            });
+        }
+        
+        if (strokeCapInput) {
+            strokeCapInput.addEventListener('change', (e) => {
+                updateStroke('cap', e.target.value);
+            });
+        }
+        
+        if (strokeJoinInput) {
+            strokeJoinInput.addEventListener('change', (e) => {
+                updateStroke('join', e.target.value);
+            });
+        }
+        
+        if (strokeDashInput) {
+            strokeDashInput.addEventListener('change', (e) => {
+                const value = e.target.value.trim();
+                const dashPattern = value ? value.split(',').map(v => parseInt(v.trim()) || 0).filter(v => v > 0) : [];
+                updateStroke('dashPattern', dashPattern);
+            });
+        }
+        
+        // Corner radius inputs (Figma-style)
+        const cornerAllInput = $('#prop-corner-all');
+        const cornerIndependentInput = $('#prop-corner-independent');
+        const cornerIndividualDiv = $('#prop-corner-individual');
+        const cornerTLInput = $('#prop-corner-tl');
+        const cornerTRInput = $('#prop-corner-tr');
+        const cornerBLInput = $('#prop-corner-bl');
+        const cornerBRInput = $('#prop-corner-br');
+        
+        const updateCornerRadius = () => {
+            if (AppState.selectedObjects.length > 0) {
+                const obj = AppState.selectedObjects[0];
+                if (!obj.cornerRadius || typeof obj.cornerRadius !== 'object') {
+                    obj.cornerRadius = { topLeft: 0, topRight: 0, bottomRight: 0, bottomLeft: 0, independent: false };
+                }
+                self._spatialIndexDirty = true;
+                self.renderAllObjects();
+            }
+        };
+        
+        if (cornerIndependentInput) {
+            cornerIndependentInput.addEventListener('change', (e) => {
+                if (AppState.selectedObjects.length > 0) {
+                    const obj = AppState.selectedObjects[0];
+                    if (!obj.cornerRadius || typeof obj.cornerRadius !== 'object') {
+                        obj.cornerRadius = { topLeft: 0, topRight: 0, bottomRight: 0, bottomLeft: 0, independent: false };
+                    }
+                    obj.cornerRadius.independent = e.target.checked;
+                    if (cornerIndividualDiv) {
+                        cornerIndividualDiv.style.display = e.target.checked ? 'block' : 'none';
+                    }
+                    updateCornerRadius();
+                }
+            });
+        }
+        
+        if (cornerAllInput) {
+            cornerAllInput.addEventListener('change', (e) => {
+                const value = parseInt(e.target.value) || 0;
+                if (AppState.selectedObjects.length > 0) {
+                    const obj = AppState.selectedObjects[0];
+                    if (!obj.cornerRadius || typeof obj.cornerRadius !== 'object') {
+                        obj.cornerRadius = { topLeft: 0, topRight: 0, bottomRight: 0, bottomLeft: 0, independent: false };
+                    }
+                    // Set all corners to same value
+                    obj.cornerRadius.topLeft = value;
+                    obj.cornerRadius.topRight = value;
+                    obj.cornerRadius.bottomLeft = value;
+                    obj.cornerRadius.bottomRight = value;
+                    // Update individual inputs if visible
+                    if (cornerTLInput) cornerTLInput.value = value;
+                    if (cornerTRInput) cornerTRInput.value = value;
+                    if (cornerBLInput) cornerBLInput.value = value;
+                    if (cornerBRInput) cornerBRInput.value = value;
+                    updateCornerRadius();
+                }
+            });
+        }
+        
+        // Individual corner inputs
+        const setupCornerInput = (input, corner) => {
+            if (input) {
+                input.addEventListener('change', (e) => {
+                    const value = parseInt(e.target.value) || 0;
+                    if (AppState.selectedObjects.length > 0) {
+                        const obj = AppState.selectedObjects[0];
+                        if (!obj.cornerRadius || typeof obj.cornerRadius !== 'object') {
+                            obj.cornerRadius = { topLeft: 0, topRight: 0, bottomRight: 0, bottomLeft: 0, independent: true };
+                        }
+                        obj.cornerRadius[corner] = value;
+                        updateCornerRadius();
+                    }
+                });
+            }
+        };
+        
+        setupCornerInput(cornerTLInput, 'topLeft');
+        setupCornerInput(cornerTRInput, 'topRight');
+        setupCornerInput(cornerBLInput, 'bottomLeft');
+        setupCornerInput(cornerBRInput, 'bottomRight');
+        
+        // Add Effect button
+        const addEffectBtn = $('#btn-add-effect');
+        if (addEffectBtn) {
+            addEffectBtn.addEventListener('click', () => {
+                if (AppState.selectedObjects.length > 0) {
+                    const obj = AppState.selectedObjects[0];
+                    if (!obj.effects) obj.effects = [];
+                    
+                    // Show effect type picker
+                    self._showAddEffectDialog(obj);
+                }
+            });
+        }
+        
         // Line style selector (legacy)
         const styleSelect = $('#line-style');
         if (styleSelect) {
@@ -11756,6 +12684,9 @@ class Asciistrator extends EventEmitter {
         // Render guides on canvas
         this._renderGuides();
         
+        // Update guide markers on rulers
+        this._renderGuideMarkersOnRulers();
+        
         // Mark full redraw needed and render
         this.renderer.markFullDirty();
         this.renderer.render();
@@ -11860,7 +12791,7 @@ class Asciistrator extends EventEmitter {
     }
     
     /**
-     * Render user-created guides on the canvas
+     * Render user-created guides on the canvas (Figma-style)
      */
     _renderGuides() {
         if (!AppState.guides || AppState.guides.length === 0) return;
@@ -11868,28 +12799,272 @@ class Asciistrator extends EventEmitter {
         const buffer = this.renderer.previewBuffer;
         const width = buffer.width;
         const height = buffer.height;
-        const guideColor = '#ff00ff'; // Magenta for guides
+        
+        // Figma-style guide colors
+        const guideColor = '#f24822'; // Figma red-orange for guides
+        const selectedGuideColor = '#18a0fb'; // Figma blue for selected
+        const guideChar = '│'; // Solid line character for vertical
+        const hGuideChar = '─'; // Solid line character for horizontal
         
         for (const guide of AppState.guides) {
+            const isSelected = AppState.selectedGuide && AppState.selectedGuide.id === guide.id;
+            const color = isSelected ? selectedGuideColor : guideColor;
+            
             if (guide.type === 'horizontal') {
                 const y = guide.position;
                 if (y >= 0 && y < height) {
                     for (let x = 0; x < width; x++) {
-                        if (x % 2 === 0) { // Dashed line
-                            buffer.setChar(x, y, '·', guideColor);
-                        }
+                        // Figma-style: solid line with guide character
+                        buffer.setChar(x, y, hGuideChar, color);
                     }
                 }
             } else if (guide.type === 'vertical') {
                 const x = guide.position;
                 if (x >= 0 && x < width) {
                     for (let y = 0; y < height; y++) {
-                        if (y % 2 === 0) { // Dashed line
-                            buffer.setChar(x, y, '·', guideColor);
-                        }
+                        buffer.setChar(x, y, guideChar, color);
                     }
                 }
             }
+        }
+        
+        // Render guide labels at intersections with canvas edge
+        this._renderGuideLabels();
+    }
+    
+    /**
+     * Render guide position labels (shown when hovering/selected)
+     */
+    _renderGuideLabels() {
+        if (!AppState.selectedGuide) return;
+        
+        const guide = AppState.selectedGuide;
+        const buffer = this.renderer.previewBuffer;
+        const labelColor = '#18a0fb';
+        const label = `${guide.position}`;
+        
+        if (guide.type === 'horizontal') {
+            // Show position label at left edge
+            for (let i = 0; i < label.length && i < buffer.width; i++) {
+                buffer.setChar(i, guide.position, label[i], labelColor);
+            }
+        } else {
+            // Show position label at top
+            for (let i = 0; i < label.length && guide.position + i < buffer.width; i++) {
+                buffer.setChar(guide.position, i, label[i], labelColor);
+            }
+        }
+    }
+    
+    /**
+     * Setup guide interaction - select, move, delete
+     */
+    _setupGuideInteraction() {
+        // Track guide dragging state
+        this._guideDragState = {
+            isDragging: false,
+            guide: null,
+            startPosition: 0
+        };
+        
+        const viewport = $('#viewport');
+        if (!viewport) return;
+        
+        // Guide selection and drag start
+        viewport.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0) return;
+            
+            const guide = this._getGuideAtPosition(e);
+            if (guide) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                // Select the guide
+                AppState.selectedGuide = guide;
+                
+                // Start dragging
+                this._guideDragState.isDragging = true;
+                this._guideDragState.guide = guide;
+                this._guideDragState.startPosition = guide.position;
+                
+                // Deselect any objects
+                AppState.selectedObjects = [];
+                
+                // Change cursor
+                viewport.style.cursor = guide.type === 'horizontal' ? 'row-resize' : 'col-resize';
+                
+                this.renderAllObjects();
+            } else if (AppState.selectedGuide) {
+                // Clicked elsewhere - deselect guide
+                AppState.selectedGuide = null;
+                this.renderAllObjects();
+            }
+        }, true); // Use capture phase to intercept before tools
+        
+        // Guide dragging
+        viewport.addEventListener('pointermove', (e) => {
+            if (!this._guideDragState.isDragging) {
+                // Show hover cursor when over a guide
+                const guide = this._getGuideAtPosition(e);
+                if (guide) {
+                    viewport.style.cursor = guide.type === 'horizontal' ? 'row-resize' : 'col-resize';
+                } else if (!this.toolManager?.activeTool?.isDragging) {
+                    viewport.style.cursor = '';
+                }
+                return;
+            }
+            
+            const guide = this._guideDragState.guide;
+            if (!guide) return;
+            
+            // Calculate new position
+            const viewportRect = viewport.getBoundingClientRect();
+            const charWidth = this.renderer.charWidth;
+            const charHeight = this.renderer.charHeight;
+            const panX = this.renderer.panX;
+            const panY = this.renderer.panY;
+            
+            let newPos;
+            if (guide.type === 'horizontal') {
+                const viewportY = e.clientY - viewportRect.top;
+                newPos = Math.round((viewportY - panY) / charHeight);
+            } else {
+                const viewportX = e.clientX - viewportRect.left;
+                newPos = Math.round((viewportX - panX) / charWidth);
+            }
+            
+            // Update guide position
+            guide.position = newPos;
+            this._updateStatus(`Moving ${guide.type} guide to ${newPos}`);
+            this.renderAllObjects();
+        });
+        
+        // Guide drag end
+        viewport.addEventListener('pointerup', (e) => {
+            if (this._guideDragState.isDragging) {
+                const guide = this._guideDragState.guide;
+                
+                // Check if guide should be removed (dragged off canvas/back to ruler)
+                const viewportRect = viewport.getBoundingClientRect();
+                const charWidth = this.renderer.charWidth;
+                const charHeight = this.renderer.charHeight;
+                const panX = this.renderer.panX;
+                const panY = this.renderer.panY;
+                
+                let shouldRemove = false;
+                if (guide.type === 'horizontal') {
+                    // Remove if dragged to top ruler area or outside viewport
+                    const viewportY = e.clientY - viewportRect.top;
+                    if (viewportY < 0 || e.clientY < viewportRect.top) {
+                        shouldRemove = true;
+                    }
+                } else {
+                    // Remove if dragged to left ruler area or outside viewport
+                    const viewportX = e.clientX - viewportRect.left;
+                    if (viewportX < 0 || e.clientX < viewportRect.left) {
+                        shouldRemove = true;
+                    }
+                }
+                
+                if (shouldRemove) {
+                    this._removeGuide(guide);
+                    this._updateStatus(`Removed ${guide.type} guide`);
+                }
+                
+                this._guideDragState.isDragging = false;
+                this._guideDragState.guide = null;
+                viewport.style.cursor = '';
+                this.renderAllObjects();
+            }
+        });
+        
+        // Keyboard handling for guide deletion
+        document.addEventListener('keydown', (e) => {
+            if (!AppState.selectedGuide) return;
+            
+            // Don't handle if typing in an input
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            
+            if (e.key === 'Delete' || e.key === 'Backspace') {
+                e.preventDefault();
+                this._removeGuide(AppState.selectedGuide);
+                this._updateStatus('Guide deleted');
+                this.renderAllObjects();
+            } else if (e.key === 'Escape') {
+                // Deselect guide
+                AppState.selectedGuide = null;
+                this.renderAllObjects();
+            } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || 
+                       e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                // Move guide with arrow keys
+                e.preventDefault();
+                const guide = AppState.selectedGuide;
+                const delta = e.shiftKey ? 10 : 1;
+                
+                if (guide.type === 'horizontal') {
+                    if (e.key === 'ArrowUp') guide.position -= delta;
+                    else if (e.key === 'ArrowDown') guide.position += delta;
+                } else {
+                    if (e.key === 'ArrowLeft') guide.position -= delta;
+                    else if (e.key === 'ArrowRight') guide.position += delta;
+                }
+                
+                this._updateStatus(`Guide moved to ${guide.position}`);
+                this.renderAllObjects();
+            }
+        });
+    }
+    
+    /**
+     * Get guide at screen position (with tolerance)
+     */
+    _getGuideAtPosition(e) {
+        if (!AppState.guides || AppState.guides.length === 0) return null;
+        
+        const viewport = $('#viewport');
+        if (!viewport || !this.renderer) return null;
+        
+        const viewportRect = viewport.getBoundingClientRect();
+        const charWidth = this.renderer.charWidth;
+        const charHeight = this.renderer.charHeight;
+        const panX = this.renderer.panX;
+        const panY = this.renderer.panY;
+        
+        const viewportX = e.clientX - viewportRect.left;
+        const viewportY = e.clientY - viewportRect.top;
+        
+        const canvasX = Math.round((viewportX - panX) / charWidth);
+        const canvasY = Math.round((viewportY - panY) / charHeight);
+        
+        // Tolerance in canvas units (how close to guide counts as hit)
+        const tolerance = 1;
+        
+        // Check each guide
+        for (const guide of AppState.guides) {
+            if (guide.type === 'horizontal') {
+                if (Math.abs(canvasY - guide.position) <= tolerance) {
+                    return guide;
+                }
+            } else {
+                if (Math.abs(canvasX - guide.position) <= tolerance) {
+                    return guide;
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Remove a guide from the guides array
+     */
+    _removeGuide(guide) {
+        const index = AppState.guides.findIndex(g => g.id === guide.id);
+        if (index !== -1) {
+            AppState.guides.splice(index, 1);
+        }
+        if (AppState.selectedGuide && AppState.selectedGuide.id === guide.id) {
+            AppState.selectedGuide = null;
         }
     }
     
@@ -17057,6 +18232,76 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             this._updateStatus(`Constraints applied: ${ConstraintEngine.getConstraintLabel({ horizontal, vertical })}`);
             this._updatePropertiesPanel();
             closeDialog();
+        });
+        
+        dialog.addEventListener('click', (e) => {
+            if (e.target === dialog) closeDialog();
+        });
+    }
+    
+    /**
+     * Show dialog to add a new effect to an object
+     */
+    _showAddEffectDialog(obj) {
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-overlay';
+        dialog.innerHTML = `
+            <div class="modal-dialog" style="width: 300px;">
+                <div class="modal-header">
+                    <span class="modal-title">Add Effect</span>
+                    <button class="modal-close">×</button>
+                </div>
+                <div class="modal-body" style="padding: 16px;">
+                    <p style="margin-bottom: 12px; font-size: 13px;">Select an effect type to add:</p>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <button class="btn effect-type-btn" data-effect="dropShadow" style="justify-content: flex-start; padding: 12px;">
+                            🌑 Drop Shadow
+                            <span style="font-size: 11px; color: var(--ui-muted); margin-left: auto;">Outer shadow</span>
+                        </button>
+                        <button class="btn effect-type-btn" data-effect="innerShadow" style="justify-content: flex-start; padding: 12px;">
+                            🌓 Inner Shadow
+                            <span style="font-size: 11px; color: var(--ui-muted); margin-left: auto;">Inset shadow</span>
+                        </button>
+                        <button class="btn effect-type-btn" data-effect="layerBlur" style="justify-content: flex-start; padding: 12px;">
+                            🌫️ Layer Blur
+                            <span style="font-size: 11px; color: var(--ui-muted); margin-left: auto;">Blur object</span>
+                        </button>
+                        <button class="btn effect-type-btn" data-effect="backgroundBlur" style="justify-content: flex-start; padding: 12px;">
+                            🔲 Background Blur
+                            <span style="font-size: 11px; color: var(--ui-muted); margin-left: auto;">Blur behind</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(dialog);
+        
+        const closeDialog = () => dialog.remove();
+        
+        dialog.querySelector('.modal-close').addEventListener('click', closeDialog);
+        
+        // Handle effect type selection
+        dialog.querySelectorAll('.effect-type-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const effectType = btn.dataset.effect;
+                const newEffect = createEffect(effectType);
+                
+                if (newEffect) {
+                    if (!obj.effects) obj.effects = [];
+                    obj.effects.push(newEffect);
+                    
+                    // Update the effects list in properties panel
+                    const activeTool = this.toolManager?.activeTool;
+                    if (activeTool && activeTool._updateEffectsList) {
+                        activeTool._updateEffectsList(obj);
+                    }
+                    
+                    this._updateStatus(`Added ${effectType} effect`);
+                    this.renderAllObjects();
+                }
+                
+                closeDialog();
+            });
         });
         
         dialog.addEventListener('click', (e) => {
