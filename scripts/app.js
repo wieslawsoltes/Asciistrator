@@ -1336,29 +1336,73 @@ class SceneObject {
     }
     
     /**
-     * Process all pending layouts
+     * Process all pending layouts - optimized version
      */
     static _flushLayoutQueue() {
         SceneObject._layoutBatchPending = false;
         SceneObject._layoutBatchRAF = null;
         
-        if (SceneObject._layoutQueue.size === 0) return;
+        const queueSize = SceneObject._layoutQueue.size;
+        if (queueSize === 0) return;
         
-        // Sort by depth (parent before child) to avoid redundant layouts
-        const sorted = [...SceneObject._layoutQueue].sort((a, b) => {
-            const depthA = SceneObject._getObjectDepth(a);
-            const depthB = SceneObject._getObjectDepth(b);
-            return depthA - depthB;
-        });
+        // Fast path: single object, just process it
+        if (queueSize === 1) {
+            const obj = SceneObject._layoutQueue.values().next().value;
+            if (obj._performLayout) {
+                obj._performLayout();
+            }
+            SceneObject._layoutQueue.clear();
+            return;
+        }
+        
+        // For multiple objects, we need to process parents before children
+        // First, build a depth map to avoid repeated hierarchy walks
+        const depthMap = new Map();
+        const queue = [...SceneObject._layoutQueue];
+        
+        for (const obj of queue) {
+            if (!depthMap.has(obj)) {
+                // Calculate depth and cache along the way
+                let depth = 0;
+                let current = obj;
+                const path = [obj];
+                
+                while (current._cachedParent) {
+                    current = current._cachedParent;
+                    if (depthMap.has(current)) {
+                        depth = depthMap.get(current) + path.length;
+                        break;
+                    }
+                    path.push(current);
+                    depth++;
+                }
+                
+                // Set depths for all objects in path
+                for (let i = 0; i < path.length; i++) {
+                    depthMap.set(path[i], depth - i);
+                }
+            }
+        }
+        
+        // Sort by cached depth (parent before child)
+        queue.sort((a, b) => depthMap.get(a) - depthMap.get(b));
         
         // Track which objects we've already laid out
         const processed = new Set();
         
-        for (const obj of sorted) {
+        for (const obj of queue) {
             // Skip if a parent was already processed (it will have laid out this child)
-            if (SceneObject._hasProcessedAncestor(obj, processed)) continue;
+            let skipDueToParent = false;
+            let current = obj._cachedParent;
+            while (current) {
+                if (processed.has(current)) {
+                    skipDueToParent = true;
+                    break;
+                }
+                current = current._cachedParent;
+            }
             
-            if (SceneObject.hasAutoLayout(obj) && obj._performLayout) {
+            if (!skipDueToParent && obj._performLayout) {
                 obj._performLayout();
             }
             processed.add(obj);
@@ -1692,68 +1736,91 @@ class SceneObject {
     
     /**
      * Perform layout immediately (called by batch processor)
+     * Optimized to minimize allocations and property lookups
      */
     _performLayout() {
-        if (!SceneObject.hasAutoLayout(this) || this.children.length === 0) return;
+        const children = this.children;
+        const childCount = children.length;
+        if (childCount === 0) return;
         
-        const content = this.getContentBounds();
-        const isHorizontal = this.layoutMode === 'HORIZONTAL';
+        const layoutMode = this.layoutMode;
+        if (!layoutMode || layoutMode === 'NONE') return;
         
-        // Reuse array if children haven't changed
-        const items = this.itemReverseZIndex ? this.children.slice().reverse() : this.children;
-        const itemCount = items.length;
+        const isHorizontal = layoutMode === 'HORIZONTAL';
         
-        // Pre-allocate itemSizes array and collect sizing info
-        const itemSizes = new Array(itemCount);
-        let maxBaseline = 0;  // For baseline alignment
+        // Cache frequently used values
+        const paddingLeft = this.paddingLeft;
+        const paddingTop = this.paddingTop;
+        const paddingRight = this.paddingRight;
+        const paddingBottom = this.paddingBottom;
+        const parentX = this.x;
+        const parentY = this.y;
+        const contentX = parentX + paddingLeft;
+        const contentY = parentY + paddingTop;
+        const contentWidth = Math.max(0, this.width - paddingLeft - paddingRight);
+        const contentHeight = Math.max(0, this.height - paddingTop - paddingBottom);
+        const itemSpacing = this.itemSpacing;
         
-        for (let i = 0; i < itemCount; i++) {
-            const child = items[i];
-            // Use simple bounds for layout (no recursive child bounds)
-            const bounds = child.getSimpleBounds ? child.getSimpleBounds() : 
-                { width: child.width || 1, height: child.height || 1 };
-            const sz = child._layoutSizing || { horizontal: SizingMode.FIXED, vertical: SizingMode.FIXED };
-            const sizing = child.sizing || {};
-            
-            // Get baseline for text objects
-            const baseline = child._getBaseline ? child._getBaseline() : (bounds.height * 0.8) | 0;
-            if (baseline > maxBaseline) maxBaseline = baseline;
-            
-            itemSizes[i] = {
-                obj: child,
-                width: bounds.width || 1,
-                height: bounds.height || 1,
-                fillH: sz.horizontal === SizingMode.FILL,
-                fillV: sz.vertical === SizingMode.FILL,
-                minW: sizing.minWidth,
-                maxW: sizing.maxWidth,
-                minH: sizing.minHeight,
-                maxH: sizing.maxHeight,
-                baseline: baseline
-            };
+        // Get items in layout order
+        const items = this.itemReverseZIndex ? children.slice().reverse() : children;
+        
+        // Reuse item data array if possible to reduce allocations
+        if (!this._layoutItemData || this._layoutItemData.length !== childCount) {
+            this._layoutItemData = new Array(childCount);
+            for (let i = 0; i < childCount; i++) {
+                this._layoutItemData[i] = { obj: null, width: 0, height: 0, fillH: false, fillV: false, minW: null, maxW: null, minH: null, maxH: null, baseline: 0 };
+            }
         }
         
-        // Handle wrapping
-        if (this.layoutWrap === 'WRAP') {
-            this._layoutWithWrap(content, itemSizes, isHorizontal);
-            return;
-        }
-        
-        // Calculate total fixed size and fill count in single pass
+        const itemSizes = this._layoutItemData;
+        let maxBaseline = 0;
         let totalFixedSize = 0;
         let fillCount = 0;
         
-        for (let i = 0; i < itemCount; i++) {
-            const item = itemSizes[i];
-            const isFill = isHorizontal ? item.fillH : item.fillV;
+        // Single pass: collect sizing info and calculate totals
+        for (let i = 0; i < childCount; i++) {
+            const child = items[i];
+            const data = itemSizes[i];
+            
+            data.obj = child;
+            data.width = child.width || 1;
+            data.height = child.height || 1;
+            
+            const sz = child._layoutSizing;
+            data.fillH = sz ? sz.horizontal === SizingMode.FILL : false;
+            data.fillV = sz ? sz.vertical === SizingMode.FILL : false;
+            
+            const sizing = child.sizing;
+            if (sizing) {
+                data.minW = sizing.minWidth;
+                data.maxW = sizing.maxWidth;
+                data.minH = sizing.minHeight;
+                data.maxH = sizing.maxHeight;
+            } else {
+                data.minW = data.maxW = data.minH = data.maxH = null;
+            }
+            
+            // Baseline for text objects
+            const baseline = child._getBaseline ? child._getBaseline() : ((data.height * 0.8) | 0);
+            data.baseline = baseline;
+            if (baseline > maxBaseline) maxBaseline = baseline;
+            
+            // Calculate totals
+            const isFill = isHorizontal ? data.fillH : data.fillV;
             if (!isFill) {
-                totalFixedSize += isHorizontal ? item.width : item.height;
+                totalFixedSize += isHorizontal ? data.width : data.height;
             } else {
                 fillCount++;
             }
         }
         
-        const totalSpacing = this.itemSpacing * Math.max(0, itemCount - 1);
+        // Handle wrapping separately
+        if (this.layoutWrap === 'WRAP') {
+            this._layoutWithWrap({ x: contentX, y: contentY, width: contentWidth, height: contentHeight }, itemSizes, isHorizontal, childCount);
+            return;
+        }
+        
+        const totalSpacing = itemSpacing * Math.max(0, childCount - 1);
         const mainAxisSize = isHorizontal ? content.width : content.height;
         const crossAxisSize = isHorizontal ? content.height : content.width;
         const availableForFill = mainAxisSize - totalFixedSize - totalSpacing;
@@ -1761,39 +1828,40 @@ class SceneObject {
         
         // Calculate positions based on distribution
         let mainPos = 0;
-        let gap = this.itemSpacing;
+        let gap = itemSpacing;
         
         // Check for space distribution modes
-        const isSpaceDistribution = this.primaryAxisAlignItems === 'SPACE_BETWEEN' || 
-                                    this.primaryAxisAlignItems === 'SPACE_AROUND' ||
-                                    this.primaryAxisAlignItems === 'SPACE_EVENLY';
+        const primaryAlign = this.primaryAxisAlignItems;
+        const isSpaceDistribution = primaryAlign === 'SPACE_BETWEEN' || 
+                                    primaryAlign === 'SPACE_AROUND' ||
+                                    primaryAlign === 'SPACE_EVENLY';
         
         if (isSpaceDistribution) {
             let totalItemSize = 0;
-            for (let i = 0; i < itemCount; i++) {
+            for (let i = 0; i < childCount; i++) {
                 const item = itemSizes[i];
                 const isFill = isHorizontal ? item.fillH : item.fillV;
                 totalItemSize += isFill ? fillSize : (isHorizontal ? item.width : item.height);
             }
             const remainingSpace = mainAxisSize - totalItemSize;
             
-            switch (this.primaryAxisAlignItems) {
+            switch (primaryAlign) {
                 case 'SPACE_BETWEEN':
-                    gap = itemCount > 1 ? remainingSpace / (itemCount - 1) : 0;
+                    gap = childCount > 1 ? remainingSpace / (childCount - 1) : 0;
                     break;
                 case 'SPACE_AROUND':
-                    gap = remainingSpace / itemCount;
+                    gap = remainingSpace / childCount;
                     mainPos = gap / 2;
                     break;
                 case 'SPACE_EVENLY':
-                    gap = remainingSpace / (itemCount + 1);
+                    gap = remainingSpace / (childCount + 1);
                     mainPos = gap;
                     break;
             }
         } else {
             // Packed alignment
             const totalSize = totalFixedSize + (fillCount * fillSize) + totalSpacing;
-            switch (this.primaryAxisAlignItems) {
+            switch (primaryAlign) {
                 case 'CENTER':
                     mainPos = ((mainAxisSize - totalSize) / 2) | 0;
                     break;
@@ -1803,13 +1871,10 @@ class SceneObject {
             }
         }
         
-        // Apply positions - optimized loop
-        const contentX = content.x;
-        const contentY = content.y;
-        const parentX = this.x;
-        const parentY = this.y;
+        // Apply positions - optimized loop with cached values
+        const counterAlign = this.counterAxisAlignItems;
         
-        for (let i = 0; i < itemCount; i++) {
+        for (let i = 0; i < childCount; i++) {
             const item = itemSizes[i];
             const obj = item.obj;
             const isFillMain = isHorizontal ? item.fillH : item.fillV;
@@ -1820,40 +1885,40 @@ class SceneObject {
             
             // Apply min/max constraints to main axis size
             if (isHorizontal) {
-                if (item.minW !== null && item.minW !== undefined) itemMainSize = Math.max(item.minW, itemMainSize);
-                if (item.maxW !== null && item.maxW !== undefined) itemMainSize = Math.min(item.maxW, itemMainSize);
+                if (item.minW != null) itemMainSize = Math.max(item.minW, itemMainSize);
+                if (item.maxW != null) itemMainSize = Math.min(item.maxW, itemMainSize);
             } else {
-                if (item.minH !== null && item.minH !== undefined) itemMainSize = Math.max(item.minH, itemMainSize);
-                if (item.maxH !== null && item.maxH !== undefined) itemMainSize = Math.min(item.maxH, itemMainSize);
+                if (item.minH != null) itemMainSize = Math.max(item.minH, itemMainSize);
+                if (item.maxH != null) itemMainSize = Math.min(item.maxH, itemMainSize);
             }
             
             // Apply min/max constraints to cross axis size
             if (isHorizontal) {
-                if (item.minH !== null && item.minH !== undefined) itemCrossSize = Math.max(item.minH, itemCrossSize);
-                if (item.maxH !== null && item.maxH !== undefined) itemCrossSize = Math.min(item.maxH, itemCrossSize);
+                if (item.minH != null) itemCrossSize = Math.max(item.minH, itemCrossSize);
+                if (item.maxH != null) itemCrossSize = Math.min(item.maxH, itemCrossSize);
             } else {
-                if (item.minW !== null && item.minW !== undefined) itemCrossSize = Math.max(item.minW, itemCrossSize);
-                if (item.maxW !== null && item.maxW !== undefined) itemCrossSize = Math.min(item.maxW, itemCrossSize);
+                if (item.minW != null) itemCrossSize = Math.max(item.minW, itemCrossSize);
+                if (item.maxW != null) itemCrossSize = Math.min(item.maxW, itemCrossSize);
             }
             
             // Cross axis positioning (using counterAxisAlignItems)
             let crossPos = 0;
-            const isStretchCross = this.counterAxisAlignItems === 'STRETCH' || isFillCross;
+            const isStretchCross = counterAlign === 'STRETCH' || isFillCross;
             
             if (isStretchCross) {
                 itemCrossSize = crossAxisSize;
                 // Apply max constraint even when stretching
-                if (isHorizontal && item.maxH !== null && item.maxH !== undefined) {
+                if (isHorizontal && item.maxH != null) {
                     itemCrossSize = Math.min(item.maxH, itemCrossSize);
-                } else if (!isHorizontal && item.maxW !== null && item.maxW !== undefined) {
+                } else if (!isHorizontal && item.maxW != null) {
                     itemCrossSize = Math.min(item.maxW, itemCrossSize);
                 }
-            } else if (this.counterAxisAlignItems === 'BASELINE' && isHorizontal) {
+            } else if (counterAlign === 'BASELINE' && isHorizontal) {
                 // Baseline alignment - align items by their text baseline
                 // Only meaningful for horizontal layouts
                 crossPos = maxBaseline - item.baseline;
             } else {
-                switch (this.counterAxisAlignItems) {
+                switch (counterAlign) {
                     case 'CENTER':
                         crossPos = ((crossAxisSize - itemCrossSize) / 2) | 0;
                         break;
@@ -1864,16 +1929,16 @@ class SceneObject {
             }
             
             // Apply main axis fill with min/max constraints
-            if (isHorizontal && item.fillH && obj.width !== undefined) {
+            if (isHorizontal && item.fillH) {
                 obj.width = itemMainSize;
-            } else if (!isHorizontal && item.fillV && obj.height !== undefined) {
+            } else if (!isHorizontal && item.fillV) {
                 obj.height = itemMainSize;
             }
             
             // Apply cross axis fill/stretch
-            if (isHorizontal && (item.fillV || isStretchCross) && obj.height !== undefined) {
+            if (isHorizontal && (item.fillV || isStretchCross)) {
                 obj.height = itemCrossSize;
-            } else if (!isHorizontal && (item.fillH || isStretchCross) && obj.width !== undefined) {
+            } else if (!isHorizontal && (item.fillH || isStretchCross)) {
                 obj.width = itemCrossSize;
             }
             
@@ -1886,19 +1951,20 @@ class SceneObject {
                 obj.y = contentY + mainPos;
             }
             
-            // Update relative position
-            obj._relativePosition = {
-                x: obj.x - parentX,
-                y: obj.y - parentY
-            };
-            
-            // Invalidate child bounds cache
-            if (obj.invalidateBounds) {
-                obj.invalidateBounds();
+            // Update relative position (reuse object if exists)
+            if (!obj._relativePosition) {
+                obj._relativePosition = { x: 0, y: 0 };
             }
+            obj._relativePosition.x = obj.x - parentX;
+            obj._relativePosition.y = obj.y - parentY;
             
-            // Schedule nested layout (don't call directly to avoid deep recursion)
-            if (SceneObject.hasAutoLayout(obj) && obj.children?.length > 0) {
+            // Invalidate child bounds cache - inline check for speed
+            obj._boundsCacheValid = false;
+            obj._boundsCache = null;
+            
+            // Schedule nested layout only if has auto layout
+            const childLayout = obj.layoutMode;
+            if (childLayout && childLayout !== 'NONE' && obj.children && obj.children.length > 0) {
                 SceneObject.requestLayout(obj);
             }
             
@@ -1922,20 +1988,24 @@ class SceneObject {
     /**
      * Layout with wrapping support (optimized)
      */
-    _layoutWithWrap(content, itemSizes, isHorizontal) {
+    _layoutWithWrap(content, itemSizes, isHorizontal, itemCount) {
         const mainAxisSize = isHorizontal ? content.width : content.height;
-        const lines = [];
-        let currentLine = [];
-        let currentLineSize = 0;
         const spacing = this.itemSpacing;
         const wrapSpacing = this.counterAxisSpacing;
         const contentX = content.x;
         const contentY = content.y;
         const parentX = this.x;
         const parentY = this.y;
+        const primaryAlign = this.primaryAxisAlignItems;
+        const counterAlign = this.counterAxisAlignItems;
+        
+        // Pre-allocate lines array (estimate max lines)
+        const lines = [];
+        let currentLine = [];
+        let currentLineSize = 0;
         
         // Group into lines - apply min/max for line breaking calculation
-        for (let i = 0; i < itemSizes.length; i++) {
+        for (let i = 0; i < itemCount; i++) {
             const item = itemSizes[i];
             let itemSize = isHorizontal ? item.width : item.height;
             
@@ -1991,7 +2061,7 @@ class SceneObject {
             }
             
             let mainPos = 0;
-            switch (this.primaryAxisAlignItems) {
+            switch (primaryAlign) {
                 case 'CENTER':
                     mainPos = ((mainAxisSize - line.size) / 2) | 0;
                     break;
@@ -2021,7 +2091,7 @@ class SceneObject {
                 }
                 
                 let itemCrossPos = crossPos;
-                switch (this.counterAxisAlignItems) {
+                switch (counterAlign) {
                     case 'CENTER':
                         itemCrossPos = crossPos + ((lineMaxCross - itemCrossSize) / 2) | 0;
                         break;
@@ -2036,13 +2106,13 @@ class SceneObject {
                         } else if (!isHorizontal && item.maxW != null) {
                             stretchSize = Math.min(item.maxW, stretchSize);
                         }
-                        if (isHorizontal && obj.height !== undefined) {
+                        if (isHorizontal) {
                             obj.height = stretchSize;
-                        } else if (!isHorizontal && obj.width !== undefined) {
+                        } else {
                             obj.width = stretchSize;
                         }
                         break;
-                    case LayoutAlignment.BASELINE:
+                    case 'BASELINE':
                         // Baseline alignment for horizontal layouts
                         if (isHorizontal) {
                             itemCrossPos = crossPos + lineMaxBaseline - item.baseline;
@@ -2058,18 +2128,20 @@ class SceneObject {
                     obj.y = contentY + mainPos;
                 }
                 
-                obj._relativePosition = {
-                    x: obj.x - parentX,
-                    y: obj.y - parentY
-                };
-                
-                // Invalidate child bounds cache
-                if (obj.invalidateBounds) {
-                    obj.invalidateBounds();
+                // Update relative position (reuse object if exists)
+                if (!obj._relativePosition) {
+                    obj._relativePosition = { x: 0, y: 0 };
                 }
+                obj._relativePosition.x = obj.x - parentX;
+                obj._relativePosition.y = obj.y - parentY;
                 
-                // Schedule nested layout
-                if (SceneObject.hasAutoLayout(obj) && obj.children?.length > 0) {
+                // Invalidate child bounds cache - inline for speed
+                obj._boundsCacheValid = false;
+                obj._boundsCache = null;
+                
+                // Schedule nested layout only if has auto layout
+                const childLayout = obj.layoutMode;
+                if (childLayout && childLayout !== 'NONE' && obj.children && obj.children.length > 0) {
                     SceneObject.requestLayout(obj);
                 }
                 
@@ -4013,157 +4085,161 @@ class FrameObject extends SceneObject {
     }
     
     /**
-     * Perform layout immediately (called by batch processor)
+     * Perform layout immediately (called by batch processor) - optimized
      */
     _performLayout() {
-        if (!SceneObject.hasAutoLayout(this) || this.children.length === 0) return;
+        const children = this.children;
+        const childCount = children.length;
+        if (childCount === 0) return;
         
-        const content = this.getContentBounds();
-        const items = this.itemReverseZIndex ? this.children.slice().reverse() : this.children;
-        const itemCount = items.length;
-        const isHorizontal = this.layoutMode === 'HORIZONTAL';
+        const layoutMode = this.layoutMode;
+        if (!layoutMode || layoutMode === 'NONE') return;
         
-        // Pre-allocate and calculate sizes with min/max and baseline
-        const itemSizes = new Array(itemCount);
-        let maxBaseline = 0;  // For baseline alignment
+        const isHorizontal = layoutMode === 'HORIZONTAL';
         
-        for (let i = 0; i < itemCount; i++) {
-            const child = items[i];
-            // Use simple bounds for layout performance
-            const bounds = child.getSimpleBounds ? child.getSimpleBounds() :
-                { width: child.width || 1, height: child.height || 1 };
-            const sizing = child.sizing || {};
-            
-            // Get baseline for text objects
-            const baseline = child._getBaseline ? child._getBaseline() : ((bounds.height || 1) * 0.8) | 0;
-            if (baseline > maxBaseline) maxBaseline = baseline;
-            
-            itemSizes[i] = {
-                obj: child,
-                width: bounds.width || 1,
-                height: bounds.height || 1,
-                fillH: child._layoutSizing?.horizontal === 'fill',
-                fillV: child._layoutSizing?.vertical === 'fill',
-                minW: sizing.minWidth,
-                maxW: sizing.maxWidth,
-                minH: sizing.minHeight,
-                maxH: sizing.maxHeight,
-                baseline: baseline
-            };
+        // Cache frequently used values
+        const padding = this.padding;
+        const frameX = this.x;
+        const frameY = this.y;
+        const contentX = frameX + padding.left;
+        const contentY = frameY + padding.top;
+        const contentWidth = Math.max(0, this.width - padding.left - padding.right);
+        const contentHeight = Math.max(0, this.height - padding.top - padding.bottom);
+        const itemSpacing = this.itemSpacing;
+        
+        // Get items in layout order
+        const items = this.itemReverseZIndex ? children.slice().reverse() : children;
+        
+        // Reuse item data array
+        if (!this._layoutItemData || this._layoutItemData.length !== childCount) {
+            this._layoutItemData = new Array(childCount);
+            for (let i = 0; i < childCount; i++) {
+                this._layoutItemData[i] = { obj: null, width: 0, height: 0, fillH: false, fillV: false, minW: null, maxW: null, minH: null, maxH: null, baseline: 0 };
+            }
         }
         
-        // Handle wrapping
-        if (this.layoutWrap === 'WRAP') {
-            this._layoutWithWrap(content, itemSizes, isHorizontal);
-            return;
-        }
-        
-        // Calculate total fixed size and count of fill items in single pass
+        const itemSizes = this._layoutItemData;
+        let maxBaseline = 0;
         let totalFixedSize = 0;
         let fillCount = 0;
         
-        for (let i = 0; i < itemCount; i++) {
-            const item = itemSizes[i];
-            const isFill = isHorizontal ? item.fillH : item.fillV;
+        // Single pass: collect sizing info and calculate totals
+        for (let i = 0; i < childCount; i++) {
+            const child = items[i];
+            const data = itemSizes[i];
+            
+            data.obj = child;
+            data.width = child.width || 1;
+            data.height = child.height || 1;
+            
+            const sz = child._layoutSizing;
+            data.fillH = sz ? sz.horizontal === 'fill' : false;
+            data.fillV = sz ? sz.vertical === 'fill' : false;
+            
+            const sizing = child.sizing;
+            if (sizing) {
+                data.minW = sizing.minWidth;
+                data.maxW = sizing.maxWidth;
+                data.minH = sizing.minHeight;
+                data.maxH = sizing.maxHeight;
+            } else {
+                data.minW = data.maxW = data.minH = data.maxH = null;
+            }
+            
+            const baseline = child._getBaseline ? child._getBaseline() : ((data.height * 0.8) | 0);
+            data.baseline = baseline;
+            if (baseline > maxBaseline) maxBaseline = baseline;
+            
+            const isFill = isHorizontal ? data.fillH : data.fillV;
             if (!isFill) {
-                totalFixedSize += isHorizontal ? item.width : item.height;
+                totalFixedSize += isHorizontal ? data.width : data.height;
             } else {
                 fillCount++;
             }
         }
         
-        // Add spacing to total
-        const totalSpacing = this.itemSpacing * (itemCount - 1);
-        const containerAxisSize = isHorizontal ? content.width : content.height;
+        // Handle wrapping
+        if (this.layoutWrap === 'WRAP') {
+            this._layoutWithWrap({ x: contentX, y: contentY, width: contentWidth, height: contentHeight }, itemSizes, isHorizontal, childCount);
+            return;
+        }
+        
+        const totalSpacing = itemSpacing * (childCount - 1);
+        const containerAxisSize = isHorizontal ? contentWidth : contentHeight;
+        const crossSize = isHorizontal ? contentHeight : contentWidth;
         const availableSpace = containerAxisSize - totalFixedSize - totalSpacing;
         const fillSize = fillCount > 0 ? (availableSpace / fillCount) | 0 : 0;
         
         // Calculate positions based on distribution
         let currentPos = 0;
-        let gap = this.itemSpacing;
+        let gap = itemSpacing;
+        const primaryAlign = this.primaryAxisAlignItems;
+        const counterAlign = this.counterAxisAlignItems;
         
-        // Check for space distribution modes
-        const isSpaceDistribution = this.primaryAxisAlignItems === 'SPACE_BETWEEN' || 
-                                    this.primaryAxisAlignItems === 'SPACE_AROUND' ||
-                                    this.primaryAxisAlignItems === 'SPACE_EVENLY';
+        const isSpaceDistribution = primaryAlign === 'SPACE_BETWEEN' || 
+                                    primaryAlign === 'SPACE_AROUND' ||
+                                    primaryAlign === 'SPACE_EVENLY';
         
         if (!isSpaceDistribution) {
-            // Align at start, center, or end
             const totalSize = totalFixedSize + (fillCount * fillSize) + totalSpacing;
             
-            switch (this.primaryAxisAlignItems) {
+            switch (primaryAlign) {
                 case 'CENTER':
                     currentPos = ((containerAxisSize - totalSize) / 2) | 0;
                     break;
                 case 'MAX':
                     currentPos = containerAxisSize - totalSize;
                     break;
-                default: // 'MIN' or others
-                    currentPos = 0;
             }
         } else {
-            // Space distribution modes - calculate total item size first
             let totalItemSize = 0;
-            for (let i = 0; i < itemCount; i++) {
+            for (let i = 0; i < childCount; i++) {
                 const item = itemSizes[i];
                 const isFill = isHorizontal ? item.fillH : item.fillV;
                 totalItemSize += isFill ? fillSize : (isHorizontal ? item.width : item.height);
             }
             const remainingSpace = containerAxisSize - totalItemSize;
             
-            switch (this.primaryAxisAlignItems) {
+            switch (primaryAlign) {
                 case 'SPACE_BETWEEN':
-                    gap = itemCount > 1 ? remainingSpace / (itemCount - 1) : 0;
+                    gap = childCount > 1 ? remainingSpace / (childCount - 1) : 0;
                     break;
                 case 'SPACE_AROUND':
-                    gap = remainingSpace / itemCount;
+                    gap = remainingSpace / childCount;
                     currentPos = gap / 2;
                     break;
                 case 'SPACE_EVENLY':
-                    gap = remainingSpace / (itemCount + 1);
+                    gap = remainingSpace / (childCount + 1);
                     currentPos = gap;
                     break;
             }
         }
         
-        // Apply positions - optimized single pass
-        const crossSize = isHorizontal ? content.height : content.width;
-        const contentX = content.x;
-        const contentY = content.y;
-        const frameX = this.x;
-        const frameY = this.y;
-        
-        for (let i = 0; i < itemCount; i++) {
+        // Apply positions
+        for (let i = 0; i < childCount; i++) {
             const item = itemSizes[i];
             const obj = item.obj;
             const isFillMain = isHorizontal ? item.fillH : item.fillV;
             
-            // Calculate sizes with min/max constraints
             let itemMainSize = isFillMain ? fillSize : (isHorizontal ? item.width : item.height);
             let itemCrossSize = isHorizontal ? item.height : item.width;
             
-            // Apply min/max constraints to main axis
+            // Apply min/max constraints
             if (isHorizontal) {
-                if (item.minW !== null && item.minW !== undefined) itemMainSize = Math.max(item.minW, itemMainSize);
-                if (item.maxW !== null && item.maxW !== undefined) itemMainSize = Math.min(item.maxW, itemMainSize);
+                if (item.minW != null) itemMainSize = Math.max(item.minW, itemMainSize);
+                if (item.maxW != null) itemMainSize = Math.min(item.maxW, itemMainSize);
+                if (item.minH != null) itemCrossSize = Math.max(item.minH, itemCrossSize);
+                if (item.maxH != null) itemCrossSize = Math.min(item.maxH, itemCrossSize);
             } else {
-                if (item.minH !== null && item.minH !== undefined) itemMainSize = Math.max(item.minH, itemMainSize);
-                if (item.maxH !== null && item.maxH !== undefined) itemMainSize = Math.min(item.maxH, itemMainSize);
-            }
-            
-            // Apply min/max constraints to cross axis
-            if (isHorizontal) {
-                if (item.minH !== null && item.minH !== undefined) itemCrossSize = Math.max(item.minH, itemCrossSize);
-                if (item.maxH !== null && item.maxH !== undefined) itemCrossSize = Math.min(item.maxH, itemCrossSize);
-            } else {
-                if (item.minW !== null && item.minW !== undefined) itemCrossSize = Math.max(item.minW, itemCrossSize);
-                if (item.maxW !== null && item.maxW !== undefined) itemCrossSize = Math.min(item.maxW, itemCrossSize);
+                if (item.minH != null) itemMainSize = Math.max(item.minH, itemMainSize);
+                if (item.maxH != null) itemMainSize = Math.min(item.maxH, itemMainSize);
+                if (item.minW != null) itemCrossSize = Math.max(item.minW, itemCrossSize);
+                if (item.maxW != null) itemCrossSize = Math.min(item.maxW, itemCrossSize);
             }
             
             let crossPos = 0;
             
-            // Cross-axis alignment (using counterAxisAlignItems)
-            switch (this.counterAxisAlignItems) {
+            switch (counterAlign) {
                 case 'CENTER':
                     crossPos = ((crossSize - itemCrossSize) / 2) | 0;
                     break;
@@ -4171,36 +4247,31 @@ class FrameObject extends SceneObject {
                     crossPos = crossSize - itemCrossSize;
                     break;
                 case 'STRETCH':
-                    crossPos = 0;
-                    // Apply stretch to cross dimension with max constraint
                     let stretchSize = crossSize;
-                    if (isHorizontal && item.maxH !== null && item.maxH !== undefined) {
+                    if (isHorizontal && item.maxH != null) {
                         stretchSize = Math.min(item.maxH, stretchSize);
-                    } else if (!isHorizontal && item.maxW !== null && item.maxW !== undefined) {
+                    } else if (!isHorizontal && item.maxW != null) {
                         stretchSize = Math.min(item.maxW, stretchSize);
                     }
-                    if (isHorizontal && obj.height !== undefined) {
+                    if (isHorizontal) {
                         obj.height = stretchSize;
                         itemCrossSize = stretchSize;
-                    } else if (!isHorizontal && obj.width !== undefined) {
+                    } else {
                         obj.width = stretchSize;
                         itemCrossSize = stretchSize;
                     }
                     break;
                 case 'BASELINE':
-                    // Baseline alignment - only for horizontal layouts
                     if (isHorizontal) {
                         crossPos = maxBaseline - item.baseline;
                     }
                     break;
-                default: // 'MIN'
-                    crossPos = 0;
             }
             
             // Apply main axis fill size
-            if (isHorizontal && item.fillH && obj.width !== undefined) {
+            if (isHorizontal && item.fillH) {
                 obj.width = itemMainSize;
-            } else if (!isHorizontal && item.fillV && obj.height !== undefined) {
+            } else if (!isHorizontal && item.fillV) {
                 obj.height = itemMainSize;
             }
             
@@ -4213,19 +4284,20 @@ class FrameObject extends SceneObject {
                 obj.y = contentY + currentPos;
             }
             
-            // Update frame offset
-            obj._frameOffset = {
-                x: obj.x - frameX,
-                y: obj.y - frameY
-            };
-            
-            // Invalidate child bounds cache
-            if (obj.invalidateBounds) {
-                obj.invalidateBounds();
+            // Update frame offset (reuse object)
+            if (!obj._frameOffset) {
+                obj._frameOffset = { x: 0, y: 0 };
             }
+            obj._frameOffset.x = obj.x - frameX;
+            obj._frameOffset.y = obj.y - frameY;
             
-            // Schedule nested layout (don't call directly)
-            if (SceneObject.hasAutoLayout(obj) && obj.children?.length > 0) {
+            // Inline bounds invalidation
+            obj._boundsCacheValid = false;
+            obj._boundsCache = null;
+            
+            // Schedule nested layout
+            const childLayout = obj.layoutMode;
+            if (childLayout && childLayout !== 'NONE' && obj.children && obj.children.length > 0) {
                 SceneObject.requestLayout(obj);
             }
             
@@ -4236,7 +4308,8 @@ class FrameObject extends SceneObject {
         this._boundsCacheValid = false;
         
         // Hug sizing
-        if (this.sizing.horizontal === 'hug' || this.sizing.vertical === 'hug') {
+        const sizing = this.sizing;
+        if (sizing.horizontal === 'hug' || sizing.vertical === 'hug') {
             this._hugContent();
         }
     }
@@ -4251,7 +4324,7 @@ class FrameObject extends SceneObject {
     /**
      * Layout children with wrapping (optimized)
      */
-    _layoutWithWrap(content, itemSizes, isHorizontal) {
+    _layoutWithWrap(content, itemSizes, isHorizontal, itemCount) {
         const mainAxisSize = isHorizontal ? content.width : content.height;
         const lines = [];
         let currentLine = [];
@@ -4262,9 +4335,11 @@ class FrameObject extends SceneObject {
         const contentY = content.y;
         const frameX = this.x;
         const frameY = this.y;
+        const primaryAlign = this.primaryAxisAlignItems;
+        const counterAlign = this.counterAxisAlignItems;
         
         // Group items into lines
-        for (let i = 0; i < itemSizes.length; i++) {
+        for (let i = 0; i < itemCount; i++) {
             const item = itemSizes[i];
             // Apply min/max to main size for line breaking calculation
             let itemSize = isHorizontal ? item.width : item.height;
@@ -4325,7 +4400,7 @@ class FrameObject extends SceneObject {
             lineMainSize += spacing * (lineLen - 1);
             
             let mainPos = 0;
-            switch (this.primaryAxisAlignItems) {
+            switch (primaryAlign) {
                 case 'CENTER':
                     mainPos = ((mainAxisSize - lineMainSize) / 2) | 0;
                     break;
@@ -4356,8 +4431,8 @@ class FrameObject extends SceneObject {
                 
                 let itemCrossPos = crossPos;
                 
-                // Cross-axis alignment within line (using counterAxisAlignItems)
-                switch (this.counterAxisAlignItems) {
+                // Cross-axis alignment within line
+                switch (counterAlign) {
                     case 'CENTER':
                         itemCrossPos = crossPos + ((lineMaxCross - itemCrossSize) / 2) | 0;
                         break;
@@ -4365,21 +4440,19 @@ class FrameObject extends SceneObject {
                         itemCrossPos = crossPos + lineMaxCross - itemCrossSize;
                         break;
                     case 'STRETCH':
-                        // Stretch with max constraint
                         let stretchSize = lineMaxCross;
                         if (isHorizontal && item.maxH != null) {
                             stretchSize = Math.min(item.maxH, stretchSize);
                         } else if (!isHorizontal && item.maxW != null) {
                             stretchSize = Math.min(item.maxW, stretchSize);
                         }
-                        if (isHorizontal && obj.height !== undefined) {
+                        if (isHorizontal) {
                             obj.height = stretchSize;
-                        } else if (!isHorizontal && obj.width !== undefined) {
+                        } else {
                             obj.width = stretchSize;
                         }
                         break;
                     case 'BASELINE':
-                        // Baseline alignment for horizontal layouts
                         if (isHorizontal) {
                             itemCrossPos = crossPos + lineMaxBaseline - item.baseline;
                         }
@@ -4394,18 +4467,20 @@ class FrameObject extends SceneObject {
                     obj.y = contentY + mainPos;
                 }
                 
-                obj._frameOffset = {
-                    x: obj.x - frameX,
-                    y: obj.y - frameY
-                };
-                
-                // Invalidate child bounds cache
-                if (obj.invalidateBounds) {
-                    obj.invalidateBounds();
+                // Update frame offset (reuse object)
+                if (!obj._frameOffset) {
+                    obj._frameOffset = { x: 0, y: 0 };
                 }
+                obj._frameOffset.x = obj.x - frameX;
+                obj._frameOffset.y = obj.y - frameY;
+                
+                // Inline bounds invalidation
+                obj._boundsCacheValid = false;
+                obj._boundsCache = null;
                 
                 // Schedule nested layout
-                if (SceneObject.hasAutoLayout(obj) && obj.children?.length > 0) {
+                const childLayout = obj.layoutMode;
+                if (childLayout && childLayout !== 'NONE' && obj.children && obj.children.length > 0) {
                     SceneObject.requestLayout(obj);
                 }
                 
@@ -4419,7 +4494,8 @@ class FrameObject extends SceneObject {
         this._boundsCacheValid = false;
         
         // Hug sizing
-        if (this.sizing.horizontal === 'hug' || this.sizing.vertical === 'hug') {
+        const sizing = this.sizing;
+        if (sizing.horizontal === 'hug' || sizing.vertical === 'hug') {
             this._hugContent();
         }
     }
@@ -4439,11 +4515,9 @@ class FrameObject extends SceneObject {
         
         for (let i = 0; i < childCount; i++) {
             const child = this.children[i];
-            // Use simple bounds for performance
-            const b = child.getSimpleBounds ? child.getSimpleBounds() :
-                { x: child.x, y: child.y, width: child.width || 1, height: child.height || 1 };
-            const relX = b.x - frameX - pLeft + b.width;
-            const relY = b.y - frameY - pTop + b.height;
+            // Direct property access for performance
+            const relX = (child.x - frameX - pLeft) + (child.width || 1);
+            const relY = (child.y - frameY - pTop) + (child.height || 1);
             if (relX > maxX) maxX = relX;
             if (relY > maxY) maxY = relY;
         }
@@ -4451,14 +4525,12 @@ class FrameObject extends SceneObject {
         const sizing = this.sizing;
         if (sizing.horizontal === 'hug') {
             let newWidth = maxX + this.padding.left + this.padding.right;
-            // Apply min/max constraints
             if (sizing.minWidth != null) newWidth = Math.max(sizing.minWidth, newWidth);
             if (sizing.maxWidth != null) newWidth = Math.min(sizing.maxWidth, newWidth);
             this.width = newWidth;
         }
         if (sizing.vertical === 'hug') {
             let newHeight = maxY + this.padding.top + this.padding.bottom;
-            // Apply min/max constraints
             if (sizing.minHeight != null) newHeight = Math.max(sizing.minHeight, newHeight);
             if (sizing.maxHeight != null) newHeight = Math.min(sizing.maxHeight, newHeight);
             this.height = newHeight;
@@ -6950,6 +7022,11 @@ class ShapeRenderMode extends RenderMode {
      * Render selection indicators in Figma style
      */
     _renderSelectionIndicators() {
+        // Validate and filter selectedObjects to remove stale references
+        AppState.selectedObjects = AppState.selectedObjects.filter(obj => 
+            obj && typeof obj.getBounds === 'function' && this.app._objectExistsInScene(obj.id)
+        );
+        
         if (AppState.selectedObjects.length === 0) return;
         
         const selColor = '#0d99ff';  // Figma blue
@@ -8332,6 +8409,11 @@ class RoughRenderMode extends ShapeRenderMode {
      * Override selection indicators for rough hand-drawn style
      */
     _renderSelectionIndicators() {
+        // Validate and filter selectedObjects to remove stale references
+        AppState.selectedObjects = AppState.selectedObjects.filter(obj => 
+            obj && typeof obj.getBounds === 'function' && this.app._objectExistsInScene(obj.id)
+        );
+        
         if (AppState.selectedObjects.length === 0) return;
         
         const selColor = '#ff6b6b';  // Warm red for rough style
@@ -9876,6 +9958,59 @@ class SelectTool extends Tool {
     }
     
     /**
+     * Find potential container for drop at point - searches ALL layers globally
+     * Used when reparenting objects that were dragged outside their parent frame
+     */
+    _findDropTargetGlobal(x, y, app, excludeObjects) {
+        const excludeIds = new Set(excludeObjects.map(o => o.id));
+        
+        // Add all descendants of excluded objects to exclusion
+        const addDescendants = (obj) => {
+            excludeIds.add(obj.id);
+            if (obj.children) {
+                for (const child of obj.children) {
+                    addDescendants(child);
+                }
+            }
+        };
+        excludeObjects.forEach(addDescendants);
+        
+        // Search through ALL layers, not just the current context
+        const allRootObjects = [];
+        for (const layer of AppState.layers) {
+            if (layer.visible && layer.objects) {
+                allRootObjects.push(...layer.objects);
+            }
+        }
+        
+        // Find the deepest container at the point
+        const findContainer = (objects) => {
+            let bestMatch = null;
+            
+            for (let i = objects.length - 1; i >= 0; i--) {
+                const obj = objects[i];
+                if (!obj.visible || excludeIds.has(obj.id)) continue;
+                
+                // Check if this object can accept children and contains point
+                if (obj.canContainChildren && obj.canContainChildren() && obj.containsPoint && obj.containsPoint(x, y)) {
+                    bestMatch = obj;
+                    
+                    // Check children for a deeper match
+                    if (obj.children && obj.children.length > 0) {
+                        const childResult = findContainer(obj.children);
+                        if (childResult) {
+                            bestMatch = childResult;
+                        }
+                    }
+                }
+            }
+            return bestMatch;
+        };
+        
+        return findContainer(allRootObjects);
+    }
+    
+    /**
      * Calculate insertion index for reordering within a container
      */
     _calculateInsertionIndex(container, x, y) {
@@ -10897,7 +11032,8 @@ class SelectTool extends Tool {
                 }
             }
             
-            const dropTarget = this._findDropTarget(centerX, centerY, app, excludeObjects);
+            // Use global search to find any frame at the drop position across all layers
+            const dropTarget = this._findDropTargetGlobal(centerX, centerY, app, excludeObjects);
             
             if (dropTarget && dropTarget !== parentFrame && dropTarget.addChild) {
                 // Found another frame at this position - add object to it
@@ -17000,6 +17136,9 @@ class Asciistrator extends EventEmitter {
             if (idx !== -1) {
                 layer.objects.splice(idx, 1);
                 
+                // Remove from selectedObjects to prevent stale selection adorners
+                AppState.selectedObjects = AppState.selectedObjects.filter(o => o.id !== objId);
+                
                 // Check if removed object affects selection context
                 this._validateSelectionContext(objId);
                 
@@ -17041,6 +17180,15 @@ class Asciistrator extends EventEmitter {
                 : null;
             this._updateBreadcrumbUI();
         }
+    }
+    
+    /**
+     * Check if an object exists in the scene (in any layer, recursively)
+     * @param {string} objId - The object ID to check
+     * @returns {boolean} - True if object exists in scene
+     */
+    _objectExistsInScene(objId) {
+        return this._findObjectById(objId) !== null;
     }
     
     /**
@@ -17717,6 +17865,11 @@ class Asciistrator extends EventEmitter {
         if (canvasModes.includes(AppState.renderMode)) {
             return;
         }
+        
+        // Validate and filter selectedObjects to remove stale references
+        AppState.selectedObjects = AppState.selectedObjects.filter(obj => 
+            obj && typeof obj.getBounds === 'function' && this._objectExistsInScene(obj.id)
+        );
         
         if (AppState.selectedObjects.length === 0) return;
         
@@ -22250,15 +22403,15 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
     }
     
     _restoreState(state) {
-        // Restore layers and objects
-        AppState.layers.forEach((layer, index) => {
-            if (state.layers[index]) {
-                const savedLayer = state.layers[index];
-                layer.visible = savedLayer.visible;
-                layer.locked = savedLayer.locked;
-                layer.objects = savedLayer.objects.map(json => this._createObjectFromJSON(json)).filter(obj => obj !== null);
-            }
-        });
+        // Properly restore layers - recreate the layers array from saved state
+        // This handles layer additions/removals correctly
+        AppState.layers = state.layers.map(savedLayer => ({
+            id: savedLayer.id,
+            name: savedLayer.name,
+            visible: savedLayer.visible,
+            locked: savedLayer.locked,
+            objects: savedLayer.objects.map(json => this._createObjectFromJSON(json)).filter(obj => obj !== null)
+        }));
         
         AppState.activeLayerId = state.activeLayerId;
         
@@ -22300,6 +22453,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         }
         
         this._updateBreadcrumbUI();
+        this._spatialIndexDirty = true; // Mark spatial index for rebuild
         this.renderAllObjects();
         this._updateLayerList();
         this._updateStatusBar();
