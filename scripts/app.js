@@ -25130,7 +25130,8 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                 if (this._pendingInsertItem.type === 'shape') {
                     this._insertQuickShapeAt(this._pendingInsertItem.shapeType, pos.x, pos.y);
                 } else if (this._pendingInsertItem.type === 'component') {
-                    this._insertComponentAt(this._pendingInsertItem.component, this._pendingInsertItem.library, pos.x, pos.y);
+                    // Use the existing working _insertComponent method
+                    this._insertComponent(this._pendingInsertItem.component, pos.x, pos.y);
                 }
             }
             
@@ -25255,93 +25256,6 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         }
     }
     
-    /**
-     * Insert a component from the library at center
-     */
-    _insertComponent(component, library) {
-        // Calculate center of visible viewport
-        const centerX = Math.floor(AppState.canvasWidth / 2);
-        const centerY = Math.floor(AppState.canvasHeight / 2);
-        this._insertComponentAt(component, library, centerX, centerY);
-    }
-
-    /**
-     * Insert a component from the library at specified position
-     */
-    _insertComponentAt(component, library, x, y) {
-        // Get the component's objects and create copies
-        const objects = component.objects || [];
-        const createdObjects = [];
-        
-        if (objects.length === 0) {
-            this._updateStatus(`Component "${component.name}" has no objects`);
-            return;
-        }
-        
-        // Calculate bounds of all component objects
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const objData of objects) {
-            const ox = objData.x || 0;
-            const oy = objData.y || 0;
-            const w = objData.width || 1;
-            const h = objData.height || 1;
-            minX = Math.min(minX, ox);
-            minY = Math.min(minY, oy);
-            maxX = Math.max(maxX, ox + w);
-            maxY = Math.max(maxY, oy + h);
-        }
-        
-        const componentWidth = maxX - minX;
-        const componentHeight = maxY - minY;
-        const offsetX = x - Math.floor(componentWidth / 2) - minX;
-        const offsetY = y - Math.floor(componentHeight / 2) - minY;
-        
-        // Create objects from component data
-        for (const objData of objects) {
-            let obj = this._createObjectFromJSON({
-                ...objData,
-                x: (objData.x || 0) + offsetX,
-                y: (objData.y || 0) + offsetY,
-                id: uuid() // Generate new ID
-            });
-            
-            // If _createObjectFromJSON returned null (unknown type like ui-component),
-            // create a placeholder rectangle
-            if (!obj && objData.type) {
-                obj = new RectangleObject(
-                    (objData.x || 0) + offsetX,
-                    (objData.y || 0) + offsetY,
-                    objData.width || 10,
-                    objData.height || 5
-                );
-                obj.id = uuid();
-                obj.name = objData.name || `${component.name} (${objData.type})`;
-                obj.strokeChar = '░';
-                obj.fillChar = ' ';
-                obj.metadata = { originalType: objData.type, componentType: objData.componentType };
-            }
-            
-            if (obj) {
-                obj.name = obj.name || objData.name || `${component.name} part`;
-                this.addObject(obj, false); // Don't save undo for each object
-                createdObjects.push(obj);
-            }
-        }
-        
-        // If multiple objects, group them
-        if (createdObjects.length > 1) {
-            AppState.selectedObjects = createdObjects;
-            this.groupSelected();
-            // After grouping, the group is now selected
-        } else if (createdObjects.length === 1) {
-            AppState.selectedObjects = createdObjects;
-        }
-        
-        this.saveStateForUndo();
-        this.renderAllObjects();
-        this._updateStatus(`Inserted component "${component.name}"`);
-    }
-
     // ==========================================
     // FIND AND REPLACE
     // ==========================================
