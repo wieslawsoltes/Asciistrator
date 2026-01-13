@@ -986,6 +986,14 @@ export class Selection extends EventEmitter {
     }
     
     /**
+     * Check if there are selected objects
+     * @returns {boolean}
+     */
+    hasSelection() {
+        return this.objects.length > 0;
+    }
+    
+    /**
      * Get selection count
      * @returns {number}
      */
@@ -1083,14 +1091,28 @@ export class Selection extends EventEmitter {
     
     /**
      * Hit test selection handles
-     * @param {number} x 
-     * @param {number} y 
+     * @param {number|Vector2D|{x: number, y: number}} xOrPoint - X coordinate or point object
+     * @param {number} [yOrTolerance] - Y coordinate or tolerance (if first param is point)
+     * @param {number} [tolerance=2] - Hit test tolerance
      * @returns {{type: string, handle: SelectionHandle}|null}
      */
-    hitTestHandles(x, y) {
+    hitTestHandles(xOrPoint, yOrTolerance, tolerance = 2) {
+        let x, y, tol;
+        
+        // Handle both (x, y) and (point, tolerance) call signatures
+        if (typeof xOrPoint === 'object' && xOrPoint !== null) {
+            x = xOrPoint.x;
+            y = xOrPoint.y;
+            tol = typeof yOrTolerance === 'number' ? yOrTolerance : tolerance;
+        } else {
+            x = xOrPoint;
+            y = yOrTolerance;
+            tol = tolerance;
+        }
+        
         // Test path handles first
         if (this.pathHandles) {
-            const handle = this.pathHandles.hitTestHandle(x, y, 2);
+            const handle = this.pathHandles.hitTestHandle(x, y, tol);
             if (handle) {
                 return { type: 'path', handle };
             }
@@ -1098,7 +1120,7 @@ export class Selection extends EventEmitter {
         
         // Then bounding box handles
         if (this.boundingBox) {
-            const handle = this.boundingBox.hitTestHandle(x, y, 2);
+            const handle = this.boundingBox.hitTestHandle(x, y, tol);
             if (handle) {
                 return { type: 'bounds', handle };
             }

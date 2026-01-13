@@ -202,12 +202,22 @@ export class SelectTool extends Tool {
             this._updateMarquee();
         }
 
+        // Update selection handles to match new object positions
+        if (this.selection && (this.mode === 'move' || this.mode === 'resize' || this.mode === 'rotate')) {
+            this.selection.refresh();
+        }
+
         this.requestRedraw();
     }
 
     onDragEnd(event) {
         if (this.mode === 'select') {
             this._finishMarquee();
+        }
+
+        // Ensure selection handles are updated after transformation
+        if (this.selection) {
+            this.selection.refresh();
         }
 
         this._dragTarget = null;
@@ -752,6 +762,11 @@ export class DirectSelectTool extends Tool {
             this._updateMarquee();
         }
 
+        // Update selection handles to match new anchor positions
+        if (this.selection && (this.mode === 'moveAnchor' || this.mode === 'moveHandle')) {
+            this.selection.refresh();
+        }
+
         this.requestRedraw();
     }
 
@@ -762,6 +777,11 @@ export class DirectSelectTool extends Tool {
 
         if (this.mode === 'moveAnchor' || this.mode === 'moveHandle') {
             this.endAction();
+        }
+
+        // Ensure selection handles are updated after anchor manipulation
+        if (this.selection) {
+            this.selection.refresh();
         }
 
         this._selectedAnchor = null;
