@@ -290,6 +290,146 @@
                             </div>
                             <button class="btn btn-small" id="btn-edit-constraints" style="margin-top: 8px; width: 100%;">Edit Constraints...</button>
                         </div>
+                        <!-- Auto Layout Section -->
+                        <div class="property-group" id="prop-auto-layout-group" style="display:none;">
+                            <label>📦 Auto Layout</label>
+                            <div class="property-row">
+                                <label>Enabled:</label>
+                                <input type="checkbox" id="prop-auto-layout-enabled">
+                            </div>
+                            <div class="property-row">
+                                <label>Direction:</label>
+                                <select id="prop-auto-layout-direction">
+                                    <option value="vertical">↓ Vertical</option>
+                                    <option value="horizontal">→ Horizontal</option>
+                                </select>
+                            </div>
+                            <div class="property-row">
+                                <label>Spacing:</label>
+                                <input type="number" id="prop-auto-layout-spacing" value="1" min="0" style="width: 60px;">
+                            </div>
+                            <div class="property-row">
+                                <label>Padding:</label>
+                                <input type="number" id="prop-auto-layout-padding" value="1" min="0" style="width: 60px;" title="All sides">
+                            </div>
+                            <div class="property-row">
+                                <label>Alignment:</label>
+                                <select id="prop-auto-layout-alignment">
+                                    <option value="start">Start</option>
+                                    <option value="center">Center</option>
+                                    <option value="end">End</option>
+                                    <option value="stretch">Stretch</option>
+                                </select>
+                            </div>
+                            <div class="property-row">
+                                <label>Distribution:</label>
+                                <select id="prop-auto-layout-distribution">
+                                    <option value="packed">Packed</option>
+                                    <option value="spaceBetween">Space Between</option>
+                                    <option value="spaceAround">Space Around</option>
+                                    <option value="spaceEvenly">Space Evenly</option>
+                                </select>
+                            </div>
+                            <div class="property-row">
+                                <label>Wrap:</label>
+                                <input type="checkbox" id="prop-auto-layout-wrap">
+                            </div>
+                        </div>
+                        <!-- Appearance Section (Figma-style) -->
+                        <div class="property-group" id="prop-appearance-group">
+                            <label>🎨 Appearance</label>
+                            <div class="property-row">
+                                <label>Opacity:</label>
+                                <input type="range" id="prop-opacity" min="0" max="100" value="100" style="width: 80px;">
+                                <span id="prop-opacity-value">100%</span>
+                            </div>
+                            <div class="property-row">
+                                <label>Blend:</label>
+                                <select id="prop-blend-mode">
+                                    <option value="normal">Normal</option>
+                                    <option value="passThrough">Pass Through</option>
+                                    <option value="multiply">Multiply</option>
+                                    <option value="screen">Screen</option>
+                                    <option value="overlay">Overlay</option>
+                                    <option value="darken">Darken</option>
+                                    <option value="lighten">Lighten</option>
+                                    <option value="colorDodge">Color Dodge</option>
+                                    <option value="colorBurn">Color Burn</option>
+                                    <option value="hardLight">Hard Light</option>
+                                    <option value="softLight">Soft Light</option>
+                                    <option value="difference">Difference</option>
+                                    <option value="exclusion">Exclusion</option>
+                                </select>
+                            </div>
+                        </div>
+                        <!-- Stroke Section (Figma-style) -->
+                        <div class="property-group" id="prop-stroke-group">
+                            <label>✏️ Stroke</label>
+                            <div class="property-row">
+                                <label>Weight:</label>
+                                <input type="number" id="prop-stroke-weight" value="1" min="0" max="10" style="width: 50px;">
+                            </div>
+                            <div class="property-row">
+                                <label>Align:</label>
+                                <select id="prop-stroke-align">
+                                    <option value="center">Center</option>
+                                    <option value="inside">Inside</option>
+                                    <option value="outside">Outside</option>
+                                </select>
+                            </div>
+                            <div class="property-row">
+                                <label>Cap:</label>
+                                <select id="prop-stroke-cap">
+                                    <option value="none">None</option>
+                                    <option value="round">Round</option>
+                                    <option value="square">Square</option>
+                                    <option value="arrow">Arrow →</option>
+                                </select>
+                            </div>
+                            <div class="property-row">
+                                <label>Join:</label>
+                                <select id="prop-stroke-join">
+                                    <option value="miter">Miter</option>
+                                    <option value="round">Round</option>
+                                    <option value="bevel">Bevel</option>
+                                </select>
+                            </div>
+                            <div class="property-row">
+                                <label>Dash:</label>
+                                <input type="text" id="prop-stroke-dash" placeholder="e.g. 4,2" style="width: 70px;" title="Dash pattern (e.g. 4,2 for dashed)">
+                            </div>
+                        </div>
+                        <!-- Corner Radius Section (Figma-style) -->
+                        <div class="property-group" id="prop-corner-group" style="display:none;">
+                            <label>⬛ Corner Radius</label>
+                            <div class="property-row">
+                                <label>All:</label>
+                                <input type="number" id="prop-corner-all" value="0" min="0" style="width: 50px;">
+                                <label style="margin-left: 8px;">
+                                    <input type="checkbox" id="prop-corner-independent"> Independent
+                                </label>
+                            </div>
+                            <div id="prop-corner-individual" style="display:none;">
+                                <div class="property-row">
+                                    <label>TL:</label>
+                                    <input type="number" id="prop-corner-tl" value="0" min="0" style="width: 40px;">
+                                    <label>TR:</label>
+                                    <input type="number" id="prop-corner-tr" value="0" min="0" style="width: 40px;">
+                                </div>
+                                <div class="property-row">
+                                    <label>BL:</label>
+                                    <input type="number" id="prop-corner-bl" value="0" min="0" style="width: 40px;">
+                                    <label>BR:</label>
+                                    <input type="number" id="prop-corner-br" value="0" min="0" style="width: 40px;">
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Effects Section (Figma-style) -->
+                        <div class="property-group" id="prop-effects-group">
+                            <label>✨ Effects</label>
+                            <div id="prop-effects-list"></div>
+                            <button class="btn btn-small" id="btn-add-effect" style="margin-top: 4px; width: 100%;">+ Add Effect</button>
+                        </div>
                         <!-- UI Component Properties -->
                         <div class="property-group" id="prop-ui-component-group" style="display:none;">
                             <label>UI Component: <span id="prop-ui-type"></span></label>
