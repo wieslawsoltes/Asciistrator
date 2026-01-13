@@ -7,13 +7,15 @@
 3. [Interface Overview](#interface-overview)
 4. [Drawing Tools](#drawing-tools)
 5. [Working with Objects](#working-with-objects)
-6. [Layers](#layers)
-7. [Charts & Graphs](#charts--graphs)
-8. [Flowcharts & Diagrams](#flowcharts--diagrams)
-9. [Text & Typography](#text--typography)
-10. [File Operations](#file-operations)
-11. [Keyboard Shortcuts](#keyboard-shortcuts)
-12. [Tips & Tricks](#tips--tricks)
+6. [Frames & Containers](#frames--containers)
+7. [Layers](#layers)
+8. [Charts & Graphs](#charts--graphs)
+9. [Flowcharts & Diagrams](#flowcharts--diagrams)
+10. [Text & Typography](#text--typography)
+11. [Advanced Features](#advanced-features)
+12. [File Operations](#file-operations)
+13. [Keyboard Shortcuts](#keyboard-shortcuts)
+14. [Tips & Tricks](#tips--tricks)
 
 ---
 
@@ -25,9 +27,13 @@
 
 - **Vector Drawing** - Create precise shapes, paths, and curves
 - **ASCII Rendering** - All graphics rendered as ASCII/Unicode characters
+- **Frames & Containers** - Nestable containers with content clipping
 - **Charts & Graphs** - Built-in charting engine with multiple chart types
 - **Flowcharts** - Create flowcharts with auto-routing connectors
 - **Layers** - Full layer system with blend modes and opacity
+- **Command Palette** - Quick access to all commands (Ctrl+K)
+- **Version History** - Browse and restore previous states
+- **Asset Library** - Save and reuse ASCII art snippets
 - **Export** - Export to SVG, PNG, HTML, and plain text
 - **Zero Dependencies** - Runs entirely in your browser
 
@@ -101,13 +107,22 @@ The vertical toolbar on the left contains all drawing tools:
 | ⬚ | Direct Select | A | Edit anchor points |
 | ▭ | Rectangle | R | Draw rectangles |
 | ○ | Ellipse | O | Draw circles and ellipses |
+| ⬚ | Frame | F | Draw frames/containers |
 | ⬠ | Polygon | Shift+O | Draw regular polygons |
 | ✳ | Star | * | Draw stars |
-| ╱ | Line | \ | Draw straight lines |
+| ╱ | Line | \\ | Draw straight lines |
 | ✒ | Pen | P | Draw bezier paths |
 | ✏ | Pencil | N | Freehand drawing |
 | T | Text | T | Add text |
 | ⊞ | Box | Ctrl+B | Draw ASCII boxes |
+
+### Command Palette (Ctrl+K)
+
+Quick access to all commands:
+- Press `Ctrl+K` to open
+- Type to search commands
+- Use arrow keys to navigate
+- Press Enter to execute
 
 ### Panels
 
@@ -135,6 +150,16 @@ Right-side panels provide property editing and management:
 - View undo/redo history
 - Click to jump to any state
 - Clear history
+
+#### Version History (Window > Version History)
+- Browse all saved states
+- Preview previous versions
+- Restore any state
+
+#### Asset Library (Window > Asset Library)
+- Save reusable ASCII art snippets
+- Organize with categories
+- Quick insert into documents
 
 ### Status Bar
 
@@ -380,7 +405,97 @@ Combine shapes using:
 - **Intersect**: Keep only overlapping area
 - **Exclude**: Remove overlapping area
 
-Access via Object > Path menu.
+Access via Object > Path menu or Command Palette (Ctrl+K).
+
+---
+
+## Frames & Containers
+
+### What are Frames?
+
+Frames are nestable containers that can hold other objects and optionally clip their content to the frame bounds. They're similar to frames in Figma.
+
+### Creating Frames
+
+**Method 1: Frame Tool (F)**
+1. Press `F` to select the Frame tool
+2. Click and drag to draw a frame
+3. Release to create
+
+**Method 2: Frame Selection (Ctrl+Alt+G)**
+1. Select one or more objects
+2. Press `Ctrl+Alt+G` or use Command Palette
+3. A frame is created around the selection
+
+### Frame Example
+
+```
+╭─ My Frame ──────────────────╮
+│                             │
+│    ┌────────────┐          │
+│    │ Child Obj  │          │
+│    └────────────┘          │
+│                             │
+│           ○                 │
+│          ╱ ╲               │
+│                             │
+╰─────────────────────────────╯
+```
+
+### Frame Properties
+
+| Property | Description |
+|----------|-------------|
+| **Title** | Optional text shown on frame border |
+| **Border Style** | single, double, rounded, dashed, thick |
+| **Clip Content** | Hide children outside frame bounds |
+| **Auto Size** | Automatically resize to fit content |
+| **Background** | Fill character and color |
+| **Padding** | Space inside frame edges |
+
+### Border Styles
+
+```
+Single:          Double:          Rounded:
+┌────────┐       ╔════════╗       ╭────────╮
+│        │       ║        ║       │        │
+└────────┘       ╚════════╝       ╰────────╯
+
+Dashed:          Thick:
+┌┄┄┄┄┄┄┄┄┐       ┏━━━━━━━━┓
+┆        ┆       ┃        ┃
+└┄┄┄┄┄┄┄┄┘       ┗━━━━━━━━┛
+```
+
+### Working with Frames
+
+**Add Objects to Frame:**
+1. Select frame and objects
+2. Use "Add to Frame" command
+3. Objects become frame children
+
+**Remove from Frame:**
+1. Select child object
+2. Use "Remove from Frame" command
+3. Object is moved to parent layer
+
+**Move Frame:**
+- Dragging a frame moves all children together
+- Children maintain relative positions
+
+**Clip Content:**
+- When enabled, children are clipped to frame bounds
+- Great for creating viewports or masked areas
+
+### Frame Commands
+
+| Command | Shortcut | Description |
+|---------|----------|-------------|
+| Frame Tool | F | Activate frame drawing |
+| Frame Selection | Ctrl+Alt+G | Create frame from selection |
+| Add to Frame | - | Add objects to selected frame |
+| Remove from Frame | - | Remove objects from frame |
+| Frame Properties | - | Edit frame settings |
 
 ---
 
@@ -646,6 +761,138 @@ Create large decorative text using ASCII art fonts:
 
 ---
 
+## Advanced Features
+
+### Command Palette (Ctrl+K)
+
+The Command Palette provides quick access to all application commands:
+
+1. Press `Ctrl+K` to open
+2. Start typing to search
+3. Use arrow keys to navigate results
+4. Press Enter to execute command
+5. Press Escape to close
+
+**Features:**
+- Search by command name
+- Grouped by category
+- Shows keyboard shortcuts
+- Quick access to tools, actions, and settings
+
+### Version History
+
+Browse and restore previous document states:
+
+1. Open via Window > Version History
+2. View chronological list of changes
+3. Preview any previous state
+4. Click "Restore" to revert
+
+### Asset Library
+
+Save and reuse ASCII art snippets:
+
+1. Open via Window > Asset Library
+2. Select objects and click "Save as Asset"
+3. Name and categorize your asset
+4. Insert assets into any document
+
+**Default Assets Include:**
+- Common borders and frames
+- UI elements
+- Decorative elements
+- Icons and symbols
+
+### Multi-Select Editing
+
+Edit properties of multiple objects at once:
+
+1. Select multiple objects (Shift+Click or drag selection)
+2. Open via Edit > Edit Multiple Objects
+3. Change shared properties
+4. Apply to all selected objects
+
+**Editable Properties:**
+- Stroke character and color
+- Fill character and color
+- Line style
+- Visibility and lock state
+
+### Selection Filters
+
+Filter and select objects by criteria:
+
+1. Open via Select > Selection Filters
+2. Choose filter type:
+   - By object type (rectangle, text, etc.)
+   - By status (locked, hidden, visible)
+3. Apply to select matching objects
+
+### Constraints
+
+Pin objects to canvas edges:
+
+1. Select an object
+2. Open Object > Constraints
+3. Enable edge pins (left, right, top, bottom)
+4. Enable centering (horizontal, vertical)
+5. Object repositions when canvas resizes
+
+### Saved Styles
+
+Save and reuse style combinations:
+
+1. Open Object > Saved Styles
+2. Create style with current properties
+3. Apply saved styles to objects
+4. Edit or delete saved styles
+
+### Copy/Paste Properties
+
+Copy style from one object to another:
+
+| Action | Shortcut |
+|--------|----------|
+| Copy Properties | Ctrl+Alt+C |
+| Paste Properties | Ctrl+Alt+V |
+
+### Batch Rename
+
+Rename multiple objects with patterns:
+
+1. Select objects to rename
+2. Open Object > Batch Rename
+3. Enter pattern (e.g., "Item {n}")
+4. Preview and apply
+
+### Measure Tool (M)
+
+Show distances between objects:
+
+1. Press `M` to activate
+2. Click and drag to measure
+3. See distance in status bar
+4. Click again to exit
+
+### Outline View
+
+View only object outlines:
+
+1. Toggle via View > Outline View
+2. Useful for complex documents
+3. Easier selection and editing
+
+### Dev Mode Panel
+
+Focused code export view:
+
+1. Open via Window > Dev Mode
+2. See generated ASCII code
+3. Copy formatted output
+4. Choose export format
+
+---
+
 ## File Operations
 
 ### Creating Documents
@@ -744,29 +991,40 @@ Create large decorative text using ASCII art fonts:
 |------|----------|
 | Select | V |
 | Direct Select | A |
-| Lasso | Q |
-| Marquee | M |
 | Rectangle | R |
 | Ellipse | O |
-| Polygon | Shift+O |
-| Star | * |
-| Line | \\ |
+| Frame | F |
+| Line | L or \\ |
 | Pen | P |
 | Pencil | N |
+| Brush | B |
 | Text | T |
 | Eraser | E |
+| Measure | M |
 
 ### Object Operations
 | Action | Windows/Linux | macOS |
 |--------|---------------|-------|
 | Group | Ctrl+G | ⌘G |
 | Ungroup | Ctrl+Shift+G | ⌘⇧G |
+| Frame Selection | Ctrl+Alt+G | ⌘⌥G |
+| Rename | Ctrl+R | ⌘R |
+| Copy Properties | Ctrl+Alt+C | ⌘⌥C |
+| Paste Properties | Ctrl+Alt+V | ⌘⌥V |
 | Bring to Front | Ctrl+Shift+] | ⌘⇧] |
 | Send to Back | Ctrl+Shift+[ | ⌘⇧[ |
 | Lock | Ctrl+2 | ⌘2 |
 | Unlock All | Ctrl+Alt+2 | ⌘⌥2 |
 | Hide | Ctrl+3 | ⌘3 |
 | Show All | Ctrl+Alt+3 | ⌘⌥3 |
+
+### Quick Actions
+| Action | Windows/Linux | macOS |
+|--------|---------------|-------|
+| Command Palette | Ctrl+K | ⌘K |
+| Find and Replace | Ctrl+H | ⌘H |
+| Quick Rename | F2 | F2 |
+| Swap Colors | X | X |
 
 ---
 

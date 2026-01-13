@@ -10,6 +10,8 @@
 6. [Working with Layers](#tutorial-6-working-with-layers)
 7. [Advanced Path Editing](#tutorial-7-advanced-path-editing)
 8. [Creating ASCII Art from Images](#tutorial-8-creating-ascii-art-from-images)
+9. [Working with Frames & Containers](#tutorial-9-working-with-frames--containers)
+10. [Using Advanced Features](#tutorial-10-using-advanced-features)
 
 ---
 
@@ -719,6 +721,237 @@ Export your creations and share them:
 
 ---
 
+## Tutorial 9: Working with Frames & Containers
+
+### Overview
+Learn to create frames for organizing complex layouts, building dashboards, and creating reusable containers.
+
+### Duration: 20 minutes
+
+### Steps
+
+#### Step 1: Create Your First Frame
+1. Select the Frame tool (`F`)
+2. Click and drag on the canvas
+3. You'll see a container with a border:
+
+```
+┌────────────────────┐
+│                    │
+│                    │
+│                    │
+│                    │
+└────────────────────┘
+```
+
+#### Step 2: Add a Title to the Frame
+1. Select your frame
+2. In the Properties panel, find "Title"
+3. Enter "My Container"
+4. The frame now displays the title:
+
+```
+┌─ My Container ─────┐
+│                    │
+│                    │
+│                    │
+└────────────────────┘
+```
+
+#### Step 3: Change Frame Border Styles
+Frames support different border styles:
+
+```
+Single:              Double:              Rounded:
+┌─ Title ───┐        ╔═ Title ═══╗        ╭─ Title ───╮
+│           │        ║           ║        │           │
+└───────────┘        ╚═══════════╝        ╰───────────╯
+
+Dashed:              Thick:
+┌┄ Title ┄┄┄┐        ┏━ Title ━━━┓
+│           │        ┃           ┃
+└┄┄┄┄┄┄┄┄┄┄┄┘        ┗━━━━━━━━━━━┛
+```
+
+#### Step 4: Add Objects Inside a Frame
+1. Create a frame
+2. Draw shapes or text inside the frame bounds
+3. Select objects and the frame, then use Object > Group to make them children
+
+#### Step 5: Enable Clipping
+1. Select a frame with content
+2. In Properties panel, check "Clip Content"
+3. Objects that extend beyond the frame are now clipped
+
+#### Step 6: Nest Frames
+Frames can contain other frames for complex layouts:
+
+```
+┌─ Dashboard ─────────────────────────────────────┐
+│ ┌─ Stats ──────────┐  ┌─ Chart ───────────────┐ │
+│ │ Users: 1,234     │  │         *             │ │
+│ │ Active: 567      │  │       * * *           │ │
+│ │ Revenue: $12,345 │  │     * * * * *         │ │
+│ └──────────────────┘  └───────────────────────┘ │
+│ ┌─ Recent Activity ────────────────────────────┐│
+│ │ • User logged in                             ││
+│ │ • Order placed                               ││
+│ └──────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────┘
+```
+
+#### Step 7: Build a Dashboard Layout
+Let's create a simple dashboard:
+
+1. Create a large outer frame (70x20)
+2. Set title to "Server Monitor"
+3. Create inner frames for different sections:
+   - Status frame (top-left)
+   - Performance frame (top-right)
+   - Logs frame (bottom, full width)
+
+### Exercise
+Create this card layout using frames:
+
+```
+┌─ Product Card ─────────────────┐
+│ ┌─ Image ─────┐ ┌─ Info ─────┐ │
+│ │             │ │ Name: Item │ │
+│ │   [IMAGE]   │ │ Price: $99 │ │
+│ │             │ │ Stock: 42  │ │
+│ └─────────────┘ └────────────┘ │
+│ ┌─ Description ───────────────┐│
+│ │ A wonderful product that    ││
+│ │ everyone needs to have!     ││
+│ └─────────────────────────────┘│
+└────────────────────────────────┘
+```
+
+---
+
+## Tutorial 10: Using Advanced Features
+
+### Overview
+Discover power-user features to boost your productivity.
+
+### Duration: 15 minutes
+
+### Command Palette
+
+#### Step 1: Open Command Palette
+1. Press `Ctrl+K` (or `Cmd+K` on Mac)
+2. A searchable dialog appears with all available commands
+
+#### Step 2: Using Command Palette
+1. Start typing to filter commands (e.g., "new" shows New Document)
+2. Commands are grouped by category (File, Edit, View, etc.)
+3. Keyboard shortcuts are displayed next to each command
+4. Press `Enter` to execute the selected command
+5. Press `Escape` to close
+
+**Pro tip:** Command Palette supports fuzzy search - typing "ndo" will match "Undo"
+
+### Version History
+
+#### Step 1: View History
+1. Go to Window > Version History
+2. A panel shows all document states with timestamps
+
+#### Step 2: Restore a Previous State
+1. Click any state in the history list
+2. Your document reverts to that state
+3. All subsequent states remain available
+
+**Use cases:**
+- Experiment freely - you can always go back
+- Compare different design approaches
+- Recover from accidental changes
+
+### Asset Library
+
+#### Step 1: Open Asset Library
+1. Go to Window > Asset Library
+2. Browse default assets organized by category
+
+#### Step 2: Use an Asset
+1. Click on any asset thumbnail
+2. The asset is inserted at the canvas center
+3. Move and resize as needed
+
+#### Step 3: Save Custom Assets
+1. Select objects to save
+2. Go to Edit > Copy (Ctrl+C)
+3. In Asset Library, click "Add New"
+4. Paste content, name it, and select category
+
+**Default Categories:** Borders, Buttons, Icons, Arrows, Boxes, Tables
+
+### Multi-Select Editing
+
+#### Step 1: Select Multiple Objects
+1. Hold `Shift` and click multiple objects
+2. Or drag a selection box around objects
+
+#### Step 2: Edit Shared Properties
+1. Go to Edit > Edit Multiple Objects
+2. Modify properties that apply to all selected objects:
+   - Stroke character
+   - Fill character
+   - Line style
+   - Visibility
+   - Lock state
+
+### Selection Filters
+
+#### Step 1: Filter Selection
+1. Go to Select > Selection Filters
+2. Choose a filter type:
+   - All objects
+   - By type (rectangles, ellipses, text, frames, etc.)
+   - By state (locked, hidden, visible, unlocked)
+
+**Example uses:**
+- Select all text objects to change font
+- Select all locked objects to unlock them
+- Select all frames to apply consistent styling
+
+### Copy/Paste Properties
+
+#### Step 1: Copy Properties
+1. Select a styled object
+2. Press `Ctrl+Shift+C` or Edit > Copy Properties
+
+#### Step 2: Paste Properties
+1. Select target objects
+2. Press `Ctrl+Shift+V` or Edit > Paste Properties
+3. Style is applied instantly
+
+### Saved Styles
+
+#### Step 1: Save a Style
+1. Style an object as desired
+2. Go to Object > Styles > Save Style
+3. Name your style (e.g., "Highlighted Box")
+
+#### Step 2: Apply a Style
+1. Select objects to style
+2. Go to Object > Styles > [Your Style Name]
+3. All properties are applied
+
+### Exercise: Power User Workflow
+
+1. Open Command Palette (`Ctrl+K`)
+2. Type "new" and create a new document
+3. Use the Asset Library to insert a border
+4. Create a frame with the Frame tool
+5. Add text inside the frame
+6. Copy the frame's style properties
+7. Create another frame and paste properties
+8. Try Version History to see your changes
+9. Use Selection Filters to select all frames
+
+---
+
 ## Tips for Success
 
 1. **Use keyboard shortcuts** - They speed up your workflow significantly
@@ -727,6 +960,9 @@ Export your creations and share them:
 4. **Zoom in** - For detailed work, zoom to 200% or more
 5. **Use guides** - Create guides for alignment
 6. **Practice** - The more you use Asciistrator, the better you'll become
+7. **Use Command Palette** - `Ctrl+K` is your best friend for quick actions
+8. **Save reusable assets** - Build your own library of commonly used elements
+9. **Use frames for layouts** - Organize complex designs with containers
 
 ---
 

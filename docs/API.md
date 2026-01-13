@@ -835,6 +835,57 @@ const objects = group.ungroup();
 
 ---
 
+### Frame
+
+Nestable container with content clipping support.
+
+```javascript
+// In scripts/app.js - FrameObject class
+const frame = new FrameObject(x, y, width, height);
+
+// Properties
+frame.name = 'My Frame';
+frame.title = 'Header';              // Title shown on frame border
+frame.clipContent = true;            // Clip children to frame bounds
+frame.showBorder = true;             // Show frame border
+frame.borderStyle = 'rounded';       // 'single', 'double', 'rounded', 'dashed', 'thick'
+frame.backgroundColor = null;        // Fill color (null = transparent)
+frame.backgroundChar = ' ';          // Character for background
+frame.padding = { top: 1, right: 1, bottom: 1, left: 1 };
+frame.autoSize = false;              // Auto-resize to fit content
+
+// Child management
+frame.addChild(object);              // Add child to frame
+frame.removeChild(object);           // Remove child from frame
+frame.getAllChildren(recursive);     // Get all children (optionally recursive)
+frame.getContentBounds();            // Get inner bounds (inside padding)
+
+// Movement
+frame.moveTo(newX, newY);           // Move frame and all children
+
+// Serialization
+const json = frame.toJSON();
+const restored = FrameObject.fromJSON(json);
+```
+
+**Border Styles:**
+| Style | Characters |
+|-------|------------|
+| `single` | ┌─┐│└┘ |
+| `double` | ╔═╗║╚╝ |
+| `rounded` | ╭─╮│╰╯ |
+| `dashed` | ┌┄┐┆└┘ |
+| `thick` | ┏━┓┃┗┛ |
+
+**Events:**
+| Event | Data | Description |
+|-------|------|-------------|
+| `childAdded` | object | Child added to frame |
+| `childRemoved` | object | Child removed from frame |
+| `boundsChanged` | bounds | Frame bounds changed |
+
+---
+
 ## Tools
 
 Location: `scripts/tools/`
@@ -893,6 +944,7 @@ tool.mode = 'toggle';   // Toggle selection (Ctrl)
 import { 
     RectangleTool, 
     EllipseTool, 
+    FrameTool,
     PolygonTool,
     StarTool,
     LineTool 
@@ -902,6 +954,9 @@ const rectTool = new RectangleTool({
     cornerRadius: 0,
     borderStyle: 'single'
 });
+
+const frameTool = new FrameTool();
+// Shortcut: F
 
 const polygonTool = new PolygonTool({
     sides: 6
@@ -1220,6 +1275,111 @@ shortcuts.loadDefaults(DefaultShortcuts);
 
 // Rebind
 shortcuts.rebind('file.new', 'Ctrl+Shift+N');
+```
+
+---
+
+### Command Palette
+
+Quick access to all application commands.
+
+```javascript
+// Accessed via app.showCommandPalette() or Ctrl+K
+
+// Command structure
+const command = {
+    label: 'New Document',
+    action: () => app.newDocument(),
+    category: 'File',
+    shortcut: 'Ctrl+N'
+};
+
+// Categories: File, Edit, View, Object, Tools, Select, Align, Boolean, Window
+```
+
+**Features:**
+- Fuzzy search by command name
+- Grouped by category
+- Shows keyboard shortcuts
+- Up to 50 results (20 when filtered)
+
+---
+
+### Version History
+
+Browse and restore previous document states.
+
+```javascript
+// Accessed via app.showVersionHistory() or Window > Version History
+
+// History state structure
+const historyState = {
+    timestamp: Date.now(),
+    label: 'Added rectangle',
+    state: serializedDocumentState
+};
+
+// Restore to specific state
+app.restoreHistoryState(index);
+```
+
+---
+
+### Asset Library
+
+Save and reuse ASCII art snippets.
+
+```javascript
+// Accessed via app.showAssetLibrary() or Window > Asset Library
+
+// Asset structure
+const asset = {
+    name: 'Border Frame',
+    category: 'Borders',
+    content: '┌────────┐\n│        │\n└────────┘',
+    preview: '...'
+};
+
+// AppState.assetLibrary contains all assets
+// Persisted to localStorage
+
+// Default assets loaded via _getDefaultAssets()
+```
+
+---
+
+### Multi-Select Editor
+
+Edit shared properties of multiple objects.
+
+```javascript
+// Accessed via app.showMultiSelectEditor() or Edit > Edit Multiple Objects
+
+// Editable properties for multiple objects:
+// - strokeChar
+// - fillChar
+// - lineStyle
+// - filled
+// - visible
+// - locked
+```
+
+---
+
+### Selection Filters
+
+Filter and select objects by criteria.
+
+```javascript
+// Accessed via app.showSelectionFilters() or Select > Selection Filters
+
+// Filter types:
+// - all: Select all objects
+// - locked: Select locked objects
+// - hidden: Select hidden objects
+// - unlocked: Select unlocked objects
+// - visible: Select visible objects
+// - By type: rectangle, ellipse, line, text, path, group, frame, etc.
 ```
 
 ---
