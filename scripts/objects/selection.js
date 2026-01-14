@@ -180,14 +180,14 @@ export class SelectionHandle {
      */
     _getHandleChar() {
         switch (this.shape) {
-            case 'circle': return '○';
-            case 'diamond': return '◇';
-            case 'filled-circle': return '●';
-            case 'filled-diamond': return '◆';
-            case 'filled-square': return '■';
-            case 'cross': return '╳';
-            case 'plus': return '✚';
-            default: return '□';
+            case 'circle': return 'o';
+            case 'diamond': return 'x';
+            case 'filled-circle': return 'o';
+            case 'filled-diamond': return 'x';
+            case 'filled-square': return '#';
+            case 'cross': return '+';
+            case 'plus': return '+';
+            default: return '+';
         }
     }
     
