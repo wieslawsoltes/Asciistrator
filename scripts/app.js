@@ -6846,29 +6846,30 @@ class ShapeRenderMode extends RenderMode {
         if (!AppState.guides || AppState.guides.length === 0) return;
         
         const guideColor = '#f24822';  // Red-orange like Figma
+        const selectedColor = '#18a0fb';  // Blue for selected guide
         
         for (const guide of AppState.guides) {
-            if (!guide.visible) continue;
+            // Check if this guide is selected
+            const isSelected = AppState.selectedGuide && AppState.selectedGuide.id === guide.id;
             
-            this.ctx.strokeStyle = guideColor;
+            this.ctx.strokeStyle = isSelected ? selectedColor : guideColor;
             this.ctx.lineWidth = 1;
-            this.ctx.setLineDash([4, 4]);
+            this.ctx.setLineDash([]);
             
-            if (guide.axis === 'vertical') {
+            // Use guide.type (set by creation) - 'vertical' or 'horizontal'
+            if (guide.type === 'vertical') {
                 const x = this.paddingLeft + guide.position * this.charWidth + this.charWidth / 2;
                 this.ctx.beginPath();
                 this.ctx.moveTo(x, 0);
                 this.ctx.lineTo(x, this.canvas.height);
                 this.ctx.stroke();
-            } else {
+            } else if (guide.type === 'horizontal') {
                 const y = this.paddingTop + guide.position * this.charHeight + this.charHeight / 2;
                 this.ctx.beginPath();
                 this.ctx.moveTo(0, y);
                 this.ctx.lineTo(this.canvas.width, y);
                 this.ctx.stroke();
             }
-            
-            this.ctx.setLineDash([]);
         }
     }
     
@@ -14386,13 +14387,16 @@ class Asciistrator extends EventEmitter {
                 const panX = this.renderer.panX;
                 const panY = this.renderer.panY;
                 
+                // Get canvas offset (border + padding)
+                const canvasOffset = this._getCanvasOffset();
+                
                 let canvasPos;
                 if (guideType === 'horizontal') {
                     const viewportY = e.clientY - viewportRect.top;
-                    canvasPos = Math.round((viewportY - panY) / charHeight);
+                    canvasPos = Math.round((viewportY - panY - canvasOffset.y) / charHeight);
                 } else {
                     const viewportX = e.clientX - viewportRect.left;
-                    canvasPos = Math.round((viewportX - panX) / charWidth);
+                    canvasPos = Math.round((viewportX - panX - canvasOffset.x) / charWidth);
                 }
                 
                 // Only create guide if dropped inside viewport
@@ -14433,13 +14437,16 @@ class Asciistrator extends EventEmitter {
         const panX = this.renderer.panX;
         const panY = this.renderer.panY;
         
+        // Get canvas offset (border + padding)
+        const canvasOffset = this._getCanvasOffset();
+        
         let canvasPos;
         if (type === 'horizontal') {
             const viewportY = e.clientY - viewportRect.top;
-            canvasPos = Math.round((viewportY - panY) / charHeight);
+            canvasPos = Math.round((viewportY - panY - canvasOffset.y) / charHeight);
         } else {
             const viewportX = e.clientX - viewportRect.left;
-            canvasPos = Math.round((viewportX - panX) / charWidth);
+            canvasPos = Math.round((viewportX - panX - canvasOffset.x) / charWidth);
         }
         
         element.setAttribute('data-position', canvasPos);
@@ -14809,6 +14816,9 @@ class Asciistrator extends EventEmitter {
         const panX = this.renderer.panX;
         const panY = this.renderer.panY;
         
+        // Get canvas offset (border + padding) for proper alignment
+        const canvasOffset = this._getCanvasOffset();
+        
         for (const guide of AppState.guides) {
             const isSelected = AppState.selectedGuide && AppState.selectedGuide.id === guide.id;
             const marker = document.createElement('div');
@@ -14821,12 +14831,12 @@ class Asciistrator extends EventEmitter {
             
             if (guide.type === 'vertical' && this.rulerH) {
                 // Vertical guide marker on horizontal ruler
-                const pixelX = guide.position * charWidth + panX;
+                const pixelX = guide.position * charWidth + panX + canvasOffset.x;
                 marker.style.left = `${pixelX}px`;
                 this.rulerH.appendChild(marker);
             } else if (guide.type === 'horizontal' && this.rulerV) {
                 // Horizontal guide marker on vertical ruler
-                const pixelY = guide.position * charHeight + panY;
+                const pixelY = guide.position * charHeight + panY + canvasOffset.y;
                 marker.style.top = `${pixelY}px`;
                 marker.classList.add('horizontal');
                 this.rulerV.appendChild(marker);
@@ -17916,11 +17926,14 @@ class Asciistrator extends EventEmitter {
         const panX = this.renderer.panX;
         const panY = this.renderer.panY;
         
+        // Get canvas offset (border + padding)
+        const canvasOffset = this._getCanvasOffset();
+        
         const viewportX = e.clientX - viewportRect.left;
         const viewportY = e.clientY - viewportRect.top;
         
-        const canvasX = Math.round((viewportX - panX) / charWidth);
-        const canvasY = Math.round((viewportY - panY) / charHeight);
+        const canvasX = Math.round((viewportX - panX - canvasOffset.x) / charWidth);
+        const canvasY = Math.round((viewportY - panY - canvasOffset.y) / charHeight);
         
         // Tolerance in canvas units (how close to guide counts as hit)
         const tolerance = 1;
