@@ -6845,7 +6845,7 @@ class ShapeRenderMode extends RenderMode {
     _renderUserGuides() {
         if (!AppState.guides || AppState.guides.length === 0) return;
         
-        const guideColor = '#f24822';  // Red-orange like Figma
+        const guideColor = '#d65c53';  // Soft red for guides
         const selectedColor = '#18a0fb';  // Blue for selected guide
         
         for (const guide of AppState.guides) {
@@ -6889,7 +6889,7 @@ class ShapeRenderMode extends RenderMode {
                 // Color based on guide type
                 let color;
                 if (guide.type === 'user-guide') {
-                    color = '#f24822';  // Red-orange for user guides
+                    color = '#5599aa';  // Subtle teal for user guides
                 } else if (guide.type === 'center') {
                     color = '#ff00ff';  // Magenta for center guides
                 } else {
@@ -9610,6 +9610,10 @@ class AsciiCanvasRenderer extends EventEmitter {
         
         requestAnimationFrame(() => {
             this._renderPending = false;
+            // Call pre-render hook (for guides, etc.) before rendering
+            if (this._preRenderCallback) {
+                this._preRenderCallback();
+            }
             this._doRender();
             // Reset dirty state after render
             this._fullRedrawNeeded = false;
@@ -9624,6 +9628,10 @@ class AsciiCanvasRenderer extends EventEmitter {
         if (this._syncCallback) {
             this._syncCallback();
         }
+        // Call pre-render hook (for guides, etc.) before rendering
+        if (this._preRenderCallback) {
+            this._preRenderCallback();
+        }
         this._doRender();
         this._fullRedrawNeeded = false;
         this._dirtyRegions = [];
@@ -9635,6 +9643,14 @@ class AsciiCanvasRenderer extends EventEmitter {
      */
     setSyncCallback(callback) {
         this._syncCallback = callback;
+    }
+    
+    /**
+     * Set callback for pre-render operations (guides, overlays that should always show)
+     * @param {Function} callback
+     */
+    setPreRenderCallback(callback) {
+        this._preRenderCallback = callback;
     }
     
     _doRender() {
@@ -12500,6 +12516,8 @@ class PenTool extends Tool {
         super('pen', 'P', 'p');
         this.points = [];
         this.currentPath = null;
+        this.previewX = -1;
+        this.previewY = -1;
     }
     
     onMouseDown(x, y, button, renderer, app) {
@@ -12518,16 +12536,9 @@ class PenTool extends Tool {
                 this.currentPath.addPoint(x, y);
             }
             
-            // Draw preview
-            if (this.points.length > 1) {
-                const p1 = this.points[this.points.length - 2];
-                const p2 = this.points[this.points.length - 1];
-                drawLine(renderer.previewBuffer, p1.x, p1.y, p2.x, p2.y, {
-                    style: AppState.lineStyle,
-                    color: AppState.strokeColor
-                });
-                renderer.render();
-            }
+            // Redraw entire path with all confirmed points
+            this._drawFullPath(renderer);
+            renderer.render();
         } else if (button === 2) {
             // Right click to finish - add path object to scene
             if (this.currentPath && this.points.length > 1 && app && app.addObject) {
@@ -12536,7 +12547,84 @@ class PenTool extends Tool {
             }
             this.points = [];
             this.currentPath = null;
+            this.previewX = -1;
+            this.previewY = -1;
         }
+    }
+    
+    onMouseMove(x, y, renderer, app) {
+        // Show preview line from last confirmed point to current mouse position
+        if (this.points.length > 0) {
+            this.previewX = x;
+            this.previewY = y;
+            
+            // Clear and redraw everything including preview
+            renderer.clearPreview();
+            
+            // Draw all confirmed segments
+            this._drawFullPath(renderer);
+            
+            // Draw preview segment from last point to current position (dashed/different color)
+            const lastPoint = this.points[this.points.length - 1];
+            this._drawPreviewLine(renderer.previewBuffer, lastPoint.x, lastPoint.y, x, y);
+            
+            renderer.render();
+        }
+    }
+    
+    _drawFullPath(renderer) {
+        // Draw all confirmed path segments
+        for (let i = 1; i < this.points.length; i++) {
+            const p1 = this.points[i - 1];
+            const p2 = this.points[i];
+            drawLine(renderer.previewBuffer, p1.x, p1.y, p2.x, p2.y, {
+                style: AppState.lineStyle,
+                color: AppState.strokeColor
+            });
+        }
+        
+        // Draw points/vertices
+        for (const point of this.points) {
+            renderer.previewBuffer.setChar(point.x, point.y, '●', '#00ff88');
+        }
+    }
+    
+    _drawPreviewLine(buffer, x1, y1, x2, y2) {
+        // Draw preview line with a different style (lighter color, or dashed)
+        const previewColor = '#888888'; // Dimmed color for preview
+        
+        // Simple line drawing for preview
+        const dx = Math.abs(x2 - x1);
+        const dy = Math.abs(y2 - y1);
+        const sx = x1 < x2 ? 1 : -1;
+        const sy = y1 < y2 ? 1 : -1;
+        let err = dx - dy;
+        let x = x1;
+        let y = y1;
+        let step = 0;
+        
+        while (true) {
+            // Draw every other pixel for dashed effect
+            if (step % 2 === 0) {
+                buffer.setChar(x, y, '·', previewColor);
+            }
+            step++;
+            
+            if (x === x2 && y === y2) break;
+            
+            const e2 = 2 * err;
+            if (e2 > -dy) {
+                err -= dy;
+                x += sx;
+            }
+            if (e2 < dx) {
+                err += dx;
+                y += sy;
+            }
+        }
+        
+        // Draw endpoint indicator
+        buffer.setChar(x2, y2, '○', '#ffaa00');
     }
     
     onKeyDown(key, renderer, app) {
@@ -12548,6 +12636,8 @@ class PenTool extends Tool {
             }
             this.points = [];
             this.currentPath = null;
+            this.previewX = -1;
+            this.previewY = -1;
         }
     }
     
@@ -12555,6 +12645,8 @@ class PenTool extends Tool {
         super.deactivate();
         this.points = [];
         this.currentPath = null;
+        this.previewX = -1;
+        this.previewY = -1;
     }
 }
 
@@ -13806,6 +13898,9 @@ class Asciistrator extends EventEmitter {
         // Set up layer sync callback
         this.renderer.setSyncCallback(() => this.syncToActiveLayer());
         
+        // Set up pre-render callback to always show guides on top
+        this.renderer.setPreRenderCallback(() => this._renderGuidesOverlay());
+        
         // Connect renderer events to tool manager
         this.renderer.on('mousedown', ({ x, y, button, event }) => {
             this.toolManager.handleMouseDown(x, y, button, this.renderer, this, event);
@@ -14378,7 +14473,7 @@ class Asciistrator extends EventEmitter {
         document.addEventListener('pointerup', (e) => {
             if (!isDraggingGuide) return;
             
-            // Convert screen position to canvas coordinates
+            // Convert screen position to canvas coordinates (Figma-style: create guide regardless of drop position)
             const viewport = $('#viewport');
             if (viewport && this.renderer) {
                 const viewportRect = viewport.getBoundingClientRect();
@@ -14399,18 +14494,16 @@ class Asciistrator extends EventEmitter {
                     canvasPos = Math.round((viewportX - panX - canvasOffset.x) / charWidth);
                 }
                 
-                // Only create guide if dropped inside viewport
-                if (e.clientX >= viewportRect.left && e.clientX <= viewportRect.right &&
-                    e.clientY >= viewportRect.top && e.clientY <= viewportRect.bottom) {
-                    // Add guide to state
-                    AppState.guides.push({
-                        type: guideType,
-                        position: canvasPos,
-                        id: Date.now()
-                    });
-                    this.renderAllObjects();
-                    this._updateStatus(`Created ${guideType} guide at ${canvasPos}`);
-                }
+                // Figma-style: Always create guide when dragged from ruler
+                // The guide represents a position, it doesn't matter where you drop it
+                const newGuide = {
+                    type: guideType,
+                    position: canvasPos,
+                    id: Date.now()
+                };
+                AppState.guides.push(newGuide);
+                this.renderAllObjects();
+                this._updateStatus(`Created ${guideType} guide at ${canvasPos}`);
             }
             
             // Cleanup
@@ -17692,15 +17785,17 @@ class Asciistrator extends EventEmitter {
     _renderGuides() {
         if (!AppState.guides || AppState.guides.length === 0) return;
         
+        // Use preview buffer so guides render on top of everything
         const buffer = this.renderer.previewBuffer;
+        const mainBuffer = this.renderer.buffer;
         const width = buffer.width;
         const height = buffer.height;
         
-        // Figma-style guide colors
-        const guideColor = '#f24822'; // Figma red-orange for guides
-        const selectedGuideColor = '#18a0fb'; // Figma blue for selected
-        const guideChar = '│'; // Solid line character for vertical
-        const hGuideChar = '─'; // Solid line character for horizontal
+        // Subtle red guides (semi-transparent effect by only drawing on empty cells)
+        const guideColor = '#d65c53'; // Soft red for guides
+        const selectedGuideColor = '#18a0fb'; // Blue for selected
+        const guideChar = '|'; // Solid vertical
+        const hGuideChar = '-'; // Solid horizontal
         
         for (const guide of AppState.guides) {
             const isSelected = AppState.selectedGuide && AppState.selectedGuide.id === guide.id;
@@ -17710,15 +17805,24 @@ class Asciistrator extends EventEmitter {
                 const y = guide.position;
                 if (y >= 0 && y < height) {
                     for (let x = 0; x < width; x++) {
-                        // Figma-style: solid line with guide character
-                        buffer.setChar(x, y, hGuideChar, color);
+                        // Only draw guide on empty cells (semi-transparent effect)
+                        const mainChar = mainBuffer.chars[y]?.[x];
+                        const previewChar = buffer.chars[y]?.[x];
+                        if ((!mainChar || mainChar === ' ') && (!previewChar || previewChar === ' ')) {
+                            buffer.setChar(x, y, hGuideChar, color);
+                        }
                     }
                 }
             } else if (guide.type === 'vertical') {
                 const x = guide.position;
                 if (x >= 0 && x < width) {
                     for (let y = 0; y < height; y++) {
-                        buffer.setChar(x, y, guideChar, color);
+                        // Only draw guide on empty cells (semi-transparent effect)
+                        const mainChar = mainBuffer.chars[y]?.[x];
+                        const previewChar = buffer.chars[y]?.[x];
+                        if ((!mainChar || mainChar === ' ') && (!previewChar || previewChar === ' ')) {
+                            buffer.setChar(x, y, guideChar, color);
+                        }
                     }
                 }
             }
@@ -17729,13 +17833,64 @@ class Asciistrator extends EventEmitter {
     }
     
     /**
+     * Render guides overlay - called before every render to ensure guides are always visible
+     * This doesn't clear the buffer, just adds guides on top of whatever is there
+     */
+    _renderGuidesOverlay() {
+        if (!AppState.guides || AppState.guides.length === 0) return;
+        if (!this.renderer || !this.renderer.previewBuffer) return;
+        
+        const buffer = this.renderer.previewBuffer;
+        const mainBuffer = this.renderer.buffer;
+        const width = buffer.width;
+        const height = buffer.height;
+        
+        // Subtle red guides (semi-transparent effect by only drawing on empty cells)
+        const guideColor = '#d65c53'; // Soft red for guides
+        const selectedGuideColor = '#18a0fb'; // Blue for selected
+        const guideChar = '|'; // Solid vertical
+        const hGuideChar = '-'; // Solid horizontal
+        
+        for (const guide of AppState.guides) {
+            const isSelected = AppState.selectedGuide && AppState.selectedGuide.id === guide.id;
+            const color = isSelected ? selectedGuideColor : guideColor;
+            
+            if (guide.type === 'horizontal') {
+                const y = guide.position;
+                if (y >= 0 && y < height) {
+                    for (let x = 0; x < width; x++) {
+                        // Only draw guide on empty cells (semi-transparent effect)
+                        const mainChar = mainBuffer.chars[y]?.[x];
+                        const previewChar = buffer.chars[y]?.[x];
+                        if ((!mainChar || mainChar === ' ') && (!previewChar || previewChar === ' ')) {
+                            buffer.setChar(x, y, hGuideChar, color);
+                        }
+                    }
+                }
+            } else if (guide.type === 'vertical') {
+                const x = guide.position;
+                if (x >= 0 && x < width) {
+                    for (let y = 0; y < height; y++) {
+                        // Only draw guide on empty cells (semi-transparent effect)
+                        const mainChar = mainBuffer.chars[y]?.[x];
+                        const previewChar = buffer.chars[y]?.[x];
+                        if ((!mainChar || mainChar === ' ') && (!previewChar || previewChar === ' ')) {
+                            buffer.setChar(x, y, guideChar, color);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
      * Render guide position labels (shown when hovering/selected)
      */
     _renderGuideLabels() {
         if (!AppState.selectedGuide) return;
         
         const guide = AppState.selectedGuide;
-        const buffer = this.renderer.previewBuffer;
+        const buffer = this.renderer.previewBuffer; // Use preview buffer so labels render on top
         const labelColor = '#18a0fb';
         const label = `${guide.position}`;
         
@@ -17766,9 +17921,18 @@ class Asciistrator extends EventEmitter {
         const viewport = $('#viewport');
         if (!viewport) return;
         
-        // Guide selection and drag start
+        // Helper to check if selection tool is active
+        const isSelectionToolActive = () => {
+            const activeTool = this.toolManager?.activeTool;
+            return activeTool && activeTool.name === 'select';
+        };
+        
+        // Guide selection and drag start - only when selection tool is active
         viewport.addEventListener('pointerdown', (e) => {
             if (e.button !== 0) return;
+            
+            // Only interact with guides when selection tool is active
+            if (!isSelectionToolActive()) return;
             
             const guide = this._getGuideAtPosition(e);
             if (guide) {
@@ -17797,8 +17961,19 @@ class Asciistrator extends EventEmitter {
             }
         }, true); // Use capture phase to intercept before tools
         
-        // Guide dragging
+        // Guide dragging - only when selection tool is active
         viewport.addEventListener('pointermove', (e) => {
+            // Only interact with guides when selection tool is active
+            if (!isSelectionToolActive()) {
+                // Reset cursor if we were showing guide cursor
+                if (this._guideDragState.isDragging) {
+                    this._guideDragState.isDragging = false;
+                    this._guideDragState.guide = null;
+                    viewport.style.cursor = '';
+                }
+                return;
+            }
+            
             if (!this._guideDragState.isDragging) {
                 // Show hover cursor when over a guide
                 const guide = this._getGuideAtPosition(e);
@@ -18067,6 +18242,9 @@ class Asciistrator extends EventEmitter {
         if (AppState.selectedObjects.length !== 1) return null;
         
         const obj = AppState.selectedObjects[0];
+        // Validate object has getBounds method
+        if (!obj || typeof obj.getBounds !== 'function') return null;
+        
         const bounds = obj.getBounds();
         const x1 = bounds.x - 1;
         const y1 = bounds.y - 1;

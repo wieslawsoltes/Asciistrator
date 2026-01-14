@@ -468,7 +468,7 @@ class SmartGuides {
                 // Color based on guide type - user guides are red-orange (Figma style)
                 let color;
                 if (guide.type === 'user-guide') {
-                    color = '#f24822'; // Figma red-orange for user guides
+                    color = '#d65c53'; // Soft red for user guides
                 } else if (guide.type === 'center') {
                     color = '#ff00ff';
                 } else {
