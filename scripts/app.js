@@ -17988,12 +17988,12 @@ class Asciistrator extends EventEmitter {
             const x2 = bounds.x + bounds.width;
             const y2 = bounds.y + bounds.height;
             
-            // Draw corners with resize handles
+            // Draw corners with resize handles - use monospace-safe characters
             const corners = [
-                { x: x1, y: y1, char: '◢', handle: 'nw' },
-                { x: x2, y: y1, char: '◣', handle: 'ne' },
-                { x: x1, y: y2, char: '◥', handle: 'sw' },
-                { x: x2, y: y2, char: '◤', handle: 'se' }
+                { x: x1, y: y1, char: '┌', handle: 'nw' },
+                { x: x2, y: y1, char: '┐', handle: 'ne' },
+                { x: x1, y: y2, char: '└', handle: 'sw' },
+                { x: x2, y: y2, char: '┘', handle: 'se' }
             ];
             
             for (const c of corners) {
@@ -18002,20 +18002,20 @@ class Asciistrator extends EventEmitter {
                 }
             }
             
-            // Draw edge resize handles (mid-points)
+            // Draw edge resize handles (mid-points) - use monospace-safe characters
             const midX = Math.floor((x1 + x2) / 2);
             const midY = Math.floor((y1 + y2) / 2);
             
             // Top and bottom edge handles
             if (midX >= 0 && midX < width) {
-                if (y1 >= 0 && y1 < height) buffer.setChar(midX, y1, '◆', handleColor);
-                if (y2 >= 0 && y2 < height) buffer.setChar(midX, y2, '◆', handleColor);
+                if (y1 >= 0 && y1 < height) buffer.setChar(midX, y1, '┬', handleColor);
+                if (y2 >= 0 && y2 < height) buffer.setChar(midX, y2, '┴', handleColor);
             }
             
             // Left and right edge handles
             if (midY >= 0 && midY < height) {
-                if (x1 >= 0 && x1 < width) buffer.setChar(x1, midY, '◆', handleColor);
-                if (x2 >= 0 && x2 < width) buffer.setChar(x2, midY, '◆', handleColor);
+                if (x1 >= 0 && x1 < width) buffer.setChar(x1, midY, '├', handleColor);
+                if (x2 >= 0 && x2 < width) buffer.setChar(x2, midY, '┤', handleColor);
             }
             
             // Draw dashed edges if object is large enough
