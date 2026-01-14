@@ -341,6 +341,7 @@
         ];
 
         let results = null;
+        const loadErrors = [];
         let currentFilter = 'all';
 
         // DOM Elements
@@ -382,12 +383,14 @@
 
         // Load test modules
         async function loadTests() {
+            loadErrors.length = 0;
             for (const module of testModules) {
                 try {
                     await import(module);
                     console.log(`Loaded: ${module}`);
                 } catch (error) {
                     console.error(`Failed to load ${module}:`, error);
+                    loadErrors.push({ module, error });
                 }
             }
         }
@@ -409,6 +412,22 @@
             const start = performance.now();
             
             try {
+                if (loadErrors.length > 0) {
+                    resultsContainer.innerHTML = renderLoadErrorSummary();
+                    durationEl.textContent = 'Tests not started: module load failed';
+                    return;
+                }
+
+                if (runner.suites.length === 0) {
+                    resultsContainer.innerHTML = `
+                        <div class="error-details">
+                            No tests were discovered. Check for import path errors or missing test registrations.
+                        </div>
+                    `;
+                    durationEl.textContent = 'Tests not started';
+                    return;
+                }
+
                 results = await runner.run();
                 const duration = performance.now() - start;
                 
@@ -425,6 +444,22 @@
 
             runBtn.disabled = false;
             runBtn.textContent = 'Run All Tests';
+        }
+
+        function renderLoadErrorSummary() {
+            if (loadErrors.length === 0) return '';
+            const items = loadErrors.map(({ module, error }) => {
+                const message = error?.message || String(error);
+                return `<li><strong>${escapeHtml(module)}</strong>: ${escapeHtml(message)}</li>`;
+            }).join('');
+
+            return `
+                <div class="error-details">
+                    Some test modules failed to load:
+                    <ul>${items}</ul>
+                    Fix the import paths or missing files, then run again.
+                </div>
+            `;
         }
 
         // Display results
@@ -562,6 +597,9 @@
                     Click "Run All Tests" to execute the test suite
                 </div>
             `;
+            if (loadErrors.length > 0) {
+                resultsContainer.innerHTML += renderLoadErrorSummary();
+            }
         });
     </script>
 </body>
