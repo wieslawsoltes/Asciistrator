@@ -171,44 +171,6 @@ export class AvaloniaXamlExporter extends BaseExporter {
             }
         };
     }
-                type: 'boolean',
-                label: 'Generate ViewModel',
-                default: false
-            },
-            useReactiveUI: {
-                type: 'boolean',
-                label: 'Use ReactiveUI',
-                default: false
-            },
-            useCommunityToolkit: {
-                type: 'boolean',
-                label: 'Use CommunityToolkit.Mvvm',
-                default: false
-            },
-            generateTheme: {
-                type: 'boolean',
-                label: 'Generate Theme File',
-                default: false
-            },
-            indentSize: {
-                type: 'number',
-                label: 'Indent Size',
-                min: 1,
-                max: 8,
-                default: 4
-            },
-            useTabs: {
-                type: 'boolean',
-                label: 'Use Tabs',
-                default: false
-            },
-            includeDesignTimeData: {
-                type: 'boolean',
-                label: 'Include Design-Time Data',
-                default: true
-            }
-        };
-    }
     
     /**
      * Configure export options

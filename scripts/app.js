@@ -23300,6 +23300,8 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             // Store objects with positions normalized to top-left of selection
             AppState.clipboard = AppState.selectedObjects.map(obj => {
                 const json = obj.toJSON();
+                const originalX = json.x ?? 0;
+                const originalY = json.y ?? 0;
                 // Normalize position relative to selection's top-left
                 if (json.x !== undefined) json.x -= minX;
                 if (json.y !== undefined) json.y -= minY;
@@ -23311,6 +23313,10 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                 // Handle center-based objects (polygon, star)
                 if (json.cx !== undefined) json.cx -= minX;
                 if (json.cy !== undefined) json.cy -= minY;
+
+                // For container types, store children relative to the parent so we can
+                // re-expand them when pasting at a new location.
+                this._normalizeChildrenToParent(json, originalX, originalY);
                 return json;
             });
             
@@ -23343,25 +23349,60 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             for (const json of AppState.clipboard) {
                 const obj = this._createObjectFromJSON(json);
                 if (obj) {
-                    // Position relative to paste location (objects already normalized to 0,0)
-                    if (obj.x !== undefined) obj.x += pasteX;
-                    if (obj.y !== undefined) obj.y += pasteY;
-                    // Handle line objects
-                    if (obj.x1 !== undefined) obj.x1 += pasteX;
-                    if (obj.y1 !== undefined) obj.y1 += pasteY;
-                    if (obj.x2 !== undefined) obj.x2 += pasteX;
-                    if (obj.y2 !== undefined) obj.y2 += pasteY;
-                    // Handle center-based objects
-                    if (obj.cx !== undefined) obj.cx += pasteX;
-                    if (obj.cy !== undefined) obj.cy += pasteY;
-                    
                     obj.id = uuid();
+
+                    // Position relative to paste location (objects already normalized to 0,0)
+                    this._applyOffsetToObject(obj, pasteX, pasteY);
+
+                    // Re-expand any relative child positions and fix parent links
+                    this._expandChildrenFromParent(obj);
+
                     this.addObject(obj);
                     AppState.selectedObjects.push(obj);
                 }
             }
             this.renderAllObjects();
             this._updateStatus(`Pasted ${AppState.clipboard.length} object(s)`);
+        }
+    }
+
+    _applyOffsetToObject(obj, dx, dy) {
+        if (obj.x !== undefined) obj.x += dx;
+        if (obj.y !== undefined) obj.y += dy;
+        if (obj.x1 !== undefined) obj.x1 += dx;
+        if (obj.y1 !== undefined) obj.y1 += dy;
+        if (obj.x2 !== undefined) obj.x2 += dx;
+        if (obj.y2 !== undefined) obj.y2 += dy;
+        if (obj.cx !== undefined) obj.cx += dx;
+        if (obj.cy !== undefined) obj.cy += dy;
+    }
+
+    _normalizeChildrenToParent(node, parentAbsX, parentAbsY) {
+        if (!node.children || node.children.length === 0) return;
+        for (const child of node.children) {
+            const childAbsX = child.x ?? parentAbsX;
+            const childAbsY = child.y ?? parentAbsY;
+
+            this._applyOffsetToObject(child, -parentAbsX, -parentAbsY);
+
+            this._normalizeChildrenToParent(child, childAbsX, childAbsY);
+        }
+    }
+
+    _expandChildrenFromParent(parent) {
+        if (!parent.children || parent.children.length === 0) return;
+
+        const parentAbsX = parent.x ?? 0;
+        const parentAbsY = parent.y ?? 0;
+
+        for (const child of parent.children) {
+            this._applyOffsetToObject(child, parentAbsX, parentAbsY);
+
+            child.parentId = parent.id;
+            child._cachedParent = parent;
+            child.parentFrame = parent.type === 'frame' ? parent.id : null;
+
+            this._expandChildrenFromParent(child);
         }
     }
     
