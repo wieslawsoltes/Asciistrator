@@ -16,10 +16,13 @@ import { DensityPalettes, BoxDrawing, getCharForDensity, getBoxChar } from './co
 import { 
     AsciiBuffer, 
     drawLine, 
+    bresenhamLine,
     drawRect, 
     fillRect, 
     drawCircle, 
     fillCircle,
+    drawEllipse,
+    fillEllipse,
     drawPolygon,
     fillPolygon,
     floodFill 
@@ -30,6 +33,7 @@ import { EventEmitter, globalEventBus } from './utils/events.js';
 import { $, $$, createElement, domReady, getMousePos, debounce, throttle } from './utils/dom.js';
 import { clamp, uniqueId, uuid, deepClone, hexToRgb, rgbToHex } from './utils/helpers.js';
 import { componentLibraryManager, Component, ComponentLibrary } from './components/ComponentLibrary.js';
+import { ChartFactory } from './charts/index.js';
 
 // ==========================================
 // SPATIAL INDEXING - QUADTREE
@@ -883,6 +887,244 @@ const VerticalConstraint = {
 };
 
 /**
+ * Normalize constraint values (supports legacy left/right/top/bottom values).
+ */
+function normalizeConstraintValue(value, axis) {
+    const fallback = axis === 'horizontal' ? HorizontalConstraint.MIN : VerticalConstraint.MIN;
+    if (!value) return fallback;
+    
+    const raw = String(value).trim();
+    if (!raw) return fallback;
+    
+    const normalized = raw.toUpperCase();
+    const compact = normalized.replace(/[^A-Z]/g, '');
+    
+    if (axis === 'horizontal') {
+        const map = {
+            MIN: HorizontalConstraint.MIN,
+            MAX: HorizontalConstraint.MAX,
+            STRETCH: HorizontalConstraint.STRETCH,
+            CENTER: HorizontalConstraint.CENTER,
+            SCALE: HorizontalConstraint.SCALE,
+            LEFT: HorizontalConstraint.MIN,
+            RIGHT: HorizontalConstraint.MAX,
+            LEFTRIGHT: HorizontalConstraint.STRETCH
+        };
+        return map[normalized] || map[compact] || fallback;
+    }
+    
+    const map = {
+        MIN: VerticalConstraint.MIN,
+        MAX: VerticalConstraint.MAX,
+        STRETCH: VerticalConstraint.STRETCH,
+        CENTER: VerticalConstraint.CENTER,
+        SCALE: VerticalConstraint.SCALE,
+        TOP: VerticalConstraint.MIN,
+        BOTTOM: VerticalConstraint.MAX,
+        TOPBOTTOM: VerticalConstraint.STRETCH
+    };
+    return map[normalized] || map[compact] || fallback;
+}
+
+function normalizeConstraints(constraints) {
+    return {
+        horizontal: normalizeConstraintValue(constraints?.horizontal, 'horizontal'),
+        vertical: normalizeConstraintValue(constraints?.vertical, 'vertical')
+    };
+}
+
+// ==========================================
+// RENDER TRANSFORMS
+// ==========================================
+
+function getObjectBounds(obj) {
+    if (obj && typeof obj.getBounds === 'function') {
+        const bounds = obj.getBounds();
+        if (bounds && Number.isFinite(bounds.x) && Number.isFinite(bounds.y)) {
+            return bounds;
+        }
+    }
+    return {
+        x: obj?.x || 0,
+        y: obj?.y || 0,
+        width: Math.max(1, obj?.width || 1),
+        height: Math.max(1, obj?.height || 1)
+    };
+}
+
+function getObjectTransformValues(obj) {
+    const rotation = Number.isFinite(obj?.rotation) ? obj.rotation : 0;
+    const scaleX = Number.isFinite(obj?.scaleX) ? obj.scaleX : 1;
+    const scaleY = Number.isFinite(obj?.scaleY) ? obj.scaleY : 1;
+    return {
+        rotation,
+        scaleX,
+        scaleY,
+        hasTransform: rotation !== 0 || scaleX !== 1 || scaleY !== 1
+    };
+}
+
+function composeObjectTransformMatrix(obj, parentMatrix) {
+    const { rotation, scaleX, scaleY, hasTransform } = getObjectTransformValues(obj);
+    if (!hasTransform) {
+        return parentMatrix || null;
+    }
+    
+    const bounds = getObjectBounds(obj);
+    const center = {
+        x: bounds.x + bounds.width / 2,
+        y: bounds.y + bounds.height / 2
+    };
+    
+    let pivot = center;
+    if (parentMatrix) {
+        const transformed = parentMatrix.transform(center.x, center.y);
+        pivot = { x: transformed.x, y: transformed.y };
+    }
+    
+    let local = Matrix3x3.identity();
+    if (scaleX !== 1 || scaleY !== 1) {
+        local = local.multiply(Matrix3x3.scalingAround(scaleX, scaleY, pivot.x, pivot.y));
+    }
+    if (rotation !== 0) {
+        local = local.multiply(Matrix3x3.rotationAround(rotation * Math.PI / 180, pivot.x, pivot.y));
+    }
+    
+    return parentMatrix ? local.multiply(parentMatrix) : local;
+}
+
+function getBoundsCorners(bounds) {
+    return [
+        { x: bounds.x, y: bounds.y },
+        { x: bounds.x + bounds.width, y: bounds.y },
+        { x: bounds.x + bounds.width, y: bounds.y + bounds.height },
+        { x: bounds.x, y: bounds.y + bounds.height }
+    ];
+}
+
+function transformPoints(points, matrix) {
+    if (!matrix) return points;
+    return points.map(point => matrix.transform(point.x, point.y));
+}
+
+function createTransformedBuffer(buffer, matrix) {
+    if (!matrix) return buffer;
+    
+    const transformPoint = (x, y) => matrix.transform(x, y);
+    
+    return {
+        width: buffer.width,
+        height: buffer.height,
+        chars: buffer.chars,
+        colors: buffer.colors,
+        fillChar: buffer.fillChar,
+        setCell: (x, y, char, fg, bg, z) => {
+            const p = transformPoint(x, y);
+            if (buffer.setCell) {
+                buffer.setCell(p.x, p.y, char, fg, bg, z);
+            } else if (buffer.setChar) {
+                buffer.setChar(p.x, p.y, char, fg, z);
+            }
+        },
+        setChar: (x, y, char, color, z) => {
+            const p = transformPoint(x, y);
+            buffer.setChar(p.x, p.y, char, color, z);
+        },
+        drawText: (x, y, text, color, z) => {
+            for (let i = 0; i < text.length; i++) {
+                const p = transformPoint(x + i, y);
+                buffer.setChar(p.x, p.y, text[i], color, z);
+            }
+        },
+        getCell: buffer.getCell
+            ? (x, y) => {
+                const p = transformPoint(x, y);
+                return buffer.getCell(p.x, p.y);
+            }
+            : undefined,
+        getChar: (x, y) => {
+            const p = transformPoint(x, y);
+            if (buffer.getChar) return buffer.getChar(p.x, p.y);
+            return buffer.chars?.[Math.round(p.y)]?.[Math.round(p.x)] || ' ';
+        },
+        inBounds: (x, y) => {
+            const p = transformPoint(x, y);
+            if (buffer.inBounds) return buffer.inBounds(p.x, p.y);
+            return p.x >= 0 && p.x < buffer.width && p.y >= 0 && p.y < buffer.height;
+        }
+    };
+}
+
+function getSelectionBounds(bounds) {
+    return {
+        x1: bounds.x - 1,
+        y1: bounds.y - 1,
+        x2: bounds.x + bounds.width,
+        y2: bounds.y + bounds.height
+    };
+}
+
+function getSelectionOutlinePoints(bounds, matrix) {
+    const sel = getSelectionBounds(bounds);
+    const corners = [
+        { x: sel.x1, y: sel.y1 },
+        { x: sel.x2, y: sel.y1 },
+        { x: sel.x2, y: sel.y2 },
+        { x: sel.x1, y: sel.y2 }
+    ];
+    return transformPoints(corners, matrix);
+}
+
+function transformHasRotation(matrix) {
+    if (!matrix) return false;
+    const epsilon = 1e-6;
+    return Math.abs(matrix.b) > epsilon || Math.abs(matrix.c) > epsilon;
+}
+
+function getAxisAlignedSelectionBounds(bounds, matrix) {
+    const outline = getSelectionOutlinePoints(bounds, matrix);
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    
+    for (const point of outline) {
+        minX = Math.min(minX, point.x);
+        minY = Math.min(minY, point.y);
+        maxX = Math.max(maxX, point.x);
+        maxY = Math.max(maxY, point.y);
+    }
+    
+    return {
+        x1: Math.round(minX),
+        y1: Math.round(minY),
+        x2: Math.round(maxX),
+        y2: Math.round(maxY)
+    };
+}
+
+function getSelectionHandlePoints(bounds, matrix) {
+    const sel = getSelectionBounds(bounds);
+    const midX = (sel.x1 + sel.x2) / 2;
+    const midY = (sel.y1 + sel.y2) / 2;
+    const handles = [
+        { id: 'nw', x: sel.x1, y: sel.y1 },
+        { id: 'n', x: midX, y: sel.y1 },
+        { id: 'ne', x: sel.x2, y: sel.y1 },
+        { id: 'e', x: sel.x2, y: midY },
+        { id: 'se', x: sel.x2, y: sel.y2 },
+        { id: 's', x: midX, y: sel.y2 },
+        { id: 'sw', x: sel.x1, y: sel.y2 },
+        { id: 'w', x: sel.x1, y: midY }
+    ];
+    if (!matrix) return handles;
+    return handles.map(handle => {
+        const point = matrix.transform(handle.x, handle.y);
+        return { ...handle, x: point.x, y: point.y };
+    });
+}
+
+/**
  * Constraint calculation engine (optimized)
  * Handles repositioning and resizing children when parent changes
  */
@@ -1004,9 +1246,9 @@ class ConstraintEngine {
         newX, newY, newW, newH, newCenterX, newCenterY,
         scaleX, scaleY
     ) {
-        const constraints = child.constraints;
-        const hConstraint = constraints?.horizontal || 'MIN';
-        const vConstraint = constraints?.vertical || 'MIN';
+        const constraints = normalizeConstraints(child.constraints || {});
+        const hConstraint = constraints.horizontal;
+        const vConstraint = constraints.vertical;
         
         // Get child bounds - use simple bounds for speed
         const childX = child.x;
@@ -1265,8 +1507,9 @@ class ConstraintEngine {
      * Get constraint info for display
      */
     static getConstraintLabel(constraints) {
-        const h = constraints?.horizontal || 'MIN';
-        const v = constraints?.vertical || 'MIN';
+        const normalized = normalizeConstraints(constraints || {});
+        const h = normalized.horizontal;
+        const v = normalized.vertical;
         
         const hLabels = {
             'MIN': 'Left',
@@ -2577,6 +2820,10 @@ class SceneObject {
         delete data.id;
         delete data.children;
         Object.assign(copy, data);
+
+        if (copy.type === 'component') {
+            copy.componentKey = uuid();
+        }
         
         copy.id = uuid();
         copy.parentId = null;
@@ -2784,24 +3031,23 @@ class EllipseObject extends SceneObject {
     }
     
     _updateBounds() {
-        // Calculate the actual rendered size
-        // When rendering, drawCircle applies aspectRatio to X
-        // So actual rendered width = radius * aspectRatio * 2 + 1
-        const effectiveRadiusX = Math.round(Math.max(this.radiusX, this.radiusY) * EllipseObject.ASPECT_RATIO);
-        const effectiveRadiusY = Math.max(this.radiusX, this.radiusY);
-        this.width = effectiveRadiusX * 2 + 1;
-        this.height = effectiveRadiusY * 2 + 1;
+        const rx = Math.max(0, this.radiusX || 0);
+        const ry = Math.max(0, this.radiusY || 0);
+        const effectiveRadiusX = Math.round(rx * EllipseObject.ASPECT_RATIO);
+        const effectiveRadiusY = Math.round(ry);
+        this.width = Math.max(1, effectiveRadiusX * 2 + 1);
+        this.height = Math.max(1, effectiveRadiusY * 2 + 1);
     }
     
     // Get center of ellipse (in canvas coordinates)
     getCenterX() {
         // Center is at x + effectiveRadiusX (accounting for aspect ratio)
-        const effectiveRadiusX = Math.round(Math.max(this.radiusX, this.radiusY) * EllipseObject.ASPECT_RATIO);
+        const effectiveRadiusX = Math.round((this.radiusX || 0) * EllipseObject.ASPECT_RATIO);
         return this.x + effectiveRadiusX;
     }
     
     getCenterY() {
-        const effectiveRadiusY = Math.max(this.radiusX, this.radiusY);
+        const effectiveRadiusY = Math.round(this.radiusY || 0);
         return this.y + effectiveRadiusY;
     }
     
@@ -2819,8 +3065,8 @@ class EllipseObject extends SceneObject {
         // Calculate using actual rendered ellipse dimensions
         const cx = this.getCenterX();
         const cy = this.getCenterY();
-        const effectiveRadiusX = Math.round(Math.max(this.radiusX, this.radiusY) * EllipseObject.ASPECT_RATIO);
-        const effectiveRadiusY = Math.max(this.radiusX, this.radiusY);
+        const effectiveRadiusX = Math.round((this.radiusX || 0) * EllipseObject.ASPECT_RATIO);
+        const effectiveRadiusY = Math.round(this.radiusY || 0);
         
         const dx = px - cx;
         const dy = py - cy;
@@ -2837,16 +3083,17 @@ class EllipseObject extends SceneObject {
         
         const cx = this.getCenterX();
         const cy = this.getCenterY();
-        const r = Math.max(this.radiusX, this.radiusY) || 1;
+        const rx = Math.max(1, Math.round((this.radiusX || 0) * EllipseObject.ASPECT_RATIO));
+        const ry = Math.max(1, Math.round(this.radiusY || 0));
         
         if (this.filled && this.fillChar) {
-            fillCircle(buffer, cx, cy, r, {
+            fillEllipse(buffer, cx, cy, rx, ry, {
                 fillChar: this.fillChar,
                 color: this.fillColor
             });
         }
         
-        drawCircle(buffer, cx, cy, r, {
+        drawEllipse(buffer, cx, cy, rx, ry, {
             char: this.strokeChar,
             color: this.strokeColor
         });
@@ -3444,60 +3691,218 @@ class ChartObject extends SceneObject {
         this.title = '';
         this.showAxes = true;
         this.showLabels = true;
+        this.chartData = null;
+        this.chartOptions = null;
     }
     
     render(buffer) {
         if (!this.visible) return;
-        
+
+        const payload = this._getChartPayload();
+        if (this.chartOptions?.engine !== 'legacy') {
+            if (this._renderWithChartEngine(buffer, payload)) {
+                return;
+            }
+        }
+
         switch (this.chartType) {
             case 'line':
-                this._renderLineChart(buffer);
+                this._renderLineChart(buffer, payload);
                 break;
             case 'pie':
-                this._renderPieChart(buffer);
+                this._renderPieChart(buffer, payload);
                 break;
             case 'scatter':
-                this._renderScatterChart(buffer);
+                this._renderScatterChart(buffer, payload);
                 break;
             default:
-                this._renderBarChart(buffer);
+                this._renderBarChart(buffer, payload);
+        }
+    }
+
+    _getChartPayload() {
+        const chartData = this.chartData && typeof this.chartData === 'object' ? this.chartData : null;
+        const data = chartData?.data && Array.isArray(chartData.data)
+            ? chartData.data
+            : this.data;
+        const labels = chartData?.labels && Array.isArray(chartData.labels)
+            ? chartData.labels
+            : this.labels;
+        const datasets = Array.isArray(chartData?.datasets)
+            ? chartData.datasets
+            : (Array.isArray(chartData?.series) ? chartData.series : null);
+        const title = this.chartOptions?.title ?? this.title;
+        const showAxes = this.chartOptions?.showAxes ?? this.showAxes;
+        const showLabels = this.chartOptions?.showLabels ?? this.showLabels;
+
+        return { data, labels, datasets, title, showAxes, showLabels };
+    }
+
+    _renderWithChartEngine(buffer, payload) {
+        if (!ChartFactory || typeof ChartFactory.createSync !== 'function') {
+            return false;
+        }
+
+        const options = this._buildChartEngineOptions(payload);
+        let chart;
+
+        try {
+            chart = ChartFactory.createSync(this._mapChartEngineType(this.chartType), options);
+        } catch (error) {
+            console.warn('Chart engine fallback:', error);
+            return false;
+        }
+
+        if (!chart) return false;
+
+        const dataConfig = this._buildChartDataConfig(payload);
+        if (dataConfig) {
+            chart.setData(dataConfig);
+        }
+
+        if (typeof payload.showAxes === 'boolean') {
+            chart.showAxes = payload.showAxes;
+        }
+
+        if (typeof payload.showLabels === 'boolean') {
+            if (chart.axisX) chart.axisX.showLabels = payload.showLabels;
+            if (chart.axisY) chart.axisY.showLabels = payload.showLabels;
+            if (chart.type === 'pie' && chart.pieStyle) {
+                chart.pieStyle.showLabel = payload.showLabels;
+            }
+        }
+
+        chart.width = Math.max(1, this.width || 1);
+        chart.height = Math.max(1, this.height || 1);
+        chart.x = 0;
+        chart.y = 0;
+        chart.dirty = true;
+
+        const chartBuffer = chart.render();
+        if (!chartBuffer) return false;
+
+        this._blitChartBuffer(buffer, chartBuffer);
+        return true;
+    }
+
+    _buildChartEngineOptions(payload) {
+        const options = {};
+        const chartOptions = this.chartOptions && typeof this.chartOptions === 'object'
+            ? { ...this.chartOptions }
+            : {};
+
+        delete chartOptions.engine;
+        Object.assign(options, chartOptions);
+
+        options.width = Math.max(1, this.width || 1);
+        options.height = Math.max(1, this.height || 1);
+
+        if (payload.labels) {
+            options.labels = payload.labels;
+        }
+
+        if (typeof payload.showAxes === 'boolean') {
+            options.showAxes = payload.showAxes;
+        }
+
+        if (payload.title !== undefined) {
+            if (payload.title && typeof payload.title === 'object') {
+                options.title = { ...(options.title || {}), ...payload.title };
+            } else {
+                options.title = { ...(options.title || {}), text: String(payload.title || '') };
+            }
+        } else if (typeof options.title === 'string') {
+            options.title = { text: options.title };
+        }
+
+        return options;
+    }
+
+    _buildChartDataConfig(payload) {
+        if (payload.datasets) {
+            return {
+                labels: payload.labels || [],
+                datasets: payload.datasets
+            };
+        }
+
+        if (payload.data) {
+            return {
+                labels: payload.labels || [],
+                data: payload.data
+            };
+        }
+
+        return null;
+    }
+
+    _mapChartEngineType(type) {
+        switch (type) {
+            case 'bar':
+            case 'line':
+            case 'pie':
+            case 'scatter':
+                return type;
+            default:
+                return 'bar';
+        }
+    }
+
+    _blitChartBuffer(target, source) {
+        const maxY = Math.min(source.height, target.height - this.y);
+        const maxX = Math.min(source.width, target.width - this.x);
+
+        for (let y = 0; y < maxY; y++) {
+            for (let x = 0; x < maxX; x++) {
+                const char = source.getChar(x, y);
+                if (char && char !== ' ') {
+                    target.setChar(this.x + x, this.y + y, char, this.strokeColor);
+                }
+            }
         }
     }
     
-    _renderBarChart(buffer) {
+    _renderBarChart(buffer, payload) {
+        const data = payload.data || [];
+        const labels = payload.labels || [];
+        const title = payload.title || '';
+        const showAxes = payload.showAxes !== false;
+        const showLabels = payload.showLabels !== false;
         const chartHeight = this.height - 3; // Leave room for axis and labels
         const chartWidth = this.width - 3;   // Leave room for Y axis
         
         // Draw title if present
-        if (this.title) {
-            const titleX = this.x + Math.floor((this.width - this.title.length) / 2);
-            buffer.drawText(titleX, this.y, this.title, this.strokeColor);
+        if (title) {
+            const titleX = this.x + Math.floor((this.width - title.length) / 2);
+            buffer.drawText(titleX, this.y, title, this.strokeColor);
         }
         
         // Draw Y axis
-        for (let i = 0; i < chartHeight; i++) {
-            buffer.setChar(this.x + 2, this.y + 1 + i, '│', this.strokeColor);
+        if (showAxes) {
+            for (let i = 0; i < chartHeight; i++) {
+                buffer.setChar(this.x + 2, this.y + 1 + i, '│', this.strokeColor);
+            }
+            
+            // Draw X axis
+            buffer.setChar(this.x + 2, this.y + chartHeight + 1, '└', this.strokeColor);
+            for (let i = 1; i < chartWidth; i++) {
+                buffer.setChar(this.x + 2 + i, this.y + chartHeight + 1, '─', this.strokeColor);
+            }
+            
+            // Draw Y axis labels
+            buffer.drawText(this.x, this.y + 1, '1', this.strokeColor);
+            buffer.drawText(this.x, this.y + Math.floor(chartHeight / 2), '.5', this.strokeColor);
+            buffer.drawText(this.x, this.y + chartHeight, '0', this.strokeColor);
         }
-        
-        // Draw X axis
-        buffer.setChar(this.x + 2, this.y + chartHeight + 1, '└', this.strokeColor);
-        for (let i = 1; i < chartWidth; i++) {
-            buffer.setChar(this.x + 2 + i, this.y + chartHeight + 1, '─', this.strokeColor);
-        }
-        
-        // Draw Y axis labels
-        buffer.drawText(this.x, this.y + 1, '1', this.strokeColor);
-        buffer.drawText(this.x, this.y + Math.floor(chartHeight / 2), '.5', this.strokeColor);
-        buffer.drawText(this.x, this.y + chartHeight, '0', this.strokeColor);
         
         // Draw bars with better spacing
         const barAreaWidth = chartWidth - 1;
-        const numBars = this.data.length;
+        const numBars = data.length;
         const totalBarSpace = barAreaWidth;
         const barWidth = Math.max(1, Math.floor(totalBarSpace / numBars) - 1);
         const spacing = Math.floor((totalBarSpace - barWidth * numBars) / (numBars + 1));
         
-        this.data.forEach((value, i) => {
+        data.forEach((value, i) => {
             const barHeight = Math.max(1, Math.round(value * (chartHeight - 1)));
             const barX = this.x + 3 + spacing + i * (barWidth + spacing);
             
@@ -3512,31 +3917,35 @@ class ChartObject extends SceneObject {
             }
             
             // Draw label below
-            if (this.showLabels && this.labels[i]) {
-                buffer.setChar(barX, this.y + chartHeight + 2, this.labels[i][0], this.strokeColor);
+            if (showLabels && labels[i]) {
+                buffer.setChar(barX, this.y + chartHeight + 2, labels[i][0], this.strokeColor);
             }
         });
     }
     
-    _renderLineChart(buffer) {
+    _renderLineChart(buffer, payload) {
+        const data = payload.data || [];
+        const showAxes = payload.showAxes !== false;
         const chartHeight = this.height - 3;
         const chartWidth = this.width - 3;
         
         // Draw axes
-        for (let i = 0; i < chartHeight; i++) {
-            buffer.setChar(this.x + 2, this.y + 1 + i, '│', this.strokeColor);
-        }
-        buffer.setChar(this.x + 2, this.y + chartHeight + 1, '└', this.strokeColor);
-        for (let i = 1; i < chartWidth; i++) {
-            buffer.setChar(this.x + 2 + i, this.y + chartHeight + 1, '─', this.strokeColor);
+        if (showAxes) {
+            for (let i = 0; i < chartHeight; i++) {
+                buffer.setChar(this.x + 2, this.y + 1 + i, '│', this.strokeColor);
+            }
+            buffer.setChar(this.x + 2, this.y + chartHeight + 1, '└', this.strokeColor);
+            for (let i = 1; i < chartWidth; i++) {
+                buffer.setChar(this.x + 2 + i, this.y + chartHeight + 1, '─', this.strokeColor);
+            }
         }
         
         // Plot points and connect with lines
         const points = [];
-        const numPoints = this.data.length;
+        const numPoints = data.length;
         const stepX = Math.floor((chartWidth - 2) / Math.max(1, numPoints - 1));
         
-        this.data.forEach((value, i) => {
+        data.forEach((value, i) => {
             const px = this.x + 3 + i * stepX;
             const py = this.y + chartHeight - Math.round(value * (chartHeight - 1));
             points.push({ x: px, y: py });
@@ -3558,18 +3967,19 @@ class ChartObject extends SceneObject {
         }
     }
     
-    _renderPieChart(buffer) {
+    _renderPieChart(buffer, payload) {
+        const data = payload.data || [];
         const cx = this.x + Math.floor(this.width / 2);
         const cy = this.y + Math.floor(this.height / 2);
         const radius = Math.min(Math.floor(this.width / 2) - 2, Math.floor(this.height / 2) - 1);
         
         // Draw circular outline
         const pieChars = ['█', '▓', '▒', '░', '▪', '○'];
-        let total = this.data.reduce((a, b) => a + b, 0);
+        let total = data.reduce((a, b) => a + b, 0);
         let currentAngle = -Math.PI / 2;
         
         // Draw filled segments
-        this.data.forEach((value, i) => {
+        data.forEach((value, i) => {
             const angleSpan = (value / total) * 2 * Math.PI;
             const midAngle = currentAngle + angleSpan / 2;
             const char = pieChars[i % pieChars.length];
@@ -3593,37 +4003,48 @@ class ChartObject extends SceneObject {
         drawCircle(buffer, cx, cy, radius, { char: '○', color: this.strokeColor });
     }
     
-    _renderScatterChart(buffer) {
+    _renderScatterChart(buffer, payload) {
+        const data = payload.data || [];
+        const showAxes = payload.showAxes !== false;
         const chartHeight = this.height - 3;
         const chartWidth = this.width - 3;
         
         // Draw axes
-        for (let i = 0; i < chartHeight; i++) {
-            buffer.setChar(this.x + 2, this.y + 1 + i, '│', this.strokeColor);
-        }
-        buffer.setChar(this.x + 2, this.y + chartHeight + 1, '└', this.strokeColor);
-        for (let i = 1; i < chartWidth; i++) {
-            buffer.setChar(this.x + 2 + i, this.y + chartHeight + 1, '─', this.strokeColor);
+        if (showAxes) {
+            for (let i = 0; i < chartHeight; i++) {
+                buffer.setChar(this.x + 2, this.y + 1 + i, '│', this.strokeColor);
+            }
+            buffer.setChar(this.x + 2, this.y + chartHeight + 1, '└', this.strokeColor);
+            for (let i = 1; i < chartWidth; i++) {
+                buffer.setChar(this.x + 2 + i, this.y + chartHeight + 1, '─', this.strokeColor);
+            }
         }
         
         // Plot scattered points
         const markers = ['●', '○', '◆', '◇', '■', '□'];
-        this.data.forEach((value, i) => {
-            const px = this.x + 3 + Math.floor((i / (this.data.length - 1 || 1)) * (chartWidth - 2));
+        data.forEach((value, i) => {
+            const px = this.x + 3 + Math.floor((i / (data.length - 1 || 1)) * (chartWidth - 2));
             const py = this.y + chartHeight - Math.round(value * (chartHeight - 1));
             buffer.setChar(px, py, markers[i % markers.length], this.strokeColor);
         });
     }
     
     toJSON() {
+        const payload = this._getChartPayload();
         return {
             ...super.toJSON(),
             chartType: this.chartType,
-            data: this.data,
-            labels: this.labels,
-            title: this.title,
-            showAxes: this.showAxes,
-            showLabels: this.showLabels
+            data: payload.data,
+            labels: payload.labels,
+            title: payload.title,
+            showAxes: payload.showAxes,
+            showLabels: payload.showLabels,
+            chartData: this.chartData ?? { data: payload.data, labels: payload.labels },
+            chartOptions: this.chartOptions ?? {
+                title: payload.title,
+                showAxes: payload.showAxes,
+                showLabels: payload.showLabels
+            }
         };
     }
 }
@@ -4976,8 +5397,7 @@ class InstanceObject extends SceneObject {
     render(buffer) {
         if (!this.visible) return;
         
-        // Instance rendering depends on having the component definition
-        // For now, render a placeholder box with instance indicator
+        // Fallback: render a placeholder box with instance indicator
         const char = '◇';  // Diamond indicates instance
         
         // Draw border
@@ -6388,7 +6808,11 @@ class AsciiRenderMode extends RenderMode {
     }
     
     renderObject(obj, buffer, options = {}) {
-        obj.render(buffer);
+        const transform = options.transform === undefined
+            ? composeObjectTransformMatrix(obj, null)
+            : options.transform;
+        const targetBuffer = createTransformedBuffer(buffer, transform);
+        obj.render(targetBuffer);
     }
 }
 
@@ -6408,6 +6832,11 @@ class OutlineRenderMode extends RenderMode {
     renderObject(obj, buffer, options = {}) {
         if (!obj.visible) return;
         
+        const transform = options.transform === undefined
+            ? composeObjectTransformMatrix(obj, null)
+            : options.transform;
+        const targetBuffer = createTransformedBuffer(buffer, transform);
+        
         // Get object bounds
         const bounds = obj.getBounds ? obj.getBounds() : { 
             x: obj.x, 
@@ -6422,37 +6851,37 @@ class OutlineRenderMode extends RenderMode {
         switch (type) {
             case 'line':
             case 'LineObject':
-                this._renderLineOutline(obj, buffer);
+                this._renderLineOutline(obj, targetBuffer);
                 break;
                 
             case 'rect':
             case 'RectObject':
             case 'rectangle':
-                this._renderRectOutline(bounds, buffer);
+                this._renderRectOutline(bounds, targetBuffer);
                 break;
                 
             case 'ellipse':
             case 'EllipseObject':
             case 'circle':
-                this._renderEllipseOutline(obj, buffer);
+                this._renderEllipseOutline(obj, targetBuffer);
                 break;
                 
             case 'path':
             case 'PathObject':
             case 'BezierPath':
-                this._renderPathOutline(obj, buffer);
+                this._renderPathOutline(obj, targetBuffer);
                 break;
                 
             case 'text':
             case 'TextObject':
-                this._renderTextOutline(obj, buffer);
+                this._renderTextOutline(obj, targetBuffer);
                 break;
                 
             case 'frame':
             case 'FrameObject':
             case 'group':
             case 'GroupObject':
-                this._renderFrameOutline(obj, buffer);
+                this._renderFrameOutline(obj, targetBuffer);
                 break;
                 
             case 'process':
@@ -6465,12 +6894,12 @@ class OutlineRenderMode extends RenderMode {
             case 'DataShape':
             case 'connector':
             case 'ConnectorObject':
-                this._renderFlowchartOutline(obj, buffer);
+                this._renderFlowchartOutline(obj, targetBuffer);
                 break;
                 
             default:
                 // Fallback: render bounding box outline
-                this._renderRectOutline(bounds, buffer);
+                this._renderRectOutline(bounds, targetBuffer);
         }
     }
     
@@ -6524,10 +6953,14 @@ class OutlineRenderMode extends RenderMode {
     }
     
     _renderEllipseOutline(obj, buffer) {
-        const cx = Math.round(obj.x + (obj.width || obj.radiusX * 2) / 2);
-        const cy = Math.round(obj.y + (obj.height || obj.radiusY * 2) / 2);
-        const rx = Math.max(1, Math.round((obj.width || obj.radiusX * 2) / 2));
-        const ry = Math.max(1, Math.round((obj.height || obj.radiusY * 2) / 2));
+        const fallbackWidth = (obj.radiusX || 0) * EllipseObject.ASPECT_RATIO * 2;
+        const fallbackHeight = (obj.radiusY || 0) * 2;
+        const width = obj.width || fallbackWidth;
+        const height = obj.height || fallbackHeight;
+        const cx = Math.round(obj.x + width / 2);
+        const cy = Math.round(obj.y + height / 2);
+        const rx = Math.max(1, Math.round(width / 2));
+        const ry = Math.max(1, Math.round(height / 2));
         
         // Midpoint ellipse algorithm
         let x = 0, y = ry;
@@ -6771,6 +7204,24 @@ class ShapeRenderMode extends RenderMode {
             x: this.paddingLeft + charX * this.charWidth,
             y: this.paddingTop + charY * this.charHeight
         };
+    }
+    
+    _getPixelTransformMatrix(transform) {
+        if (!transform) return null;
+        const cw = this.charWidth || 1;
+        const ch = this.charHeight || 1;
+        const charToPixel = Matrix3x3.translation(this.paddingLeft, this.paddingTop)
+            .multiply(Matrix3x3.scaling(cw, ch));
+        const pixelToChar = Matrix3x3.scaling(1 / cw, 1 / ch)
+            .multiply(Matrix3x3.translation(-this.paddingLeft, -this.paddingTop));
+        return charToPixel.multiply(transform).multiply(pixelToChar);
+    }
+    
+    _applyRenderTransform(transform) {
+        if (!transform || !this.ctx) return;
+        const pixelMatrix = this._getPixelTransformMatrix(transform);
+        if (!pixelMatrix) return;
+        this.ctx.transform(pixelMatrix.a, pixelMatrix.b, pixelMatrix.c, pixelMatrix.d, pixelMatrix.tx, pixelMatrix.ty);
     }
     
     /**
@@ -7044,9 +7495,15 @@ class ShapeRenderMode extends RenderMode {
         const selColor = '#0d99ff';  // Figma blue
         const handleColor = '#ffffff';
         const handleSize = 8;
+        const appRef = window.Asciistrator?.app;
         
         for (const obj of validObjects) {
             const bounds = obj.getBounds();
+            const transform = appRef?._getObjectRenderMatrix?.(obj) || composeObjectTransformMatrix(obj, null);
+            
+            this.ctx.save();
+            this._applyRenderTransform(transform);
+            
             const pos = this._charToPixel(bounds.x, bounds.y);
             const w = bounds.width * this.charWidth;
             const h = bounds.height * this.charHeight;
@@ -7078,6 +7535,8 @@ class ShapeRenderMode extends RenderMode {
                 this.ctx.lineWidth = 1;
                 this.ctx.strokeRect(handle.x, handle.y, handleSize, handleSize);
             }
+            
+            this.ctx.restore();
         }
         
         // Draw multi-selection bounding box if multiple objects selected
@@ -7085,13 +7544,15 @@ class ShapeRenderMode extends RenderMode {
             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
             for (const obj of validObjects) {
                 const bounds = obj.getBounds();
-                const pos = this._charToPixel(bounds.x, bounds.y);
-                const w = bounds.width * this.charWidth;
-                const h = bounds.height * this.charHeight;
-                minX = Math.min(minX, pos.x);
-                minY = Math.min(minY, pos.y);
-                maxX = Math.max(maxX, pos.x + w);
-                maxY = Math.max(maxY, pos.y + h);
+                const transform = appRef?._getObjectRenderMatrix?.(obj) || composeObjectTransformMatrix(obj, null);
+                const outline = getSelectionOutlinePoints(bounds, transform);
+                for (const point of outline) {
+                    const pos = this._charToPixel(point.x, point.y);
+                    minX = Math.min(minX, pos.x);
+                    minY = Math.min(minY, pos.y);
+                    maxX = Math.max(maxX, pos.x);
+                    maxY = Math.max(maxY, pos.y);
+                }
             }
             
             // Dashed outer bounding box
@@ -7115,6 +7576,9 @@ class ShapeRenderMode extends RenderMode {
             width: obj.width || 1, 
             height: obj.height || 1 
         };
+        const transform = options.transform === undefined
+            ? composeObjectTransformMatrix(obj, null)
+            : options.transform;
         
         const type = obj.type || obj.constructor.name;
         const fillColor = this._parseColor(obj.fillColor || obj.backgroundColor, '#3d3d4a');
@@ -7128,6 +7592,8 @@ class ShapeRenderMode extends RenderMode {
         this.ctx.shadowColor = this.shadowColor;
         this.ctx.shadowOffsetX = 1;
         this.ctx.shadowOffsetY = 1;
+        
+        this._applyRenderTransform(transform);
         
         switch (type) {
             case 'rect':
@@ -7295,10 +7761,14 @@ class ShapeRenderMode extends RenderMode {
      * Render ellipse/circle
      */
     _renderEllipse(obj, fillColor, strokeColor) {
-        const cx = obj.x + (obj.width || obj.radiusX * 2) / 2;
-        const cy = obj.y + (obj.height || obj.radiusY * 2) / 2;
-        const rx = (obj.width || obj.radiusX * 2) / 2;
-        const ry = (obj.height || obj.radiusY * 2) / 2;
+        const fallbackWidth = (obj.radiusX || 0) * EllipseObject.ASPECT_RATIO * 2;
+        const fallbackHeight = (obj.radiusY || 0) * 2;
+        const width = obj.width || fallbackWidth;
+        const height = obj.height || fallbackHeight;
+        const cx = obj.x + width / 2;
+        const cy = obj.y + height / 2;
+        const rx = width / 2;
+        const ry = height / 2;
         
         const center = this._charToPixel(cx, cy);
         const radiusX = rx * this.charWidth;
@@ -7562,6 +8032,11 @@ class ScratchRenderMode extends RenderMode {
     renderObject(obj, buffer, options = {}) {
         if (!obj.visible) return;
         
+        const transform = options.transform === undefined
+            ? composeObjectTransformMatrix(obj, null)
+            : options.transform;
+        const targetBuffer = createTransformedBuffer(buffer, transform);
+        
         const bounds = obj.getBounds ? obj.getBounds() : { 
             x: obj.x, 
             y: obj.y, 
@@ -7575,7 +8050,7 @@ class ScratchRenderMode extends RenderMode {
         switch (type) {
             case 'line':
             case 'LineObject':
-                this._renderSketchLine(obj, buffer, color);
+                this._renderSketchLine(obj, targetBuffer, color);
                 break;
                 
             case 'rect':
@@ -7583,24 +8058,24 @@ class ScratchRenderMode extends RenderMode {
             case 'rectangle':
             case 'frame':
             case 'FrameObject':
-                this._renderSketchRect(bounds, buffer, color);
+                this._renderSketchRect(bounds, targetBuffer, color);
                 break;
                 
             case 'ellipse':
             case 'EllipseObject':
             case 'circle':
-                this._renderSketchEllipse(obj, buffer, color);
+                this._renderSketchEllipse(obj, targetBuffer, color);
                 break;
                 
             case 'text':
             case 'TextObject':
                 // Render text normally but with underline
-                this._renderSketchText(obj, buffer);
+                this._renderSketchText(obj, targetBuffer);
                 break;
                 
             default:
                 // Fallback to sketch rectangle
-                this._renderSketchRect(bounds, buffer, color);
+                this._renderSketchRect(bounds, targetBuffer, color);
         }
     }
     
@@ -7660,10 +8135,14 @@ class ScratchRenderMode extends RenderMode {
     }
     
     _renderSketchEllipse(obj, buffer, color) {
-        const cx = Math.round(obj.x + (obj.width || obj.radiusX * 2) / 2);
-        const cy = Math.round(obj.y + (obj.height || obj.radiusY * 2) / 2);
-        const rx = Math.max(1, Math.round((obj.width || obj.radiusX * 2) / 2));
-        const ry = Math.max(1, Math.round((obj.height || obj.radiusY * 2) / 2));
+        const fallbackWidth = (obj.radiusX || 0) * EllipseObject.ASPECT_RATIO * 2;
+        const fallbackHeight = (obj.radiusY || 0) * 2;
+        const width = obj.width || fallbackWidth;
+        const height = obj.height || fallbackHeight;
+        const cx = Math.round(obj.x + width / 2);
+        const cy = Math.round(obj.y + height / 2);
+        const rx = Math.max(1, Math.round(width / 2));
+        const ry = Math.max(1, Math.round(height / 2));
         
         const chars = ['o', 'O', '0', 'c', 'C', '(', ')'];
         
@@ -7784,6 +8263,9 @@ class RoughRenderMode extends ShapeRenderMode {
             width: obj.width || 1, 
             height: obj.height || 1 
         };
+        const transform = options.transform === undefined
+            ? composeObjectTransformMatrix(obj, null)
+            : options.transform;
         
         const type = obj.type || obj.constructor.name;
         const fillColor = this._parseColor(obj.fillColor || obj.backgroundColor, null);
@@ -7792,6 +8274,8 @@ class RoughRenderMode extends ShapeRenderMode {
         this.ctx.save();
         this.ctx.lineCap = 'round';
         this.ctx.lineJoin = 'round';
+        
+        this._applyRenderTransform(transform);
         
         switch (type) {
             case 'rect':
@@ -8057,10 +8541,14 @@ class RoughRenderMode extends ShapeRenderMode {
      * Draw rough ellipse
      */
     _renderRoughEllipse(obj, fillColor, strokeColor) {
-        const cx = obj.x + (obj.width || obj.radiusX * 2) / 2;
-        const cy = obj.y + (obj.height || obj.radiusY * 2) / 2;
-        const rx = (obj.width || obj.radiusX * 2) / 2;
-        const ry = (obj.height || obj.radiusY * 2) / 2;
+        const fallbackWidth = (obj.radiusX || 0) * EllipseObject.ASPECT_RATIO * 2;
+        const fallbackHeight = (obj.radiusY || 0) * 2;
+        const width = obj.width || fallbackWidth;
+        const height = obj.height || fallbackHeight;
+        const cx = obj.x + width / 2;
+        const cy = obj.y + height / 2;
+        const rx = width / 2;
+        const ry = height / 2;
         
         const center = this._charToPixel(cx, cy);
         const radiusX = rx * this.charWidth;
@@ -9557,9 +10045,8 @@ class AsciiCanvasRenderer extends EventEmitter {
             this._previewObjects.push(obj);
         } else {
             // For ASCII modes, render to preview buffer using object's render method
-            if (obj.render) {
-                obj.render(this.previewBuffer);
-            }
+            const transform = composeObjectTransformMatrix(obj, null);
+            renderModeManager.renderObject(obj, this.previewBuffer, { transform });
         }
     }
     
@@ -9820,9 +10307,9 @@ class Tool {
     }
     
     onMouseDown(x, y, button, renderer) {}
-    onMouseMove(x, y, renderer) {}
-    onMouseUp(x, y, button, renderer) {}
-    onKeyDown(key, renderer) {}
+    onMouseMove(x, y, renderer, app, event = null) {}
+    onMouseUp(x, y, button, renderer, app, event = null) {}
+    onKeyDown(key, renderer, app, event = null) {}
 }
 
 /**
@@ -9835,6 +10322,9 @@ class SelectTool extends Tool {
         this.isResizing = false;
         this.resizeHandle = null;
         this.resizeStartBounds = null;
+        this.resizeStartCenter = null;
+        this.resizeStartMatrix = null;
+        this.resizeStartInverse = null;
         this.moveOffsetX = 0;
         this.moveOffsetY = 0;
         this.selectionRect = null; // For marquee selection
@@ -10241,6 +10731,12 @@ class SelectTool extends Tool {
                     this.resizeStartX = x;
                     this.resizeStartY = y;
                     this.resizeStartBounds = { ...handleInfo.obj.getBounds() };
+                    this.resizeStartCenter = {
+                        x: this.resizeStartBounds.x + this.resizeStartBounds.width / 2,
+                        y: this.resizeStartBounds.y + this.resizeStartBounds.height / 2
+                    };
+                    this.resizeStartMatrix = app?._getObjectRenderMatrix?.(handleInfo.obj) || null;
+                    this.resizeStartInverse = this.resizeStartMatrix ? this.resizeStartMatrix.invert() : null;
                     this.resizeObj = handleInfo.obj;
                     if (app.saveStateForUndo) app.saveStateForUndo();
                     return;
@@ -10516,7 +11012,7 @@ class SelectTool extends Tool {
         }
     }
     
-    onMouseMove(x, y, renderer, app) {
+    onMouseMove(x, y, renderer, app, event = null) {
         if (this.isDragging) {
             // Drawing selection rectangle
             renderer.clearPreview();
@@ -10534,48 +11030,88 @@ class SelectTool extends Tool {
             const dy = y - this.resizeStartY;
             const obj = this.resizeObj;
             const start = this.resizeStartBounds;
+            const startCenter = this.resizeStartCenter || {
+                x: start.x + start.width / 2,
+                y: start.y + start.height / 2
+            };
+
+            let localDx = dx;
+            let localDy = dy;
+            if (this.resizeStartInverse) {
+                const startLocal = this.resizeStartInverse.transform(this.resizeStartX, this.resizeStartY);
+                const currentLocal = this.resizeStartInverse.transform(x, y);
+                localDx = currentLocal.x - startLocal.x;
+                localDy = currentLocal.y - startLocal.y;
+            }
             
             let newX = start.x;
             let newY = start.y;
             let newW = start.width;
             let newH = start.height;
             
-            switch (this.resizeHandle) {
-                case 'nw':
-                    newX = start.x + dx;
-                    newY = start.y + dy;
-                    newW = start.width - dx;
-                    newH = start.height - dy;
-                    break;
-                case 'ne':
-                    newY = start.y + dy;
-                    newW = start.width + dx;
-                    newH = start.height - dy;
-                    break;
-                case 'sw':
-                    newX = start.x + dx;
-                    newW = start.width - dx;
-                    newH = start.height + dy;
-                    break;
-                case 'se':
-                    newW = start.width + dx;
-                    newH = start.height + dy;
-                    break;
-                case 'n':
-                    newY = start.y + dy;
-                    newH = start.height - dy;
-                    break;
-                case 's':
-                    newH = start.height + dy;
-                    break;
-                case 'w':
-                    newX = start.x + dx;
-                    newW = start.width - dx;
-                    break;
-                case 'e':
-                    newW = start.width + dx;
-                    break;
+            const hasX = this.resizeHandle.includes('e') || this.resizeHandle.includes('w');
+            const hasY = this.resizeHandle.includes('s') || this.resizeHandle.includes('n');
+            const signX = this.resizeHandle.includes('e') ? 1 : -1;
+            const signY = this.resizeHandle.includes('s') ? 1 : -1;
+            const shiftPressed = !!event?.shiftKey;
+            const altPressed = !!event?.altKey;
+            
+            let deltaW = 0;
+            let deltaH = 0;
+            
+            if (hasX) {
+                deltaW = altPressed ? signX * localDx * 2 : signX * localDx;
             }
+            if (hasY) {
+                deltaH = altPressed ? signY * localDy * 2 : signY * localDy;
+            }
+            
+            const startW = Math.max(1, start.width);
+            const startH = Math.max(1, start.height);
+            
+            if (shiftPressed && (hasX || hasY)) {
+                const scaleX = hasX ? (startW + deltaW) / startW : 1;
+                const scaleY = hasY ? (startH + deltaH) / startH : 1;
+                let scale = 1;
+                
+                if (hasX && hasY) {
+                    const deltaScaleX = Math.abs(scaleX - 1);
+                    const deltaScaleY = Math.abs(scaleY - 1);
+                    scale = deltaScaleX >= deltaScaleY ? scaleX : scaleY;
+                } else if (hasX) {
+                    scale = scaleX;
+                } else {
+                    scale = scaleY;
+                }
+                
+                deltaW = startW * scale - startW;
+                deltaH = startH * scale - startH;
+            }
+            
+            newW = startW + deltaW;
+            newH = startH + deltaH;
+            
+            let shiftXLocal = 0;
+            let shiftYLocal = 0;
+            
+            if (!altPressed) {
+                if (hasX) {
+                    shiftXLocal = signX * deltaW / 2;
+                }
+                if (hasY) {
+                    shiftYLocal = signY * deltaH / 2;
+                }
+            }
+            
+            let shiftWorld = { x: shiftXLocal, y: shiftYLocal };
+            if (this.resizeStartMatrix) {
+                shiftWorld = this.resizeStartMatrix.transformVector(shiftWorld);
+            }
+            
+            const newCenterX = startCenter.x + shiftWorld.x;
+            const newCenterY = startCenter.y + shiftWorld.y;
+            newX = newCenterX - newW / 2;
+            newY = newCenterY - newH / 2;
             
             // Apply snapping during resize
             if (AppState.smartGuides.enabled) {
@@ -10643,8 +11179,11 @@ class SelectTool extends Tool {
                 
                 // Update related properties for specific object types
                 if (obj.type === 'ellipse') {
-                    obj.radiusX = Math.max(1, Math.floor(newW / 2));
-                    obj.radiusY = Math.max(1, Math.floor(newH / 2));
+                    const aspect = EllipseObject.ASPECT_RATIO || 2;
+                    const nextRadiusX = (newW - 1) / (2 * aspect);
+                    const nextRadiusY = (newH - 1) / 2;
+                    obj.radiusX = Math.max(1, Math.round(nextRadiusX));
+                    obj.radiusY = Math.max(1, Math.round(nextRadiusY));
                 } else if (obj.type === 'line') {
                     // Resize line by adjusting endpoints
                     const lineW = obj.x2 - obj.x1;
@@ -10904,6 +11443,9 @@ class SelectTool extends Tool {
             this.resizeHandle = null;
             this.resizeObj = null;
             this.resizeStartBounds = null;
+            this.resizeStartCenter = null;
+            this.resizeStartMatrix = null;
+            this.resizeStartInverse = null;
             // Clear smart guides
             this.smartGuides.clearGuides();
             this.lastSnapResult = null;
@@ -11141,7 +11683,7 @@ class SelectTool extends Tool {
         return null;
     }
     
-    onKeyDown(key, renderer, app) {
+    onKeyDown(key, renderer, app, event = null) {
         // Handle Escape - exit container or clear selection
         if (key === 'Escape') {
             if (AppState.selectionContext.currentContainer) {
@@ -11185,13 +11727,17 @@ class SelectTool extends Tool {
                 this._updateStatus('Deleted selected objects');
                 if (app && app.renderAllObjects) app.renderAllObjects();
             } else if (key === 'ArrowUp') {
-                this._moveSelection(0, -1, app);
+                const step = event?.shiftKey ? 10 : 1;
+                this._moveSelection(0, -step, app);
             } else if (key === 'ArrowDown') {
-                this._moveSelection(0, 1, app);
+                const step = event?.shiftKey ? 10 : 1;
+                this._moveSelection(0, step, app);
             } else if (key === 'ArrowLeft') {
-                this._moveSelection(-1, 0, app);
+                const step = event?.shiftKey ? 10 : 1;
+                this._moveSelection(-step, 0, app);
             } else if (key === 'ArrowRight') {
-                this._moveSelection(1, 0, app);
+                const step = event?.shiftKey ? 10 : 1;
+                this._moveSelection(step, 0, app);
             }
         }
     }
@@ -11283,18 +11829,36 @@ class SelectTool extends Tool {
     }
     
     _updatePropertiesPanel(obj) {
-        if (!obj) return;
+        if (!obj) {
+            this._updateComponentInstanceProperties(null);
+            return;
+        }
         
         // Update position inputs
         const xInput = $('#prop-x');
         const yInput = $('#prop-y');
         const wInput = $('#prop-width');
         const hInput = $('#prop-height');
+        const rotationInput = $('#prop-rotation');
+        const scaleXInput = $('#prop-scale-x');
+        const scaleYInput = $('#prop-scale-y');
         
         if (xInput) xInput.value = obj.x || 0;
         if (yInput) yInput.value = obj.y || 0;
         if (wInput) wInput.value = obj.width || 0;
         if (hInput) hInput.value = obj.height || 0;
+        if (rotationInput) {
+            const rotation = Number.isFinite(obj.rotation) ? obj.rotation : 0;
+            rotationInput.value = Math.round(rotation * 100) / 100;
+        }
+        if (scaleXInput) {
+            const scaleX = Number.isFinite(obj.scaleX) ? obj.scaleX : 1;
+            scaleXInput.value = Math.round(scaleX * 100) / 100;
+        }
+        if (scaleYInput) {
+            const scaleY = Number.isFinite(obj.scaleY) ? obj.scaleY : 1;
+            scaleYInput.value = Math.round(scaleY * 100) / 100;
+        }
         
         // Update text input (for text objects and flowchart shapes)
         const propText = $('#prop-text');
@@ -11337,11 +11901,19 @@ class SelectTool extends Tool {
             // Show constraints section
             constraintsGroup.style.display = 'block';
             
+            const normalized = normalizeConstraints(obj.constraints || {});
+            if (!obj.constraints) {
+                obj.constraints = normalized;
+            } else {
+                obj.constraints.horizontal = normalized.horizontal;
+                obj.constraints.vertical = normalized.vertical;
+            }
+            
             if (constraintH) {
-                constraintH.value = obj.constraints?.horizontal || 'MIN';
+                constraintH.value = normalized.horizontal;
             }
             if (constraintV) {
-                constraintV.value = obj.constraints?.vertical || 'MIN';
+                constraintV.value = normalized.vertical;
             }
         }
         
@@ -11460,6 +12032,9 @@ class SelectTool extends Tool {
         
         // Update UI component properties
         this._updateUIComponentProperties(obj);
+
+        // Update component instance properties
+        this._updateComponentInstanceProperties(obj);
         
         // Update style picker buttons (get app reference)
         const appRef = window.Asciistrator?.app;
@@ -11573,6 +12148,173 @@ class SelectTool extends Tool {
             
             uiPropsContainer.appendChild(row);
         }
+    }
+
+    _updateComponentInstanceProperties(obj) {
+        const componentGroup = $('#prop-component-group');
+        const swapSelect = $('#prop-component-swap');
+        const overridesContainer = $('#prop-instance-overrides');
+
+        if (!componentGroup || !swapSelect || !overridesContainer) return;
+
+        if (!obj || obj.type !== 'instance') {
+            componentGroup.style.display = 'none';
+            overridesContainer.innerHTML = '';
+            return;
+        }
+
+        componentGroup.style.display = 'block';
+
+        const appRef = window.Asciistrator?.app;
+        const components = appRef?._collectLocalComponents() || [];
+        components.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        const currentComponent = appRef?._findComponentDefinition(obj.componentId || obj.componentKey);
+
+        swapSelect.innerHTML = '';
+        if (components.length === 0) {
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = 'No components available';
+            swapSelect.appendChild(option);
+            swapSelect.disabled = true;
+        } else {
+            swapSelect.disabled = false;
+            if (!currentComponent) {
+                const missing = document.createElement('option');
+                missing.value = '';
+                missing.textContent = 'Missing component';
+                swapSelect.appendChild(missing);
+            }
+            for (const component of components) {
+                const option = document.createElement('option');
+                option.value = component.componentKey;
+                option.textContent = component.name || 'Component';
+                if (component.componentKey === obj.componentId) {
+                    option.selected = true;
+                }
+                swapSelect.appendChild(option);
+            }
+            if (!currentComponent) {
+                swapSelect.value = '';
+            }
+        }
+
+        overridesContainer.innerHTML = '';
+        if (!currentComponent) {
+            const empty = document.createElement('div');
+            empty.className = 'property-row';
+            empty.innerHTML = '<span style="font-size: 11px; color: var(--color-text-muted);">Component missing</span>';
+            overridesContainer.appendChild(empty);
+            return;
+        }
+
+        const targets = appRef?._buildInstanceOverrideTargets(currentComponent) || [];
+        if (targets.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'property-row';
+            empty.innerHTML = '<span style="font-size: 11px; color: var(--color-text-muted);">No overrideable text</span>';
+            overridesContainer.appendChild(empty);
+            return;
+        }
+
+        for (const target of targets) {
+            const row = document.createElement('div');
+            row.className = 'property-row';
+
+            const label = document.createElement('label');
+            label.textContent = target.name || 'Text';
+            label.title = target.label || target.name || '';
+            label.style.minWidth = '80px';
+            row.appendChild(label);
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = '';
+
+            const overrideEntry = this._resolveInstanceOverride(obj, target);
+            const hasOverride = overrideEntry.value !== undefined;
+            const currentValue = hasOverride ? overrideEntry.value : target.value;
+            input.value = currentValue ?? '';
+            input.placeholder = target.value || '';
+
+            const resetBtn = document.createElement('button');
+            resetBtn.className = 'icon-btn small';
+            resetBtn.textContent = '↺';
+            resetBtn.title = 'Reset override';
+            resetBtn.disabled = !hasOverride;
+
+            const applyOverride = (value) => {
+                if (!obj.overrides) obj.overrides = {};
+                if (overrideEntry.key && overrideEntry.key !== target.id) {
+                    delete obj.overrides[overrideEntry.key];
+                }
+
+                if (value === target.value) {
+                    delete obj.overrides[target.id];
+                } else {
+                    obj.overrides[target.id] = { [target.property]: value };
+                }
+
+                resetBtn.disabled = !(obj.overrides && obj.overrides[target.id] !== undefined);
+                if (appRef) {
+                    appRef._spatialIndexDirty = true;
+                    appRef.renderAllObjects();
+                }
+            };
+
+            input.addEventListener('input', () => {
+                applyOverride(input.value);
+            });
+
+            resetBtn.addEventListener('click', () => {
+                if (!obj.overrides) return;
+                if (overrideEntry.key && overrideEntry.key !== target.id) {
+                    delete obj.overrides[overrideEntry.key];
+                }
+                delete obj.overrides[target.id];
+                input.value = target.value || '';
+                resetBtn.disabled = true;
+                if (appRef) {
+                    appRef._spatialIndexDirty = true;
+                    appRef.renderAllObjects();
+                }
+            });
+
+            row.appendChild(input);
+            row.appendChild(resetBtn);
+            overridesContainer.appendChild(row);
+        }
+    }
+
+    _resolveInstanceOverride(instance, target) {
+        if (!instance || !instance.overrides || !target) {
+            return { key: target?.id, value: undefined };
+        }
+
+        if (target.id && instance.overrides[target.id] !== undefined) {
+            return { key: target.id, value: this._normalizeOverrideValue(instance.overrides[target.id], target.property) };
+        }
+
+        if (target.name && instance.overrides[target.name] !== undefined) {
+            return { key: target.name, value: this._normalizeOverrideValue(instance.overrides[target.name], target.property) };
+        }
+
+        return { key: target.id, value: undefined };
+    }
+
+    _normalizeOverrideValue(overrideValue, property) {
+        if (overrideValue && typeof overrideValue === 'object' && !Array.isArray(overrideValue)) {
+            if (overrideValue[property] !== undefined) return String(overrideValue[property]);
+            if (overrideValue.text !== undefined) return String(overrideValue.text);
+            if (overrideValue.characters !== undefined) return String(overrideValue.characters);
+            if (overrideValue.label !== undefined) return String(overrideValue.label);
+        }
+
+        if (overrideValue !== undefined && overrideValue !== null) {
+            return String(overrideValue);
+        }
+
+        return '';
     }
     
     _getRelevantUIProperties(componentType, obj) {
@@ -11823,6 +12565,24 @@ class LineTool extends Tool {
     constructor() {
         super('line', 'L', 'l');
     }
+
+    _getLineEnd(x, y, event = null) {
+        if (event?.shiftKey) {
+            const dx = x - this.startX;
+            const dy = y - this.startY;
+            const length = Math.hypot(dx, dy);
+            if (length > 0) {
+                const snap = Math.PI / 4;
+                const angle = Math.atan2(dy, dx);
+                const snapped = Math.round(angle / snap) * snap;
+                return {
+                    x: Math.round(this.startX + Math.cos(snapped) * length),
+                    y: Math.round(this.startY + Math.sin(snapped) * length)
+                };
+            }
+        }
+        return { x, y };
+    }
     
     onMouseDown(x, y, button, renderer) {
         if (button === 0) {
@@ -11832,20 +12592,21 @@ class LineTool extends Tool {
         }
     }
     
-    onMouseMove(x, y, renderer) {
+    onMouseMove(x, y, renderer, app, event = null) {
         if (this.isDragging) {
+            const end = this._getLineEnd(x, y, event);
             renderer.clearPreview();
             
             // Create preview object for canvas-based modes
             const previewLine = new LineObject();
             previewLine.x1 = this.startX;
             previewLine.y1 = this.startY;
-            previewLine.x2 = x;
-            previewLine.y2 = y;
-            previewLine.x = Math.min(this.startX, x);
-            previewLine.y = Math.min(this.startY, y);
-            previewLine.width = Math.abs(x - this.startX) + 1;
-            previewLine.height = Math.abs(y - this.startY) + 1;
+            previewLine.x2 = end.x;
+            previewLine.y2 = end.y;
+            previewLine.x = Math.min(this.startX, end.x);
+            previewLine.y = Math.min(this.startY, end.y);
+            previewLine.width = Math.abs(end.x - this.startX) + 1;
+            previewLine.height = Math.abs(end.y - this.startY) + 1;
             previewLine.strokeChar = AppState.strokeChar;
             previewLine.strokeColor = AppState.strokeColor;
             previewLine.lineStyle = AppState.lineStyle;
@@ -11853,7 +12614,7 @@ class LineTool extends Tool {
             renderer.renderPreviewObject(previewLine);
             
             // Also render to ASCII buffer for ASCII mode
-            drawLine(renderer.previewBuffer, this.startX, this.startY, x, y, {
+            drawLine(renderer.previewBuffer, this.startX, this.startY, end.x, end.y, {
                 style: AppState.lineStyle,
                 color: AppState.strokeColor
             });
@@ -11861,20 +12622,21 @@ class LineTool extends Tool {
         }
     }
     
-    onMouseUp(x, y, button, renderer, app) {
+    onMouseUp(x, y, button, renderer, app, event = null) {
         if (this.isDragging) {
+            const end = this._getLineEnd(x, y, event);
             renderer.clearPreview();
             
             // Create LineObject instead of drawing directly
             const line = new LineObject();
             line.x1 = this.startX;
             line.y1 = this.startY;
-            line.x2 = x;
-            line.y2 = y;
-            line.x = Math.min(this.startX, x);
-            line.y = Math.min(this.startY, y);
-            line.width = Math.abs(x - this.startX) + 1;
-            line.height = Math.abs(y - this.startY) + 1;
+            line.x2 = end.x;
+            line.y2 = end.y;
+            line.x = Math.min(this.startX, end.x);
+            line.y = Math.min(this.startY, end.y);
+            line.width = Math.abs(end.x - this.startX) + 1;
+            line.height = Math.abs(end.y - this.startY) + 1;
             line.strokeChar = AppState.strokeChar;
             line.strokeColor = AppState.strokeColor;
             line.lineStyle = AppState.lineStyle;
@@ -11904,6 +12666,41 @@ class RectangleTool extends Tool {
     constructor() {
         super('rectangle', 'R', 'r');
     }
+
+    _getRectBounds(x, y, event = null) {
+        let dx = x - this.startX;
+        let dy = y - this.startY;
+        const shiftPressed = !!event?.shiftKey;
+        const altPressed = !!event?.altKey;
+        
+        if (shiftPressed) {
+            const size = Math.max(Math.abs(dx), Math.abs(dy));
+            const signX = dx === 0 ? 1 : Math.sign(dx);
+            const signY = dy === 0 ? 1 : Math.sign(dy);
+            dx = signX * size;
+            dy = signY * size;
+        }
+        
+        if (altPressed) {
+            const halfW = Math.abs(dx);
+            const halfH = Math.abs(dy);
+            return {
+                minX: this.startX - halfW,
+                minY: this.startY - halfH,
+                width: halfW * 2 + 1,
+                height: halfH * 2 + 1
+            };
+        }
+        
+        const endX = this.startX + dx;
+        const endY = this.startY + dy;
+        return {
+            minX: Math.min(this.startX, endX),
+            minY: Math.min(this.startY, endY),
+            width: Math.abs(dx) + 1,
+            height: Math.abs(dy) + 1
+        };
+    }
     
     onMouseDown(x, y, button, renderer) {
         if (button === 0) {
@@ -11913,13 +12710,10 @@ class RectangleTool extends Tool {
         }
     }
     
-    onMouseMove(x, y, renderer) {
+    onMouseMove(x, y, renderer, app, event = null) {
         if (this.isDragging) {
             renderer.clearPreview();
-            const minX = Math.min(this.startX, x);
-            const minY = Math.min(this.startY, y);
-            const width = Math.abs(x - this.startX) + 1;
-            const height = Math.abs(y - this.startY) + 1;
+            const { minX, minY, width, height } = this._getRectBounds(x, y, event);
             
             // Auto-fill if fillChar is set
             const shouldFill = AppState.fillChar && AppState.fillChar !== '';
@@ -11959,13 +12753,10 @@ class RectangleTool extends Tool {
         }
     }
     
-    onMouseUp(x, y, button, renderer, app) {
+    onMouseUp(x, y, button, renderer, app, event = null) {
         if (this.isDragging) {
             renderer.clearPreview();
-            const minX = Math.min(this.startX, x);
-            const minY = Math.min(this.startY, y);
-            const width = Math.abs(x - this.startX) + 1;
-            const height = Math.abs(y - this.startY) + 1;
+            const { minX, minY, width, height } = this._getRectBounds(x, y, event);
             
             // Auto-fill if fillChar is set
             const shouldFill = AppState.fillChar && AppState.fillChar !== '';
@@ -12001,6 +12792,63 @@ class EllipseTool extends Tool {
     constructor() {
         super('ellipse', 'E', 'e');
     }
+
+    _getEllipseMetrics(x, y, event = null) {
+        const aspect = EllipseObject.ASPECT_RATIO || 2;
+        let dx = x - this.startX;
+        let dy = y - this.startY;
+        const shiftPressed = !!event?.shiftKey;
+        const altPressed = !!event?.altKey;
+        
+        if (shiftPressed) {
+            const signX = dx === 0 ? 1 : Math.sign(dx);
+            const signY = dy === 0 ? 1 : Math.sign(dy);
+            const absDx = Math.abs(dx);
+            const absDy = Math.abs(dy);
+            if (absDx / aspect >= absDy) {
+                dy = signY * Math.round(absDx / aspect);
+            } else {
+                dx = signX * Math.round(absDy * aspect);
+            }
+        }
+        
+        let centerX = this.startX;
+        let centerY = this.startY;
+        let width = 1;
+        let height = 1;
+        
+        if (altPressed) {
+            width = Math.abs(dx) * 2 + 1;
+            height = Math.abs(dy) * 2 + 1;
+        } else {
+            const endX = this.startX + dx;
+            const endY = this.startY + dy;
+            centerX = Math.round((this.startX + endX) / 2);
+            centerY = Math.round((this.startY + endY) / 2);
+            width = Math.abs(dx) + 1;
+            height = Math.abs(dy) + 1;
+        }
+        
+        const rawRadiusX = (width - 1) / (2 * aspect);
+        const rawRadiusY = (height - 1) / 2;
+        if (rawRadiusX < 1 && rawRadiusY < 1) return null;
+        
+        const radiusX = Math.max(1, Math.round(rawRadiusX));
+        const radiusY = Math.max(1, Math.round(rawRadiusY));
+        const effectiveRadiusX = Math.round(radiusX * aspect);
+        const effectiveRadiusY = Math.round(radiusY);
+        
+        return {
+            centerX,
+            centerY,
+            radiusX,
+            radiusY,
+            x: Math.round(centerX - effectiveRadiusX),
+            y: Math.round(centerY - effectiveRadiusY),
+            effectiveRadiusX,
+            effectiveRadiusY
+        };
+    }
     
     onMouseDown(x, y, button, renderer) {
         if (button === 0) {
@@ -12010,68 +12858,53 @@ class EllipseTool extends Tool {
         }
     }
     
-    onMouseMove(x, y, renderer) {
+    onMouseMove(x, y, renderer, app, event = null) {
         if (this.isDragging) {
             renderer.clearPreview();
-            
-            // Calculate center and radius from drag bounds
-            const cx = Math.round((this.startX + x) / 2);
-            const cy = Math.round((this.startY + y) / 2);
-            // Use half the height as radius (the rendering will apply aspect ratio)
-            const radius = Math.abs(y - this.startY) / 2;
+            const metrics = this._getEllipseMetrics(x, y, event);
+            if (!metrics) {
+                renderer.render();
+                return;
+            }
             
             // Auto-fill if fillChar is set
             const shouldFill = AppState.fillChar && AppState.fillChar !== '';
             
-            // Create preview object for canvas-based modes
-            if (radius > 0) {
-                const aspectRatio = EllipseObject.ASPECT_RATIO;
-                const effectiveRadiusX = Math.round(radius * aspectRatio);
-                const effectiveRadiusY = Math.round(radius);
-                
-                const previewEllipse = new EllipseObject();
-                previewEllipse.x = cx - effectiveRadiusX;
-                previewEllipse.y = cy - effectiveRadiusY;
-                previewEllipse.radiusX = radius;
-                previewEllipse.radiusY = radius;
-                previewEllipse._updateBounds();
-                previewEllipse.filled = shouldFill;
-                previewEllipse.strokeChar = AppState.strokeChar;
-                previewEllipse.fillChar = AppState.fillChar;
-                previewEllipse.strokeColor = AppState.strokeColor;
-                previewEllipse.fillColor = AppState.fillColor;
-                
-                renderer.renderPreviewObject(previewEllipse);
-            }
+            const previewEllipse = new EllipseObject();
+            previewEllipse.x = metrics.x;
+            previewEllipse.y = metrics.y;
+            previewEllipse.radiusX = metrics.radiusX;
+            previewEllipse.radiusY = metrics.radiusY;
+            previewEllipse._updateBounds();
+            previewEllipse.filled = shouldFill;
+            previewEllipse.strokeChar = AppState.strokeChar;
+            previewEllipse.fillChar = AppState.fillChar;
+            previewEllipse.strokeColor = AppState.strokeColor;
+            previewEllipse.fillColor = AppState.fillColor;
+            
+            renderer.renderPreviewObject(previewEllipse);
             
             // Also render to ASCII buffer for ASCII mode
-            if (shouldFill && radius > 0) {
-                fillCircle(renderer.previewBuffer, cx, cy, radius, {
+            if (shouldFill) {
+                fillEllipse(renderer.previewBuffer, metrics.centerX, metrics.centerY, metrics.effectiveRadiusX, metrics.effectiveRadiusY, {
                     fillChar: AppState.fillChar,
                     color: AppState.fillColor
                 });
             }
-            if (radius > 0) {
-                drawCircle(renderer.previewBuffer, cx, cy, radius, {
-                    char: AppState.strokeChar,
-                    color: AppState.strokeColor
-                });
-            }
+            drawEllipse(renderer.previewBuffer, metrics.centerX, metrics.centerY, metrics.effectiveRadiusX, metrics.effectiveRadiusY, {
+                char: AppState.strokeChar,
+                color: AppState.strokeColor
+            });
             
             renderer.render();
         }
     }
     
-    onMouseUp(x, y, button, renderer, app) {
+    onMouseUp(x, y, button, renderer, app, event = null) {
         if (this.isDragging) {
             renderer.clearPreview();
-            
-            // Calculate center and radius
-            const cx = Math.round((this.startX + x) / 2);
-            const cy = Math.round((this.startY + y) / 2);
-            const radius = Math.abs(y - this.startY) / 2;
-            
-            if (radius < 1) {
+            const metrics = this._getEllipseMetrics(x, y, event);
+            if (!metrics) {
                 this.isDragging = false;
                 return;
             }
@@ -12079,24 +12912,18 @@ class EllipseTool extends Tool {
             // Auto-fill if fillChar is set
             const shouldFill = AppState.fillChar && AppState.fillChar !== '';
             
-            // Create EllipseObject
-            // Calculate top-left position accounting for aspect ratio
-            const aspectRatio = EllipseObject.ASPECT_RATIO;
-            const effectiveRadiusX = Math.round(radius * aspectRatio);
-            const effectiveRadiusY = Math.round(radius);
-            
             const ellipse = new EllipseObject();
-            ellipse.x = cx - effectiveRadiusX;
-            ellipse.y = cy - effectiveRadiusY;
-            ellipse.radiusX = radius;
-            ellipse.radiusY = radius;
+            ellipse.x = metrics.x;
+            ellipse.y = metrics.y;
+            ellipse.radiusX = metrics.radiusX;
+            ellipse.radiusY = metrics.radiusY;
             ellipse._updateBounds(); // Ensure bounds are calculated
             ellipse.filled = shouldFill;
             ellipse.strokeChar = AppState.strokeChar;
             ellipse.fillChar = AppState.fillChar;
             ellipse.strokeColor = AppState.strokeColor;
             ellipse.fillColor = AppState.fillColor;
-            ellipse.name = `Circle ${Date.now() % 10000}`;
+            ellipse.name = `Ellipse ${Date.now() % 10000}`;
             
             // Add to active layer
             if (app && app.addObject) {
@@ -13832,21 +14659,21 @@ class ToolManager extends EventEmitter {
         }
     }
     
-    handleMouseMove(x, y, renderer, app) {
+    handleMouseMove(x, y, renderer, app, event = null) {
         if (this.activeTool) {
-            this.activeTool.onMouseMove(x, y, renderer, app);
+            this.activeTool.onMouseMove(x, y, renderer, app, event);
         }
     }
     
-    handleMouseUp(x, y, button, renderer, app) {
+    handleMouseUp(x, y, button, renderer, app, event = null) {
         if (this.activeTool) {
-            this.activeTool.onMouseUp(x, y, button, renderer, app);
+            this.activeTool.onMouseUp(x, y, button, renderer, app, event);
         }
     }
     
-    handleKeyDown(key, renderer, app) {
+    handleKeyDown(key, renderer, app, event = null) {
         if (this.activeTool) {
-            this.activeTool.onKeyDown(key, renderer, app);
+            this.activeTool.onKeyDown(key, renderer, app, event);
         }
     }
 }
@@ -13906,12 +14733,12 @@ class Asciistrator extends EventEmitter {
             this.toolManager.handleMouseDown(x, y, button, this.renderer, this, event);
         });
         
-        this.renderer.on('mousemove', ({ x, y }) => {
-            this.toolManager.handleMouseMove(x, y, this.renderer, this);
+        this.renderer.on('mousemove', ({ x, y, event }) => {
+            this.toolManager.handleMouseMove(x, y, this.renderer, this, event);
         });
         
-        this.renderer.on('mouseup', ({ x, y, button }) => {
-            this.toolManager.handleMouseUp(x, y, button, this.renderer, this);
+        this.renderer.on('mouseup', ({ x, y, button, event }) => {
+            this.toolManager.handleMouseUp(x, y, button, this.renderer, this, event);
         });
         
         // Listen for transform changes to update rulers and re-render for canvas modes
@@ -14109,7 +14936,9 @@ class Asciistrator extends EventEmitter {
             const selectedObj = AppState.selectedObjects[0];
             const isGroup = selectedObj?.type === 'group';
             const isFrame = selectedObj?.isFrame;
-            const isComponent = selectedObj?.uiComponentType || selectedObj?.avaloniaType;
+            const isComponentMaster = selectedObj?.type === 'component';
+            const isInstance = selectedObj?.type === 'instance';
+            const isUIComponent = selectedObj?.uiComponentType || selectedObj?.avaloniaType;
             
             const items = [
                 { label: 'Cut', action: () => this.cut(), shortcut: 'Ctrl+X', disabled: !hasSelection },
@@ -14183,10 +15012,16 @@ class Asciistrator extends EventEmitter {
             
             // Component actions
             items.push({ type: 'separator' });
-            if (hasSelection && !isComponent) {
-                items.push({ label: 'Create Component...', action: () => this._showCreateComponentDialog() });
+            if (hasSelection && !isComponentMaster && !isInstance) {
+                items.push({ label: 'Create Component', action: () => this.createComponentFromSelection() });
             }
-            if (isComponent) {
+            if (hasSelection) {
+                items.push({ label: 'Create Library Component...', action: () => this._showCreateComponentDialog('library') });
+            }
+            if (isComponentMaster) {
+                items.push({ label: 'Create Instance', action: () => this.createInstanceFromSelection() });
+            }
+            if (isInstance || isUIComponent) {
                 items.push({ label: 'Detach Instance', action: () => this.detachInstance() });
             }
             
@@ -15209,7 +16044,7 @@ class Asciistrator extends EventEmitter {
             }
             
             // Pass key to active tool
-            this.toolManager.handleKeyDown(e.key, this.renderer, this);
+            this.toolManager.handleKeyDown(e.key, this.renderer, this, e);
             
             // Global shortcuts
             if (e.ctrlKey || e.metaKey) {
@@ -15880,6 +16715,7 @@ class Asciistrator extends EventEmitter {
                 { label: 'Hide/Show', action: 'toggle-visible', shortcut: 'Ctrl+Shift+H' },
                 { type: 'separator' },
                 { label: 'Create Component...', action: 'create-component' },
+                { label: 'Create Instance', action: 'create-instance' },
                 { label: 'Detach Instance', action: 'detach-instance' },
                 { type: 'separator' },
                 { label: 'Saved Styles...', action: 'saved-styles' },
@@ -16370,6 +17206,9 @@ class Asciistrator extends EventEmitter {
             case 'create-component':
                 this._showCreateComponentDialog();
                 break;
+            case 'create-instance':
+                this.createInstanceFromSelection();
+                break;
             // Medium Impact Features
             case 'constraints':
                 this.showConstraintsDialog();
@@ -16650,6 +17489,9 @@ class Asciistrator extends EventEmitter {
         const propY = $('#prop-y');
         const propWidth = $('#prop-width');
         const propHeight = $('#prop-height');
+        const propRotation = $('#prop-rotation');
+        const propScaleX = $('#prop-scale-x');
+        const propScaleY = $('#prop-scale-y');
         
         if (propX) {
             propX.addEventListener('change', (e) => {
@@ -16672,6 +17514,68 @@ class Asciistrator extends EventEmitter {
         if (propHeight) {
             propHeight.addEventListener('change', (e) => {
                 updateSelectedObject('height', parseInt(e.target.value) || 1);
+            });
+        }
+        
+        if (propRotation) {
+            propRotation.addEventListener('change', (e) => {
+                const value = parseFloat(e.target.value);
+                updateSelectedObject('rotation', Number.isFinite(value) ? value : 0);
+            });
+        }
+        
+        if (propScaleX) {
+            propScaleX.addEventListener('change', (e) => {
+                const value = parseFloat(e.target.value);
+                updateSelectedObject('scaleX', Number.isFinite(value) ? value : 1);
+            });
+        }
+        
+        if (propScaleY) {
+            propScaleY.addEventListener('change', (e) => {
+                const value = parseFloat(e.target.value);
+                updateSelectedObject('scaleY', Number.isFinite(value) ? value : 1);
+            });
+        }
+
+        // Component instance controls
+        const componentSwap = $('#prop-component-swap');
+        const resetOverridesBtn = $('#btn-reset-overrides');
+        const detachInstanceBtn = $('#btn-detach-instance');
+        const selectMasterBtn = $('#btn-select-component-master');
+
+        if (componentSwap) {
+            componentSwap.addEventListener('change', (e) => {
+                const instance = AppState.selectedObjects[0];
+                if (!instance || instance.type !== 'instance') return;
+                const componentKey = e.target.value;
+                this._swapInstanceComponent(instance, componentKey);
+            });
+        }
+
+        if (resetOverridesBtn) {
+            resetOverridesBtn.addEventListener('click', () => {
+                const instance = AppState.selectedObjects[0];
+                if (!instance || instance.type !== 'instance') return;
+                this.saveStateForUndo();
+                instance.resetAllOverrides();
+                this.renderAllObjects();
+                this._updatePropertiesPanel();
+                this._updateStatus('Instance overrides reset');
+            });
+        }
+
+        if (detachInstanceBtn) {
+            detachInstanceBtn.addEventListener('click', () => {
+                this.detachInstance();
+            });
+        }
+
+        if (selectMasterBtn) {
+            selectMasterBtn.addEventListener('click', () => {
+                const instance = AppState.selectedObjects[0];
+                if (!instance || instance.type !== 'instance') return;
+                this._selectComponentMaster(instance);
             });
         }
         
@@ -17513,11 +18417,31 @@ class Asciistrator extends EventEmitter {
         renderModeManager.preRender(mainBuffer);
         
         // Helper function to recursively render an object and its children
-        const renderObjectHierarchy = (obj, buffer, clipBounds = null) => {
-            if (!obj.visible) return;
+        const renderObjectHierarchy = (obj, buffer, clipBounds = null, componentStack = null, parentTransform = null) => {
+            if (!obj || !obj.visible) return;
+            const stack = componentStack || new Set();
+            const currentTransform = composeObjectTransformMatrix(obj, parentTransform);
+            
+            if (obj.type === 'instance') {
+                const componentId = obj.componentId || obj.componentKey;
+                if (componentId && stack.has(componentId)) {
+                    renderModeManager.renderObject(obj, buffer, { transform: currentTransform });
+                    return;
+                }
+                
+                if (componentId) stack.add(componentId);
+                const resolved = this._resolveComponentInstance(obj);
+                if (resolved) {
+                    renderObjectHierarchy(resolved, buffer, clipBounds, stack, currentTransform);
+                } else {
+                    renderModeManager.renderObject(obj, buffer, { transform: currentTransform });
+                }
+                if (componentId) stack.delete(componentId);
+                return;
+            }
             
             // Render the object using the active render mode
-            renderModeManager.renderObject(obj, buffer);
+            renderModeManager.renderObject(obj, buffer, { transform: currentTransform });
             
             // Render children if any
             if (obj.children && obj.children.length > 0) {
@@ -17548,14 +18472,16 @@ class Asciistrator extends EventEmitter {
                     if (child.visible) {
                         // Apply clipping during render if needed
                         if (childClipBounds) {
-                            this._renderWithClipping(child, buffer, childClipBounds);
+                            this._renderWithClipping(child, buffer, childClipBounds, stack, currentTransform);
                         } else {
-                            renderObjectHierarchy(child, buffer, clipBounds);
+                            renderObjectHierarchy(child, buffer, clipBounds, stack, currentTransform);
                         }
                     }
                 }
             }
         };
+        
+        const instanceRenderStack = new Set();
         
         // Track which layers need buffer clear
         const layersToRender = AppState.layers.filter(l => l.visible && l.objects && l.objects.length > 0);
@@ -17564,7 +18490,7 @@ class Asciistrator extends EventEmitter {
         if (layersToRender.length === 1) {
             const layer = layersToRender[0];
             for (const obj of layer.objects) {
-                renderObjectHierarchy(obj, mainBuffer);
+                renderObjectHierarchy(obj, mainBuffer, null, instanceRenderStack, null);
             }
         } else {
             // Multi-layer: composite from bottom to top
@@ -17579,7 +18505,7 @@ class Asciistrator extends EventEmitter {
                 // Render each object to the layer's buffer
                 const targetBuffer = layer.buffer || mainBuffer;
                 for (const obj of layer.objects) {
-                    renderObjectHierarchy(obj, targetBuffer);
+                    renderObjectHierarchy(obj, targetBuffer, null, instanceRenderStack, null);
                 }
                 
                 // Composite layer buffer to main buffer using direct array access
@@ -17631,9 +18557,541 @@ class Asciistrator extends EventEmitter {
     }
     
     /**
+     * Resolve a component instance into a renderable clone
+     */
+    _resolveComponentInstance(instance) {
+        if (!instance) return null;
+        
+        const componentId = instance.componentId || instance.componentKey;
+        if (!componentId) return null;
+        
+        const component = this._findComponentDefinition(componentId);
+        if (!component) return null;
+        
+        const clone = this._cloneComponentPreserveIds(component);
+        if (!clone) return null;
+        
+        // Apply overrides before transforming to instance space
+        this._applyInstanceOverrides(clone, instance.overrides);
+        
+        const bounds = component.getBounds ? component.getBounds() : {
+            x: component.x || 0,
+            y: component.y || 0,
+            width: component.width || 1,
+            height: component.height || 1
+        };
+        
+        const targetWidth = Math.max(1, instance.width || bounds.width || 1);
+        const targetHeight = Math.max(1, instance.height || bounds.height || 1);
+        
+        let scaleX = bounds.width ? (targetWidth / bounds.width) : 1;
+        let scaleY = bounds.height ? (targetHeight / bounds.height) : 1;
+        const scaleFactor = Number.isFinite(instance.scaleFactor) && instance.scaleFactor > 0 ? instance.scaleFactor : 1;
+        
+        scaleX = Number.isFinite(scaleX) && scaleX > 0 ? scaleX * scaleFactor : scaleFactor;
+        scaleY = Number.isFinite(scaleY) && scaleY > 0 ? scaleY * scaleFactor : scaleFactor;
+        
+        const offsetX = instance.x - bounds.x * scaleX;
+        const offsetY = instance.y - bounds.y * scaleY;
+        
+        this._transformObjectTree(clone, { scaleX, scaleY, offsetX, offsetY });
+        return clone;
+    }
+    
+    /**
+     * Find component definition by component key or id
+     */
+    _findComponentDefinition(componentId) {
+        if (!componentId) return null;
+        
+        const findInObjects = (objects) => {
+            for (const obj of objects) {
+                if (obj.type === 'component' &&
+                    (obj.componentKey === componentId || obj.id === componentId)) {
+                    return obj;
+                }
+                if (obj.children && obj.children.length > 0) {
+                    const found = findInObjects(obj.children);
+                    if (found) return found;
+                }
+            }
+            return null;
+        };
+        
+        for (const layer of AppState.layers) {
+            if (!layer.objects) continue;
+            const found = findInObjects(layer.objects);
+            if (found) return found;
+        }
+        
+        return null;
+    }
+
+    _collectLocalComponents() {
+        const components = [];
+        const seen = new Set();
+
+        const visit = (objects) => {
+            for (const obj of objects || []) {
+                if (obj.type === 'component' && obj.componentKey && !seen.has(obj.componentKey)) {
+                    components.push(obj);
+                    seen.add(obj.componentKey);
+                }
+                if (obj.children && obj.children.length > 0) {
+                    visit(obj.children);
+                }
+            }
+        };
+
+        for (const layer of AppState.layers) {
+            if (layer.objects) {
+                visit(layer.objects);
+            }
+        }
+
+        return components;
+    }
+
+    _buildInstanceOverrideTargets(component) {
+        const targets = [];
+        if (!component) return targets;
+
+        const visit = (node, path = []) => {
+            if (!node) return;
+
+            const isText = node.type === 'text' || node.type === 'ascii-text';
+            const hasLabel = typeof node.label === 'string';
+            if (isText || hasLabel) {
+                const nameBase = node.name || node.text || node.label || node.type;
+                const pathLabel = path.length > 0 ? `${path.join(' / ')} / ${nameBase}` : nameBase;
+                targets.push({
+                    id: node.id,
+                    name: nameBase,
+                    label: pathLabel,
+                    property: isText ? 'characters' : 'label',
+                    value: isText ? (node.text || '') : (node.label || '')
+                });
+            }
+
+            if (node.children && node.children.length > 0) {
+                const nextPath = node.name ? [...path, node.name] : path;
+                for (const child of node.children) {
+                    visit(child, nextPath);
+                }
+            }
+        };
+
+        visit(component, []);
+        return targets;
+    }
+    
+    _cloneComponentPreserveIds(component) {
+        if (!component || !component.clone) return null;
+        
+        const clone = component.clone();
+        const syncIds = (src, dest) => {
+            dest.id = src.id;
+            if (src.children && dest.children) {
+                for (let i = 0; i < src.children.length; i++) {
+                    if (dest.children[i]) {
+                        dest.children[i].parentId = dest.id;
+                        if (dest.children[i]._cachedParent !== undefined) {
+                            dest.children[i]._cachedParent = dest;
+                        }
+                        syncIds(src.children[i], dest.children[i]);
+                    }
+                }
+            }
+        };
+        
+        syncIds(component, clone);
+        return clone;
+    }
+    
+    _applyInstanceOverrides(root, overrides) {
+        if (!root || !overrides || typeof overrides !== 'object') return;
+        
+        for (const [key, value] of Object.entries(overrides)) {
+            if (value === undefined) continue;
+            
+            const target = this._findObjectInComponent(root, key);
+            if (target) {
+                this._applyOverrideProperties(target, value);
+            } else {
+                this._applyOverridePath(root, key, value);
+            }
+        }
+    }
+    
+    _findObjectInComponent(root, idOrName) {
+        if (!root) return null;
+        
+        if (root.id === idOrName || root.name === idOrName) {
+            return root;
+        }
+        
+        if (root.children) {
+            for (const child of root.children) {
+                const found = this._findObjectInComponent(child, idOrName);
+                if (found) return found;
+            }
+        }
+        
+        return null;
+    }
+    
+    _applyOverrideProperties(target, overrideValue) {
+        if (!target) return;
+        
+        const isText = target.type === 'text' || target.type === 'ascii-text';
+        
+        if (overrideValue && typeof overrideValue === 'object' && !Array.isArray(overrideValue)) {
+            for (const [prop, value] of Object.entries(overrideValue)) {
+                const key = prop === 'characters' ? 'text' : prop;
+                target[key] = value;
+                if (isText && key === 'text' && target._updateBounds) {
+                    target._updateBounds();
+                }
+            }
+            return;
+        }
+        
+        if (isText) {
+            target.text = String(overrideValue);
+            if (target._updateBounds) {
+                target._updateBounds();
+            }
+        } else if (typeof target.label === 'string') {
+            target.label = String(overrideValue);
+        }
+    }
+    
+    _applyOverridePath(root, path, value) {
+        if (!root || typeof path !== 'string' || path.length === 0) return;
+        
+        const segments = path.split('.');
+        let target = root;
+        
+        for (let i = 0; i < segments.length - 1; i++) {
+            const segment = segments[i];
+            if (!target) return;
+            
+            if (segment === 'children') {
+                const index = Number(segments[++i]);
+                if (!Array.isArray(target.children) || !Number.isFinite(index)) return;
+                target = target.children[index];
+                continue;
+            }
+            
+            if (Array.isArray(target[segment])) {
+                const index = Number(segments[++i]);
+                if (!Number.isFinite(index) || !target[segment][index]) return;
+                target = target[segment][index];
+                continue;
+            }
+            
+            target = target[segment];
+        }
+        
+        if (!target || typeof target !== 'object') return;
+        
+        const lastKey = segments[segments.length - 1];
+        if (!lastKey) return;
+        
+        const normalizedKey = lastKey === 'characters' ? 'text' : lastKey;
+        target[normalizedKey] = value;
+        
+        if ((target.type === 'text' || target.type === 'ascii-text') && normalizedKey === 'text' && target._updateBounds) {
+            target._updateBounds();
+        }
+    }
+    
+    _transformObjectTree(obj, transform) {
+        if (!obj) return;
+        
+        const { scaleX, scaleY, offsetX, offsetY } = transform;
+        const scaleAvg = (scaleX + scaleY) / 2;
+        
+        const scalePoint = (point) => {
+            if (!point) return;
+            if (typeof point.x === 'number') point.x = point.x * scaleX + offsetX;
+            if (typeof point.y === 'number') point.y = point.y * scaleY + offsetY;
+        };
+        
+        if (typeof obj.x === 'number') obj.x = obj.x * scaleX + offsetX;
+        if (typeof obj.y === 'number') obj.y = obj.y * scaleY + offsetY;
+        
+        if (typeof obj.width === 'number') obj.width *= scaleX;
+        if (typeof obj.height === 'number') obj.height *= scaleY;
+        
+        if (typeof obj.x1 === 'number') obj.x1 = obj.x1 * scaleX + offsetX;
+        if (typeof obj.y1 === 'number') obj.y1 = obj.y1 * scaleY + offsetY;
+        if (typeof obj.x2 === 'number') obj.x2 = obj.x2 * scaleX + offsetX;
+        if (typeof obj.y2 === 'number') obj.y2 = obj.y2 * scaleY + offsetY;
+        
+        if (typeof obj.startX === 'number') obj.startX = obj.startX * scaleX + offsetX;
+        if (typeof obj.startY === 'number') obj.startY = obj.startY * scaleY + offsetY;
+        if (typeof obj.endX === 'number') obj.endX = obj.endX * scaleX + offsetX;
+        if (typeof obj.endY === 'number') obj.endY = obj.endY * scaleY + offsetY;
+        
+        if (typeof obj.cx === 'number') obj.cx = obj.cx * scaleX + offsetX;
+        if (typeof obj.cy === 'number') obj.cy = obj.cy * scaleY + offsetY;
+        
+        if (typeof obj.radiusX === 'number') obj.radiusX *= scaleX;
+        if (typeof obj.radiusY === 'number') obj.radiusY *= scaleY;
+        if (typeof obj.radius === 'number') obj.radius *= scaleAvg;
+        if (typeof obj.outerRadius === 'number') obj.outerRadius *= scaleAvg;
+        if (typeof obj.innerRadius === 'number') obj.innerRadius *= scaleAvg;
+        if (typeof obj.brushSize === 'number') obj.brushSize *= scaleAvg;
+        
+        if (obj.padding && typeof obj.padding === 'object') {
+            if (typeof obj.padding.left === 'number') obj.padding.left *= scaleX;
+            if (typeof obj.padding.right === 'number') obj.padding.right *= scaleX;
+            if (typeof obj.padding.top === 'number') obj.padding.top *= scaleY;
+            if (typeof obj.padding.bottom === 'number') obj.padding.bottom *= scaleY;
+        }
+        
+        if (obj.cornerRadius !== undefined) {
+            if (typeof obj.cornerRadius === 'number') {
+                obj.cornerRadius *= scaleAvg;
+            } else if (typeof obj.cornerRadius === 'object') {
+                const corners = ['topLeft', 'topRight', 'bottomRight', 'bottomLeft'];
+                for (const corner of corners) {
+                    if (typeof obj.cornerRadius[corner] === 'number') {
+                        obj.cornerRadius[corner] *= scaleAvg;
+                    }
+                }
+            }
+        }
+        
+        if (Array.isArray(obj.points)) {
+            for (const point of obj.points) {
+                scalePoint(point);
+            }
+        }
+        
+        if (Array.isArray(obj.waypoints)) {
+            for (const point of obj.waypoints) {
+                scalePoint(point);
+            }
+        }
+        
+        if (Array.isArray(obj.columnWidths)) {
+            obj.columnWidths = obj.columnWidths.map(width => 
+                typeof width === 'number' ? width * scaleX : width
+            );
+        }
+        
+        if (Array.isArray(obj.rowHeights)) {
+            obj.rowHeights = obj.rowHeights.map(height => 
+                typeof height === 'number' ? height * scaleY : height
+            );
+        }
+        
+        if (obj._frameOffset) {
+            obj._frameOffset.x *= scaleX;
+            obj._frameOffset.y *= scaleY;
+        }
+        
+        if (obj.children && obj.children.length > 0) {
+            for (const child of obj.children) {
+                this._transformObjectTree(child, transform);
+            }
+        }
+        
+        if (typeof obj._updateSnapPoints === 'function') {
+            obj._updateSnapPoints();
+        }
+    }
+
+    _detachComponentInstance(instance) {
+        if (!instance || instance.type !== 'instance') return null;
+
+        const resolved = this._resolveComponentInstance(instance);
+        if (!resolved) return null;
+
+        if (resolved.type === 'component') {
+            resolved.type = 'frame';
+        }
+        delete resolved.componentKey;
+        delete resolved.description;
+        delete resolved.documentationLinks;
+
+        const baseName = instance.name || resolved.name || 'Component';
+        resolved.name = `${baseName} (detached)`;
+
+        this._assignNewObjectIds(resolved, instance.id);
+
+        if (!this._replaceObjectInScene(instance, resolved)) {
+            return null;
+        }
+
+        return resolved;
+    }
+
+    _assignNewObjectIds(root, keepRootId = null) {
+        if (!root) return;
+
+        const assignRecursive = (node, parent) => {
+            node.id = node === root && keepRootId ? keepRootId : uuid();
+            node.parentId = parent ? parent.id : null;
+            node._cachedParent = parent || null;
+            node.parentFrame = parent && parent.type === 'frame' ? parent.id : null;
+
+            if (node.children && node.children.length > 0) {
+                for (const child of node.children) {
+                    assignRecursive(child, node);
+                }
+            }
+        };
+
+        assignRecursive(root, null);
+    }
+
+    _replaceObjectInScene(target, replacement) {
+        if (!target || !replacement) return false;
+
+        if (target.parentId) {
+            const parent = this._findObjectById(target.parentId);
+            if (parent && parent.children) {
+                const index = parent.children.indexOf(target);
+                if (index !== -1) {
+                    if (parent.removeChild && parent.addChild) {
+                        parent.removeChild(target);
+                        parent.addChild(replacement, index);
+                    } else {
+                        parent.children.splice(index, 1, replacement);
+                        replacement.parentId = parent.id;
+                        replacement._cachedParent = parent;
+                        replacement.parentFrame = parent.type === 'frame' ? parent.id : null;
+                    }
+                    return true;
+                }
+            }
+        }
+
+        for (const layer of AppState.layers) {
+            if (!layer.objects) continue;
+            const index = layer.objects.indexOf(target);
+            if (index !== -1) {
+                layer.objects.splice(index, 1, replacement);
+                replacement.parentId = null;
+                replacement._cachedParent = null;
+                replacement.parentFrame = null;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    _findLayerForObject(obj) {
+        for (const layer of AppState.layers) {
+            if (!layer.objects) continue;
+            const index = layer.objects.indexOf(obj);
+            if (index !== -1) {
+                return { layer, index };
+            }
+        }
+        return null;
+    }
+
+    _addObjectToSameContainer(reference, obj) {
+        if (!reference || !obj) return false;
+
+        if (reference.parentId) {
+            const parent = this._findObjectById(reference.parentId);
+            if (parent) {
+                const index = parent.children ? parent.children.indexOf(reference) : -1;
+                if (parent.addChild) {
+                    parent.addChild(obj, index >= 0 ? index + 1 : -1);
+                } else if (parent.children) {
+                    if (index >= 0) {
+                        parent.children.splice(index + 1, 0, obj);
+                    } else {
+                        parent.children.push(obj);
+                    }
+                    obj.parentId = parent.id;
+                    obj._cachedParent = parent;
+                    obj.parentFrame = parent.type === 'frame' ? parent.id : null;
+                }
+                return true;
+            }
+        }
+
+        const layerInfo = this._findLayerForObject(reference);
+        if (layerInfo) {
+            const insertIndex = layerInfo.index >= 0 ? layerInfo.index + 1 : layerInfo.layer.objects.length;
+            layerInfo.layer.objects.splice(insertIndex, 0, obj);
+            obj.parentId = null;
+            obj._cachedParent = null;
+            obj.parentFrame = null;
+            return true;
+        }
+
+        return false;
+    }
+
+    _detachObjectFromScene(obj) {
+        if (!obj) return false;
+
+        if (obj.parentId) {
+            const parent = this._findObjectById(obj.parentId);
+            if (parent) {
+                if (parent.removeChild) {
+                    parent.removeChild(obj);
+                } else if (parent.children) {
+                    const index = parent.children.indexOf(obj);
+                    if (index !== -1) {
+                        parent.children.splice(index, 1);
+                    }
+                }
+                obj.parentId = null;
+                obj._cachedParent = null;
+                obj.parentFrame = null;
+                return true;
+            }
+        }
+
+        const layerInfo = this._findLayerForObject(obj);
+        if (layerInfo) {
+            layerInfo.layer.objects.splice(layerInfo.index, 1);
+            obj.parentId = null;
+            obj._cachedParent = null;
+            obj.parentFrame = null;
+            return true;
+        }
+
+        return false;
+    }
+    
+    /**
      * Render an object with clipping to specified bounds
      */
-    _renderWithClipping(obj, buffer, clipBounds) {
+    _renderWithClipping(obj, buffer, clipBounds, componentStack = null, parentTransform = null) {
+        if (!obj || !obj.visible) return;
+        
+        const stack = componentStack || new Set();
+        const currentTransform = composeObjectTransformMatrix(obj, parentTransform);
+        
+        if (obj.type === 'instance') {
+            const componentId = obj.componentId || obj.componentKey;
+            if (componentId && stack.has(componentId)) {
+                renderModeManager.renderObject(obj, buffer, { transform: currentTransform });
+                return;
+            }
+            
+            if (componentId) stack.add(componentId);
+            const resolved = this._resolveComponentInstance(obj);
+            if (resolved) {
+                this._renderWithClipping(resolved, buffer, clipBounds, stack, currentTransform);
+            } else {
+                renderModeManager.renderObject(obj, buffer, { transform: currentTransform });
+            }
+            if (componentId) stack.delete(componentId);
+            return;
+        }
+        
         // For canvas-based render modes, use canvas clipping
         const activeMode = renderModeManager.activeMode;
         const isCanvasMode = activeMode && ['shape', 'rough'].includes(activeMode.name);
@@ -17654,16 +19112,21 @@ class Asciistrator extends EventEmitter {
             ctx.clip();
             
             // Render the object using render mode
-            renderModeManager.renderObject(obj, buffer);
+            renderModeManager.renderObject(obj, buffer, { transform: currentTransform });
             
             // Render children recursively with same clipping
             if (obj.children && obj.children.length > 0) {
                 for (const child of obj.children) {
                     if (child.visible) {
                         // Recursively render with clipping (clipping is already set)
-                        renderModeManager.renderObject(child, buffer);
-                        if (child.children && child.children.length > 0) {
-                            this._renderWithClipping(child, buffer, clipBounds);
+                        if (child.type === 'instance') {
+                            this._renderWithClipping(child, buffer, clipBounds, stack, currentTransform);
+                        } else {
+                            const childTransform = composeObjectTransformMatrix(child, currentTransform);
+                            renderModeManager.renderObject(child, buffer, { transform: childTransform });
+                            if (child.children && child.children.length > 0) {
+                                this._renderWithClipping(child, buffer, clipBounds, stack, currentTransform);
+                            }
                         }
                     }
                 }
@@ -17707,13 +19170,14 @@ class Asciistrator extends EventEmitter {
             colors: buffer.colors
         };
         
-        obj.render(tempBuffer);
+        const targetBuffer = createTransformedBuffer(tempBuffer, currentTransform);
+        obj.render(targetBuffer);
         
         // Also render children with clipping
         if (obj.children && obj.children.length > 0) {
             for (const child of obj.children) {
                 if (child.visible) {
-                    this._renderWithClipping(child, buffer, clipBounds);
+                    this._renderWithClipping(child, buffer, clipBounds, stack, currentTransform);
                 }
             }
         }
@@ -18141,6 +19605,25 @@ class Asciistrator extends EventEmitter {
             AppState.selectedGuide = null;
         }
     }
+
+    _getObjectRenderMatrix(obj) {
+        if (!obj) return null;
+        const chain = [];
+        let current = obj;
+        
+        while (current) {
+            chain.push(current);
+            const parentId = current.parentId;
+            current = parentId ? this._findObjectById(parentId) : null;
+        }
+        
+        let matrix = null;
+        for (let i = chain.length - 1; i >= 0; i--) {
+            matrix = composeObjectTransformMatrix(chain[i], matrix);
+        }
+        
+        return matrix;
+    }
     
     // Draw selection handles around selected objects
     _renderSelectionIndicators() {
@@ -18167,14 +19650,50 @@ class Asciistrator extends EventEmitter {
         const height = buffer.height;
         const selColor = '#00ff88';
         const handleColor = '#ffaa00';
+        const outlineChar = '.';
+        const handleChar = 'o';
         
         for (const obj of AppState.selectedObjects) {
             const bounds = obj.getBounds();
+            const transform = this._getObjectRenderMatrix(obj);
+            const hasRotation = transformHasRotation(transform);
+
+            if (transform && hasRotation) {
+                const outline = getSelectionOutlinePoints(bounds, transform);
+                const handles = getSelectionHandlePoints(bounds, transform);
+                
+                for (let i = 0; i < outline.length; i++) {
+                    const start = outline[i];
+                    const end = outline[(i + 1) % outline.length];
+                    const points = bresenhamLine(start.x, start.y, end.x, end.y);
+                    
+                    for (let p = 0; p < points.length; p++) {
+                        if (p % 2 !== 0) continue;
+                        const point = points[p];
+                        const x = Math.round(point.x);
+                        const y = Math.round(point.y);
+                        if (x >= 0 && x < width && y >= 0 && y < height) {
+                            buffer.setChar(x, y, outlineChar, selColor);
+                        }
+                    }
+                }
+                
+                for (const handle of handles) {
+                    const x = Math.round(handle.x);
+                    const y = Math.round(handle.y);
+                    if (x >= 0 && x < width && y >= 0 && y < height) {
+                        buffer.setChar(x, y, handleChar, handleColor);
+                    }
+                }
+                continue;
+            }
+            
+            const alignedBounds = transform ? getAxisAlignedSelectionBounds(bounds, transform) : null;
             // Expand bounds by 1 for selection border
-            const x1 = bounds.x - 1;
-            const y1 = bounds.y - 1;
-            const x2 = bounds.x + bounds.width;
-            const y2 = bounds.y + bounds.height;
+            const x1 = alignedBounds ? alignedBounds.x1 : bounds.x - 1;
+            const y1 = alignedBounds ? alignedBounds.y1 : bounds.y - 1;
+            const x2 = alignedBounds ? alignedBounds.x2 : bounds.x + bounds.width;
+            const y2 = alignedBounds ? alignedBounds.y2 : bounds.y + bounds.height;
             
             // Draw corners with resize handles - use monospace-safe characters
             const corners = [
@@ -18246,6 +19765,17 @@ class Asciistrator extends EventEmitter {
         if (!obj || typeof obj.getBounds !== 'function') return null;
         
         const bounds = obj.getBounds();
+        const transform = this._getObjectRenderMatrix(obj);
+        if (transform) {
+            const handles = getSelectionHandlePoints(bounds, transform);
+            for (const handle of handles) {
+                if (Math.abs(x - handle.x) <= 1 && Math.abs(y - handle.y) <= 1) {
+                    return { obj, handle: handle.id };
+                }
+            }
+            return null;
+        }
+
         const x1 = bounds.x - 1;
         const y1 = bounds.y - 1;
         const x2 = bounds.x + bounds.width;
@@ -18487,6 +20017,8 @@ class Asciistrator extends EventEmitter {
             'connector': '→',
             'group': '▦',
             'frame': '📦',
+            'component': '🧩',
+            'instance': '◇',
             'panel': '📋',
             'chart': '📊',
             'table': '▤',
@@ -18668,6 +20200,8 @@ class Asciistrator extends EventEmitter {
         if (!container) return;
         
         container.innerHTML = '';
+
+        this._renderLocalComponents(container);
         
         const libraries = componentLibraryManager.getAllLibraries();
         
@@ -18754,6 +20288,48 @@ class Asciistrator extends EventEmitter {
         
         return libDiv;
     }
+
+    _renderLocalComponents(container) {
+        const components = this._collectLocalComponents();
+        components.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        const libDiv = createElement('div', {
+            class: `component-library local-components${components.length ? ' expanded' : ''}`,
+            'data-library-id': 'local'
+        });
+
+        const header = createElement('div', { class: 'component-library-header' });
+        header.innerHTML = `
+            <span class="component-library-expand">▶</span>
+            <span class="component-library-icon">🧩</span>
+            <span class="component-library-name">Local Components</span>
+            <span class="component-library-count">${components.length}</span>
+        `;
+
+        header.addEventListener('click', () => {
+            libDiv.classList.toggle('expanded');
+        });
+
+        libDiv.appendChild(header);
+
+        const content = createElement('div', { class: 'component-library-content' });
+        const categoryDiv = createElement('div', { class: 'component-category' });
+        categoryDiv.innerHTML = `<div class="component-category-header">Canvas</div>`;
+
+        const grid = createElement('div', { class: 'component-grid' });
+        if (components.length === 0) {
+            grid.innerHTML = '<div class="no-results">No local components yet</div>';
+        } else {
+            for (const component of components) {
+                const compEl = this._createLocalComponentElement(component);
+                grid.appendChild(compEl);
+            }
+        }
+
+        categoryDiv.appendChild(grid);
+        content.appendChild(categoryDiv);
+        libDiv.appendChild(content);
+        container.appendChild(libDiv);
+    }
     
     _createComponentElement(component, library) {
         const compDiv = createElement('div', {
@@ -18815,7 +20391,7 @@ class Asciistrator extends EventEmitter {
         compDiv.addEventListener('dragend', () => {
             compDiv.classList.remove('dragging');
         });
-        
+
         // Touch drag support for mobile
         let touchDragGhost = null;
         let touchStartTime = 0;
@@ -18902,6 +20478,54 @@ class Asciistrator extends EventEmitter {
         
         return compDiv;
     }
+
+    _createLocalComponentElement(component) {
+        const compDiv = createElement('div', {
+            class: 'component-item',
+            'data-component-id': component.id,
+            'data-component-key': component.componentKey,
+            draggable: 'true',
+            title: component.description || component.name || 'Component'
+        });
+
+        compDiv.innerHTML = `
+            <span class="component-icon">🧩</span>
+            <span class="component-name">${this._escapeHtml(component.name || 'Component')}</span>
+        `;
+
+        compDiv.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            const menuItems = [
+                { label: 'Insert at Center', action: () => this._insertLocalComponentAtCenter(component) },
+                { label: 'Select Main Component', action: () => this._selectComponentMaster({ type: 'instance', componentId: component.componentKey }) }
+            ];
+            this._showContextMenu(e.clientX, e.clientY, menuItems);
+        });
+
+        compDiv.addEventListener('dragstart', (e) => {
+            e.dataTransfer.setData('application/x-asciistrator-local-component', JSON.stringify({
+                componentKey: component.componentKey
+            }));
+            e.dataTransfer.effectAllowed = 'copy';
+            compDiv.classList.add('dragging');
+
+            const ghost = createElement('div', { class: 'component-drag-ghost' });
+            ghost.textContent = component.name || 'Component';
+            document.body.appendChild(ghost);
+            e.dataTransfer.setDragImage(ghost, 0, 0);
+            setTimeout(() => ghost.remove(), 0);
+        });
+
+        compDiv.addEventListener('dragend', () => {
+            compDiv.classList.remove('dragging');
+        });
+
+        compDiv.addEventListener('dblclick', () => {
+            this._insertLocalComponentAtCenter(component);
+        });
+
+        return compDiv;
+    }
     
     _setupComponentDragDrop() {
         const viewport = $('#viewport');
@@ -18909,6 +20533,7 @@ class Asciistrator extends EventEmitter {
         
         viewport.addEventListener('dragover', (e) => {
             if (e.dataTransfer.types.includes('application/x-asciistrator-component') ||
+                e.dataTransfer.types.includes('application/x-asciistrator-local-component') ||
                 e.dataTransfer.types.includes('application/x-asciistrator-style')) {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'copy';
@@ -18926,6 +20551,21 @@ class Asciistrator extends EventEmitter {
             
             // Handle component drops
             const data = e.dataTransfer.getData('application/x-asciistrator-component');
+            const localData = e.dataTransfer.getData('application/x-asciistrator-local-component');
+            if (localData) {
+                e.preventDefault();
+                try {
+                    const { componentKey } = JSON.parse(localData);
+                    const component = this._findComponentDefinition(componentKey);
+                    if (!component) return;
+
+                    const pos = this.renderer.pointerToCanvas(e);
+                    this._insertLocalComponentInstance(component, pos.x, pos.y);
+                } catch (error) {
+                    console.error('Failed to drop local component:', error);
+                }
+                return;
+            }
             if (!data) return;
             
             e.preventDefault();
@@ -19063,10 +20703,10 @@ class Asciistrator extends EventEmitter {
         
         // Check for ellipse
         if (obj.type === 'ellipse' && obj.radiusX !== undefined) {
-            const cx = objX + (obj.radiusX || 0);
-            const cy = objY + (obj.radiusY || 0);
-            const rx = obj.radiusX || 0;
-            const ry = obj.radiusY || 0;
+            const rx = Math.round((obj.radiusX || 0) * EllipseObject.ASPECT_RATIO);
+            const ry = Math.round(obj.radiusY || 0);
+            const cx = objX + rx;
+            const cy = objY + ry;
             
             if (rx > 0 && ry > 0) {
                 const dx = (x - cx) / rx;
@@ -19095,6 +20735,22 @@ class Asciistrator extends EventEmitter {
         
         this._updateStatus(`Inserted: ${component.name}`);
     }
+
+    _insertLocalComponentInstance(component, x, y) {
+        if (!component || component.type !== 'component') return null;
+
+        this.saveStateForUndo();
+        const instance = component.createInstance(x, y);
+        instance.x = x;
+        instance.y = y;
+        instance.width = component.width;
+        instance.height = component.height;
+
+        AppState.selectedObjects = [instance];
+        this.addObject(instance);
+        this._updateStatus(`Inserted instance: ${component.name || 'Component'}`);
+        return instance;
+    }
     
     _insertComponentAtCenter(component) {
         // Calculate center of visible viewport
@@ -19105,6 +20761,16 @@ class Asciistrator extends EventEmitter {
         const y = Math.floor(viewportHeight / 2 - component.height / 2);
         
         this._insertComponent(component, x, y);
+    }
+
+    _insertLocalComponentAtCenter(component) {
+        const viewportWidth = AppState.canvasWidth;
+        const viewportHeight = AppState.canvasHeight;
+
+        const x = Math.floor(viewportWidth / 2 - component.width / 2);
+        const y = Math.floor(viewportHeight / 2 - component.height / 2);
+
+        this._insertLocalComponentInstance(component, x, y);
     }
     
     _createObjectFromDefinition(def) {
@@ -19291,29 +20957,46 @@ class Asciistrator extends EventEmitter {
         if (!container) return;
         
         const results = componentLibraryManager.searchComponents(query);
+        const lowerQuery = query.toLowerCase();
+        const localResults = this._collectLocalComponents().filter(component => {
+            const name = (component.name || '').toLowerCase();
+            const description = (component.description || '').toLowerCase();
+            return name.includes(lowerQuery) || description.includes(lowerQuery);
+        });
+        localResults.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
         
         container.innerHTML = '';
         
-        if (results.length === 0) {
+        if (results.length === 0 && localResults.length === 0) {
             container.innerHTML = '<div class="no-results">No components found</div>';
             return;
         }
         
-        const resultsDiv = createElement('div', { class: 'component-search-results' });
-        resultsDiv.innerHTML = `<div class="component-category-header">Search Results (${results.length})</div>`;
-        
-        const grid = createElement('div', { class: 'component-grid' });
-        
-        for (const { component, library } of results) {
-            const compEl = this._createComponentElement(component, library);
-            grid.appendChild(compEl);
+        if (localResults.length > 0) {
+            const localDiv = createElement('div', { class: 'component-search-results' });
+            localDiv.innerHTML = `<div class="component-category-header">Local Components (${localResults.length})</div>`;
+            const localGrid = createElement('div', { class: 'component-grid' });
+            for (const component of localResults) {
+                localGrid.appendChild(this._createLocalComponentElement(component));
+            }
+            localDiv.appendChild(localGrid);
+            container.appendChild(localDiv);
         }
-        
-        resultsDiv.appendChild(grid);
-        container.appendChild(resultsDiv);
+
+        if (results.length > 0) {
+            const resultsDiv = createElement('div', { class: 'component-search-results' });
+            resultsDiv.innerHTML = `<div class="component-category-header">Library Components (${results.length})</div>`;
+            const grid = createElement('div', { class: 'component-grid' });
+            for (const { component, library } of results) {
+                const compEl = this._createComponentElement(component, library);
+                grid.appendChild(compEl);
+            }
+            resultsDiv.appendChild(grid);
+            container.appendChild(resultsDiv);
+        }
     }
     
-    _showCreateComponentDialog() {
+    _showCreateComponentDialog(defaultType = 'local') {
         if (AppState.selectedObjects.length === 0) {
             this._updateStatus('Select objects to create a component');
             return;
@@ -19333,6 +21016,15 @@ class Asciistrator extends EventEmitter {
         const dialogHtml = `
             <div class="create-component-form">
                 <div class="form-group">
+                    <label>Type</label>
+                    <div class="library-select-wrapper">
+                        <select id="comp-type">
+                            <option value="local">Local Component</option>
+                            <option value="library">Library Component</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
                     <label>Name</label>
                     <input type="text" id="comp-name" placeholder="Component name" required>
                 </div>
@@ -19340,24 +21032,26 @@ class Asciistrator extends EventEmitter {
                     <label>Description</label>
                     <textarea id="comp-description" placeholder="Optional description"></textarea>
                 </div>
-                <div class="form-group">
-                    <label>Category</label>
-                    <input type="text" id="comp-category" placeholder="General" value="General">
-                </div>
-                <div class="form-group">
-                    <label>Icon</label>
-                    <input type="text" id="comp-icon" placeholder="📦" value="📦" maxlength="2">
-                </div>
-                <div class="form-group">
-                    <label>Tags (comma-separated)</label>
-                    <input type="text" id="comp-tags" placeholder="tag1, tag2">
-                </div>
-                <div class="form-group">
-                    <label>Library</label>
-                    <div class="library-select-wrapper">
-                        <select id="comp-library">
-                            ${userLibraries.map(l => `<option value="${l.id}">${l.name}</option>`).join('')}
-                        </select>
+                <div id="comp-library-fields">
+                    <div class="form-group">
+                        <label>Category</label>
+                        <input type="text" id="comp-category" placeholder="General" value="General">
+                    </div>
+                    <div class="form-group">
+                        <label>Icon</label>
+                        <input type="text" id="comp-icon" placeholder="📦" value="📦" maxlength="2">
+                    </div>
+                    <div class="form-group">
+                        <label>Tags (comma-separated)</label>
+                        <input type="text" id="comp-tags" placeholder="tag1, tag2">
+                    </div>
+                    <div class="form-group">
+                        <label>Library</label>
+                        <div class="library-select-wrapper">
+                            <select id="comp-library">
+                                ${userLibraries.map(l => `<option value="${l.id}">${l.name}</option>`).join('')}
+                            </select>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -19373,34 +21067,51 @@ class Asciistrator extends EventEmitter {
                 primary: true,
                 action: () => {
                     const name = $('#comp-name').value.trim();
-                    if (!name) {
+                    const type = $('#comp-type').value;
+                    if (!name && type === 'library') {
                         this._updateStatus('Component name is required');
                         return false;
                     }
-                    
+
                     const description = $('#comp-description').value.trim();
+                    if (type === 'local') {
+                        const component = this.createComponentFromSelection({ name, description });
+                        if (!component) return false;
+                        this._renderComponentLibraries();
+                        return true;
+                    }
+
                     const category = $('#comp-category').value.trim() || 'General';
                     const icon = $('#comp-icon').value.trim() || '📦';
                     const tags = $('#comp-tags').value.split(',').map(t => t.trim()).filter(Boolean);
                     const libraryId = $('#comp-library').value;
-                    
-                    // Create component from selected objects
+
                     const component = componentLibraryManager.createComponentFromObjects(
                         AppState.selectedObjects,
                         { name, description, category, icon, tags }
                     );
-                    
-                    // Add to library
+
                     componentLibraryManager.addComponentToLibrary(component, libraryId);
-                    
+
                     this._updateStatus(`Created component: ${name}`);
                     this._renderComponentLibraries();
-                    
+
                     return true;
                 }
             }
         ]);
         
+        const compTypeSelect = $('#comp-type');
+        const libraryFields = $('#comp-library-fields');
+        if (compTypeSelect && libraryFields) {
+            compTypeSelect.value = defaultType;
+            const updateFields = () => {
+                libraryFields.style.display = compTypeSelect.value === 'library' ? 'block' : 'none';
+            };
+            compTypeSelect.addEventListener('change', updateFields);
+            updateFields();
+        }
+
         // Focus name input
         setTimeout(() => $('#comp-name')?.focus(), 100);
     }
@@ -21849,6 +23560,7 @@ class Asciistrator extends EventEmitter {
         AppState.modified = false;
         AppState.filename = 'untitled.asc';
         this._updateStatus('New document created');
+        this._renderComponentLibraries();
     }
     
     open() {
@@ -21953,6 +23665,7 @@ class Asciistrator extends EventEmitter {
         this._updateLayerList();
         this._updateUndoRedoButtons();
         AppState.modified = false;
+        this._renderComponentLibraries();
     }
     
     /**
@@ -22015,7 +23728,7 @@ class Asciistrator extends EventEmitter {
             // Convert page children (v2 nodes) to objects
             if (page.children && page.children.length > 0) {
                 for (const node of page.children) {
-                    const obj = this._createObjectFromV2Node(node, ColorUtils, TypeMapping);
+                    const obj = this._createObjectFromV2Node(node, ColorUtils, TypeMapping, null);
                     if (obj) {
                         layer.objects.push(obj);
                     }
@@ -22032,20 +23745,27 @@ class Asciistrator extends EventEmitter {
     /**
      * Create an object from a v2 format node
      */
-    _createObjectFromV2Node(node, ColorUtils, TypeMapping) {
+    _createObjectFromV2Node(node, ColorUtils, TypeMapping, parent = null) {
         // Map Figma type back to internal type
         const internalType = TypeMapping.fromFigma[node.type] || node.flowchartType || node.type.toLowerCase();
+
+        const transform = this._parseRelativeTransform(node.relativeTransform);
+        const fallbackX = transform ? transform.tx + (parent?.x ?? 0) : 0;
+        const fallbackY = transform ? transform.ty + (parent?.y ?? 0) : 0;
+        const rotationValue = typeof node.rotation === 'number'
+            ? node.rotation
+            : (transform ? transform.rotation : 0);
         
         // Build v1-style JSON for _createObjectFromJSON
         const json = {
             id: node.id,
             type: internalType,
             name: node.name,
-            x: node.absoluteBoundingBox?.x || 0,
-            y: node.absoluteBoundingBox?.y || 0,
+            x: node.absoluteBoundingBox?.x ?? fallbackX,
+            y: node.absoluteBoundingBox?.y ?? fallbackY,
             width: node.absoluteBoundingBox?.width || 1,
             height: node.absoluteBoundingBox?.height || 1,
-            rotation: node.rotation || 0,
+            rotation: rotationValue,
             visible: node.visible !== false,
             locked: node.locked || false,
             opacity: node.opacity ?? 1,
@@ -22067,6 +23787,12 @@ class Asciistrator extends EventEmitter {
             
             clipContent: node.clipsContent || false
         };
+
+        if (transform) {
+            json.scaleX = transform.scaleX;
+            json.scaleY = transform.scaleY;
+            json.relativeTransform = node.relativeTransform;
+        }
         
         // Restore layout properties (flat Figma-style)
         json.layoutMode = node.layoutMode || 'NONE';
@@ -22206,6 +23932,11 @@ class Asciistrator extends EventEmitter {
                 // Restore from ascii namespace (with fallback to old locations)
                 json.chartData = node.ascii?.chartData || node.chartData;
                 json.chartOptions = node.ascii?.chartOptions || node.chartOptions;
+                if (json.chartData?.data) json.data = json.chartData.data;
+                if (json.chartData?.labels) json.labels = json.chartData.labels;
+                if (json.chartOptions?.title !== undefined) json.title = json.chartOptions.title;
+                if (json.chartOptions?.showAxes !== undefined) json.showAxes = json.chartOptions.showAxes;
+                if (json.chartOptions?.showLabels !== undefined) json.showLabels = json.chartOptions.showLabels;
                 break;
                 
             // Flowchart shapes
@@ -22265,7 +23996,7 @@ class Asciistrator extends EventEmitter {
         if (obj && node.children && node.children.length > 0) {
             obj.children = [];
             for (const childNode of node.children) {
-                const childObj = this._createObjectFromV2Node(childNode, ColorUtils, TypeMapping);
+                const childObj = this._createObjectFromV2Node(childNode, ColorUtils, TypeMapping, obj);
                 if (childObj) {
                     childObj.parentId = obj.id;
                     childObj._cachedParent = obj;
@@ -22275,6 +24006,35 @@ class Asciistrator extends EventEmitter {
         }
         
         return obj;
+    }
+
+    _parseRelativeTransform(relativeTransform) {
+        if (!Array.isArray(relativeTransform) || relativeTransform.length !== 2) {
+            return null;
+        }
+
+        const row0 = relativeTransform[0];
+        const row1 = relativeTransform[1];
+        if (!Array.isArray(row0) || !Array.isArray(row1)) {
+            return null;
+        }
+
+        const a = row0[0];
+        const c = row0[1];
+        const tx = row0[2];
+        const b = row1[0];
+        const d = row1[1];
+        const ty = row1[2];
+
+        if (![a, b, c, d, tx, ty].every(Number.isFinite)) {
+            return null;
+        }
+
+        const scaleX = Math.sqrt(a * a + b * b) || 1;
+        const scaleY = Math.sqrt(c * c + d * d) || 1;
+        const rotation = Math.atan2(b, a) * 180 / Math.PI;
+
+        return { a, b, c, d, tx, ty, scaleX, scaleY, rotation };
     }
     
     /**
@@ -22749,6 +24509,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         this.renderAllObjects();
         this._updateLayerList();
         this._updateStatusBar();
+        this._renderComponentLibraries();
     }
     
     _findObjectById(id) {
@@ -23284,6 +25045,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             AppState.selectedObjects = [];
             this.renderAllObjects();
             this._updateStatus('Cut to clipboard');
+            this._renderComponentLibraries();
         }
     }
     
@@ -23330,6 +25092,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
     paste() {
         if (AppState.clipboard && AppState.clipboard.length > 0) {
             this.saveStateForUndo();
+            const componentKeyMap = new Map();
             
             // Determine paste position: use cursor position if available, otherwise use a default offset
             let pasteX = 5;
@@ -23346,6 +25109,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             }
             
             AppState.selectedObjects = [];
+            const pastedObjects = [];
             for (const json of AppState.clipboard) {
                 const obj = this._createObjectFromJSON(json);
                 if (obj) {
@@ -23357,12 +25121,22 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                     // Re-expand any relative child positions and fix parent links
                     this._expandChildrenFromParent(obj);
 
+                    // Remap component keys for pasted components
+                    this._remapComponentKeys(obj, componentKeyMap);
+
                     this.addObject(obj);
                     AppState.selectedObjects.push(obj);
+                    pastedObjects.push(obj);
                 }
             }
+
+            for (const obj of pastedObjects) {
+                this._remapInstanceComponentIds(obj, componentKeyMap);
+            }
+
             this.renderAllObjects();
             this._updateStatus(`Pasted ${AppState.clipboard.length} object(s)`);
+            this._renderComponentLibraries();
         }
     }
 
@@ -23403,6 +25177,37 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             child.parentFrame = parent.type === 'frame' ? parent.id : null;
 
             this._expandChildrenFromParent(child);
+        }
+    }
+
+    _remapComponentKeys(node, keyMap) {
+        if (!node) return;
+
+        if (node.type === 'component' && node.componentKey) {
+            const oldKey = node.componentKey;
+            const newKey = uuid();
+            node.componentKey = newKey;
+            keyMap.set(oldKey, newKey);
+        }
+
+        if (node.children && node.children.length > 0) {
+            for (const child of node.children) {
+                this._remapComponentKeys(child, keyMap);
+            }
+        }
+    }
+
+    _remapInstanceComponentIds(node, keyMap) {
+        if (!node) return;
+
+        if (node.type === 'instance' && node.componentId && keyMap.has(node.componentId)) {
+            node.componentId = keyMap.get(node.componentId);
+        }
+
+        if (node.children && node.children.length > 0) {
+            for (const child of node.children) {
+                this._remapInstanceComponentIds(child, keyMap);
+            }
         }
     }
     
@@ -23639,6 +25444,176 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         this.renderAllObjects();
         this._updateLayerList();
         this._updateStatus(`Created frame with ${frame.children.length} objects`);
+    }
+
+    createComponentFromSelection(options = {}) {
+        if (AppState.selectedObjects.length === 0) {
+            this._updateStatus('Select objects to create a component');
+            return null;
+        }
+
+        const selected = [...AppState.selectedObjects];
+        const name = (options.name || '').trim();
+        const description = (options.description || '').trim();
+
+        this.saveStateForUndo();
+
+        if (selected.length === 1 && selected[0].type === 'component') {
+            this._updateStatus('Selection is already a component');
+            return selected[0];
+        }
+
+        if (selected.length === 1 && selected[0].type === 'frame') {
+            const frame = selected[0];
+            const component = new ComponentObject(frame.x, frame.y, frame.width, frame.height);
+            this._copyFramePropsToComponent(component, frame);
+            component.name = name || frame.name || `Component ${Date.now() % 10000}`;
+            component.description = description || frame.description || '';
+
+            component.children = frame.children || [];
+            for (const child of component.children) {
+                child.parentId = component.id;
+                child._cachedParent = component;
+                child.parentFrame = component.id;
+            }
+
+            this._replaceObjectInScene(frame, component);
+            AppState.selectedObjects = [component];
+            this._spatialIndexDirty = true;
+            this.renderAllObjects();
+            this._updateLayerList();
+            this._updateStatus(`Created component: ${component.name}`);
+            return component;
+        }
+
+        // Calculate bounds of selected objects
+        let minX = Infinity, minY = Infinity;
+        let maxX = -Infinity, maxY = -Infinity;
+
+        for (const obj of selected) {
+            const b = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y, width: obj.width || 1, height: obj.height || 1 };
+            minX = Math.min(minX, b.x);
+            minY = Math.min(minY, b.y);
+            maxX = Math.max(maxX, b.x + b.width);
+            maxY = Math.max(maxY, b.y + b.height);
+        }
+
+        const padding = 1;
+        const component = new ComponentObject(
+            minX - padding,
+            minY - padding,
+            (maxX - minX) + padding * 2,
+            (maxY - minY) + padding * 2
+        );
+        component.name = name || `Component ${Date.now() % 10000}`;
+        component.description = description || '';
+        component.strokeColor = AppState.strokeColor;
+
+        const reference = selected[0];
+        const referenceParentId = reference?.parentId || null;
+        const referenceLayerInfo = reference ? this._findLayerForObject(reference) : null;
+
+        for (const obj of selected) {
+            this._detachObjectFromScene(obj);
+            component.addChild(obj);
+        }
+
+        let inserted = false;
+        if (referenceParentId) {
+            const parent = this._findObjectById(referenceParentId);
+            if (parent) {
+                if (parent.addChild) {
+                    parent.addChild(component);
+                } else if (parent.children) {
+                    parent.children.push(component);
+                    component.parentId = parent.id;
+                    component._cachedParent = parent;
+                    component.parentFrame = parent.type === 'frame' ? parent.id : null;
+                }
+                inserted = true;
+            }
+        }
+
+        if (!inserted && referenceLayerInfo) {
+            referenceLayerInfo.layer.objects.push(component);
+            component.parentId = null;
+            component._cachedParent = null;
+            component.parentFrame = null;
+            inserted = true;
+        }
+
+        if (!inserted) {
+            this.addObject(component);
+        }
+
+        AppState.selectedObjects = [component];
+        this._spatialIndexDirty = true;
+        this.renderAllObjects();
+        this._updateLayerList();
+        this._updateStatus(`Created component: ${component.name}`);
+        return component;
+    }
+
+    _copyFramePropsToComponent(component, frame) {
+        if (!component || !frame) return;
+
+        component.clipContent = frame.clipContent;
+        component.showBorder = frame.showBorder;
+        component.borderStyle = frame.borderStyle;
+        component.backgroundColor = frame.backgroundColor;
+        component.backgroundChar = frame.backgroundChar;
+        component.title = frame.title;
+        component.padding = frame.padding ? { ...frame.padding } : component.padding;
+        component.autoSize = frame.autoSize;
+        component.strokeColor = frame.strokeColor;
+        component.fillColor = frame.fillColor;
+        component.opacity = frame.opacity ?? component.opacity;
+        component.blendMode = frame.blendMode || component.blendMode;
+        component.rotation = frame.rotation || component.rotation;
+
+        if (frame.stroke) {
+            component.stroke = {
+                ...frame.stroke,
+                dashPattern: Array.isArray(frame.stroke.dashPattern) ? [...frame.stroke.dashPattern] : []
+            };
+        }
+
+        if (frame.cornerRadius !== undefined) {
+            component.cornerRadius = typeof frame.cornerRadius === 'object'
+                ? JSON.parse(JSON.stringify(frame.cornerRadius))
+                : frame.cornerRadius;
+        }
+
+        if (frame.effects) {
+            component.effects = JSON.parse(JSON.stringify(frame.effects));
+        }
+
+        component.layoutMode = frame.layoutMode || component.layoutMode;
+        component.primaryAxisAlignItems = frame.primaryAxisAlignItems || component.primaryAxisAlignItems;
+        component.counterAxisAlignItems = frame.counterAxisAlignItems || component.counterAxisAlignItems;
+        component.paddingLeft = frame.paddingLeft ?? component.paddingLeft;
+        component.paddingRight = frame.paddingRight ?? component.paddingRight;
+        component.paddingTop = frame.paddingTop ?? component.paddingTop;
+        component.paddingBottom = frame.paddingBottom ?? component.paddingBottom;
+        component.itemSpacing = frame.itemSpacing ?? component.itemSpacing;
+        component.counterAxisSpacing = frame.counterAxisSpacing ?? component.counterAxisSpacing;
+        component.layoutWrap = frame.layoutWrap || component.layoutWrap;
+        component.itemReverseZIndex = frame.itemReverseZIndex || component.itemReverseZIndex;
+
+        if (frame.sizing) {
+            component.sizing = {
+                horizontal: frame.sizing.horizontal || component.sizing.horizontal,
+                vertical: frame.sizing.vertical || component.sizing.vertical,
+                minWidth: frame.sizing.minWidth ?? component.sizing.minWidth,
+                maxWidth: frame.sizing.maxWidth ?? component.sizing.maxWidth,
+                minHeight: frame.sizing.minHeight ?? component.sizing.minHeight,
+                maxHeight: frame.sizing.maxHeight ?? component.sizing.maxHeight
+            };
+        }
+
+        if (frame.constraints) {
+            component.constraints = { ...frame.constraints };
+        }
     }
     
     /**
@@ -24805,13 +26780,95 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
     }
     
     // Component operations
+    createInstanceFromSelection() {
+        const component = AppState.selectedObjects.find(obj => obj.type === 'component');
+        if (!component) {
+            this._updateStatus('Select a component to create an instance');
+            return null;
+        }
+
+        this.saveStateForUndo();
+        const offset = 2;
+        const instance = component.createInstance(component.x + component.width + offset, component.y);
+        instance.width = component.width;
+        instance.height = component.height;
+
+        if (!this._addObjectToSameContainer(component, instance)) {
+            this.addObject(instance);
+        }
+
+        AppState.selectedObjects = [instance];
+        this._spatialIndexDirty = true;
+        this.renderAllObjects();
+        this._updateLayerList();
+        this._updateStatus(`Created instance of ${component.name || 'Component'}`);
+        return instance;
+    }
+
+    _swapInstanceComponent(instance, componentKey) {
+        if (!instance || instance.type !== 'instance') return;
+        if (!componentKey) return;
+
+        const component = this._findComponentDefinition(componentKey);
+        if (!component) {
+            this._updateStatus('Component not found');
+            return;
+        }
+
+        if (instance.componentId === componentKey) return;
+
+        this.saveStateForUndo();
+        instance.componentId = componentKey;
+        instance.overrides = {};
+        instance.name = component.name ? `${component.name} Instance` : instance.name;
+
+        if (!instance.width || !instance.height) {
+            instance.width = component.width;
+            instance.height = component.height;
+        }
+
+        this._spatialIndexDirty = true;
+        this.renderAllObjects();
+        this._updateLayerList();
+        this._updatePropertiesPanel();
+        this._updateStatus(`Swapped instance to ${component.name || 'Component'}`);
+    }
+
+    _selectComponentMaster(instance) {
+        if (!instance || instance.type !== 'instance') return;
+
+        const component = this._findComponentDefinition(instance.componentId);
+        if (!component) {
+            this._updateStatus('Component not found');
+            return;
+        }
+
+        AppState.selectedObjects = [component];
+        this._updateLayerList();
+        this.renderAllObjects();
+        this._updatePropertiesPanel();
+        this._updateStatus(`Selected component: ${component.name || 'Component'}`);
+    }
+
     detachInstance() {
         if (AppState.selectedObjects.length === 0) return;
         
         this.saveStateForUndo();
         let detached = 0;
+        const newSelection = [];
         
         for (const obj of AppState.selectedObjects) {
+            if (obj.type === 'instance') {
+                const detachedInstance = this._detachComponentInstance(obj);
+                if (detachedInstance) {
+                    detached++;
+                    newSelection.push(detachedInstance);
+                } else {
+                    newSelection.push(obj);
+                }
+                continue;
+            }
+
             if (obj.uiComponentType || obj.avaloniaType) {
                 // Remove component type references but keep the visual
                 delete obj.uiComponentType;
@@ -24819,11 +26876,17 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                 delete obj.uiProperties;
                 obj.name = obj.name ? obj.name + ' (detached)' : 'Detached';
                 detached++;
+                newSelection.push(obj);
+                continue;
             }
+            newSelection.push(obj);
         }
         
         if (detached > 0) {
+            AppState.selectedObjects = newSelection;
+            this._spatialIndexDirty = true;
             this.renderAllObjects();
+            this._updateLayerList();
             this._updateStatus(`Detached ${detached} instance(s)`);
         } else {
             this._updateStatus('No component instances selected');
@@ -24885,6 +26948,8 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             { label: 'Group', action: () => this.groupSelected(), category: 'Object', shortcut: 'Ctrl+G' },
             { label: 'Ungroup', action: () => this.ungroupSelected(), category: 'Object', shortcut: 'Ctrl+Shift+G' },
             { label: 'Frame Selection', action: () => this.frameSelection(), category: 'Object', shortcut: 'Ctrl+Alt+G' },
+            { label: 'Create Component from Selection', action: () => this.createComponentFromSelection(), category: 'Object' },
+            { label: 'Create Instance', action: () => this.createInstanceFromSelection(), category: 'Object' },
             { label: 'Rename', action: () => this.renameSelected(), category: 'Object', shortcut: 'Ctrl+R' },
             { label: 'Bring to Front', action: () => this.bringToFront(), category: 'Object' },
             { label: 'Send to Back', action: () => this.sendToBack(), category: 'Object' },
@@ -25131,6 +27196,20 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                 });
             }
         }
+
+        // Add local (Figma-style) components
+        const localComponents = this._collectLocalComponents();
+        for (const component of localComponents) {
+            allComponents.push({
+                label: component.name || 'Component',
+                category: 'Local Components',
+                description: component.description || '',
+                tags: [],
+                icon: '🧩',
+                component: component,
+                type: 'local-component'
+            });
+        }
         
         // Add basic shapes as "Quick Shapes"
         const quickShapes = [
@@ -25178,7 +27257,8 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                     comp.category.toLowerCase().includes(lowerQuery) ||
                     comp.description.toLowerCase().includes(lowerQuery) ||
                     comp.tags.some(t => t.toLowerCase().includes(lowerQuery))) {
-                    items.push({ ...comp, type: 'component' });
+                    const entryType = comp.type || 'component';
+                    items.push({ ...comp, type: entryType });
                 }
             }
             
@@ -25364,6 +27444,8 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                 } else if (this._pendingInsertItem.type === 'component') {
                     // Use the existing working _insertComponent method
                     this._insertComponent(this._pendingInsertItem.component, pos.x, pos.y);
+                } else if (this._pendingInsertItem.type === 'local-component') {
+                    this._insertLocalComponentInstance(this._pendingInsertItem.component, pos.x, pos.y);
                 }
             }
             
@@ -25659,7 +27741,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             'path': (obj) => obj.type === 'path',
             'group': (obj) => obj.type === 'group',
             'flowchart': (obj) => obj.type?.startsWith('flowchart-') || ['process', 'decision', 'terminal', 'io', 'document', 'database', 'subprocess', 'connector'].includes(obj.type),
-            'component': (obj) => obj.uiComponentType || obj.avaloniaType,
+            'component': (obj) => obj.type === 'component' || obj.uiComponentType || obj.avaloniaType,
         };
         
         const matcher = typeMatchers[type];
@@ -25668,14 +27750,20 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             return;
         }
         
-        for (const layer of AppState.layers) {
-            if (!layer.visible || layer.locked || !layer.objects) continue;
-            
-            for (const obj of layer.objects) {
+        const collectMatches = (objects) => {
+            for (const obj of objects || []) {
                 if (obj.visible && !obj.locked && matcher(obj)) {
                     AppState.selectedObjects.push(obj);
                 }
+                if (obj.children && obj.children.length > 0) {
+                    collectMatches(obj.children);
+                }
             }
+        };
+
+        for (const layer of AppState.layers) {
+            if (!layer.visible || layer.locked || !layer.objects) continue;
+            collectMatches(layer.objects);
         }
         
         this.renderAllObjects();
@@ -25725,6 +27813,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                 obj.name = newName;
                 this._updateLayerList();
                 this._updateStatus(`Renamed to "${newName}"`);
+                this._renderComponentLibraries();
             }
             dialog.remove();
         };
@@ -25990,10 +28079,8 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         
         const obj = AppState.selectedObjects[0];
         
-        // Initialize constraints if not set
-        if (!obj.constraints) {
-            obj.constraints = { horizontal: 'MIN', vertical: 'MIN' };
-        }
+        // Normalize constraints (supports legacy values)
+        obj.constraints = normalizeConstraints(obj.constraints || {});
         
         // Check if object has a parent container
         const hasParent = obj.parentId || obj.parentFrame;
@@ -26021,11 +28108,11 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                                 <div id="h-preview-obj" style="position: absolute; top: 50%; transform: translateY(-50%); height: 16px; background: var(--ui-accent); border-radius: 2px; transition: all 0.2s;"></div>
                             </div>
                             <select id="constraint-horizontal" style="width: 100%; padding: 8px; margin-top: 8px; background: var(--ui-bg-secondary); border: 1px solid var(--ui-border); border-radius: 4px; color: var(--ui-text);">
-                                <option value="left" ${obj.constraints.horizontal === 'left' ? 'selected' : ''}>⬅ Left</option>
-                                <option value="right" ${obj.constraints.horizontal === 'right' ? 'selected' : ''}>➡ Right</option>
-                                <option value="leftRight" ${obj.constraints.horizontal === 'leftRight' ? 'selected' : ''}>↔ Left & Right (Stretch)</option>
-                                <option value="center" ${obj.constraints.horizontal === 'center' ? 'selected' : ''}>⬌ Center</option>
-                                <option value="scale" ${obj.constraints.horizontal === 'scale' ? 'selected' : ''}>⤢ Scale</option>
+                                <option value="MIN" ${obj.constraints.horizontal === 'MIN' ? 'selected' : ''}>⬅ Left (MIN)</option>
+                                <option value="MAX" ${obj.constraints.horizontal === 'MAX' ? 'selected' : ''}>➡ Right (MAX)</option>
+                                <option value="STRETCH" ${obj.constraints.horizontal === 'STRETCH' ? 'selected' : ''}>↔ Left & Right (Stretch)</option>
+                                <option value="CENTER" ${obj.constraints.horizontal === 'CENTER' ? 'selected' : ''}>⬌ Center</option>
+                                <option value="SCALE" ${obj.constraints.horizontal === 'SCALE' ? 'selected' : ''}>⤢ Scale</option>
                             </select>
                         </div>
                         
@@ -26036,11 +28123,11 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
                                 <div id="v-preview-obj" style="position: absolute; left: 50%; transform: translateX(-50%); width: 16px; background: var(--ui-accent); border-radius: 2px; transition: all 0.2s;"></div>
                             </div>
                             <select id="constraint-vertical" style="width: 100%; padding: 8px; margin-top: 8px; background: var(--ui-bg-secondary); border: 1px solid var(--ui-border); border-radius: 4px; color: var(--ui-text);">
-                                <option value="top" ${obj.constraints.vertical === 'top' ? 'selected' : ''}>⬆ Top</option>
-                                <option value="bottom" ${obj.constraints.vertical === 'bottom' ? 'selected' : ''}>⬇ Bottom</option>
-                                <option value="topBottom" ${obj.constraints.vertical === 'topBottom' ? 'selected' : ''}>↕ Top & Bottom (Stretch)</option>
-                                <option value="center" ${obj.constraints.vertical === 'center' ? 'selected' : ''}>⬍ Center</option>
-                                <option value="scale" ${obj.constraints.vertical === 'scale' ? 'selected' : ''}>⤡ Scale</option>
+                                <option value="MIN" ${obj.constraints.vertical === 'MIN' ? 'selected' : ''}>⬆ Top (MIN)</option>
+                                <option value="MAX" ${obj.constraints.vertical === 'MAX' ? 'selected' : ''}>⬇ Bottom (MAX)</option>
+                                <option value="STRETCH" ${obj.constraints.vertical === 'STRETCH' ? 'selected' : ''}>↕ Top & Bottom (Stretch)</option>
+                                <option value="CENTER" ${obj.constraints.vertical === 'CENTER' ? 'selected' : ''}>⬍ Center</option>
+                                <option value="SCALE" ${obj.constraints.vertical === 'SCALE' ? 'selected' : ''}>⤡ Scale</option>
                             </select>
                         </div>
                     </div>
@@ -26075,78 +28162,86 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             
             // Update horizontal preview
             switch (hSelect.value) {
-                case 'left':
+                case 'MIN':
                     hPreview.style.left = '8px';
                     hPreview.style.right = 'auto';
                     hPreview.style.width = '30%';
+                    hPreview.style.transform = 'translateY(-50%)';
                     break;
-                case 'right':
+                case 'MAX':
                     hPreview.style.left = 'auto';
                     hPreview.style.right = '8px';
                     hPreview.style.width = '30%';
+                    hPreview.style.transform = 'translateY(-50%)';
                     break;
-                case 'leftRight':
+                case 'STRETCH':
                     hPreview.style.left = '8px';
                     hPreview.style.right = '8px';
                     hPreview.style.width = 'auto';
+                    hPreview.style.transform = 'translateY(-50%)';
                     break;
-                case 'center':
+                case 'CENTER':
                     hPreview.style.left = '50%';
                     hPreview.style.right = 'auto';
                     hPreview.style.width = '30%';
                     hPreview.style.transform = 'translate(-50%, -50%)';
                     break;
-                case 'scale':
+                case 'SCALE':
                     hPreview.style.left = '20%';
                     hPreview.style.right = 'auto';
                     hPreview.style.width = '30%';
+                    hPreview.style.transform = 'translateY(-50%)';
                     break;
             }
             
             // Update vertical preview
             switch (vSelect.value) {
-                case 'top':
+                case 'MIN':
                     vPreview.style.top = '8px';
                     vPreview.style.bottom = 'auto';
                     vPreview.style.height = '40%';
+                    vPreview.style.transform = 'translateX(-50%)';
                     break;
-                case 'bottom':
+                case 'MAX':
                     vPreview.style.top = 'auto';
                     vPreview.style.bottom = '8px';
                     vPreview.style.height = '40%';
+                    vPreview.style.transform = 'translateX(-50%)';
                     break;
-                case 'topBottom':
+                case 'STRETCH':
                     vPreview.style.top = '8px';
                     vPreview.style.bottom = '8px';
                     vPreview.style.height = 'auto';
+                    vPreview.style.transform = 'translateX(-50%)';
                     break;
-                case 'center':
+                case 'CENTER':
                     vPreview.style.top = '50%';
                     vPreview.style.bottom = 'auto';
                     vPreview.style.height = '40%';
                     vPreview.style.transform = 'translate(-50%, -50%)';
                     break;
-                case 'scale':
+                case 'SCALE':
                     vPreview.style.top = '20%';
                     vPreview.style.bottom = 'auto';
                     vPreview.style.height = '40%';
+                    vPreview.style.transform = 'translateX(-50%)';
                     break;
             }
             
             // Update description
             const descriptions = {
-                'left': 'Maintains distance from the left edge when parent resizes.',
-                'right': 'Maintains distance from the right edge when parent resizes.',
-                'leftRight': 'Stretches to maintain both left and right distances. Width changes with parent.',
-                'center': 'Stays centered horizontally. Position adjusts to remain in center.',
-                'scale': 'Scales position and size proportionally with parent.'
+                'MIN': 'Maintains distance from the left edge when parent resizes.',
+                'MAX': 'Maintains distance from the right edge when parent resizes.',
+                'STRETCH': 'Stretches to maintain both left and right distances. Width changes with parent.',
+                'CENTER': 'Stays centered horizontally. Position adjusts to remain in center.',
+                'SCALE': 'Scales position and size proportionally with parent.'
             };
             const vDescriptions = {
-                'top': 'Maintains distance from the top edge.',
-                'bottom': 'Maintains distance from the bottom edge.',
-                'topBottom': 'Stretches to maintain both top and bottom distances. Height changes with parent.',
-                'center': 'Stays centered vertically.',
-                'scale': 'Scales position and size proportionally.'
+                'MIN': 'Maintains distance from the top edge.',
+                'MAX': 'Maintains distance from the bottom edge.',
+                'STRETCH': 'Stretches to maintain both top and bottom distances. Height changes with parent.',
+                'CENTER': 'Stays centered vertically.',
+                'SCALE': 'Scales position and size proportionally.'
             };
             
             description.textContent = `H: ${descriptions[hSelect.value]} V: ${vDescriptions[vSelect.value]}`;
@@ -26165,16 +28260,16 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         dialog.querySelector('.modal-cancel').addEventListener('click', closeDialog);
         
         dialog.querySelector('#btn-reset-constraints').addEventListener('click', () => {
-            dialog.querySelector('#constraint-horizontal').value = 'left';
-            dialog.querySelector('#constraint-vertical').value = 'top';
+            dialog.querySelector('#constraint-horizontal').value = 'MIN';
+            dialog.querySelector('#constraint-vertical').value = 'MIN';
             updatePreview();
         });
         
         dialog.querySelector('.modal-ok').addEventListener('click', () => {
             this.saveStateForUndo();
             
-            const horizontal = dialog.querySelector('#constraint-horizontal').value;
-            const vertical = dialog.querySelector('#constraint-vertical').value;
+            const horizontal = normalizeConstraintValue(dialog.querySelector('#constraint-horizontal').value, 'horizontal');
+            const vertical = normalizeConstraintValue(dialog.querySelector('#constraint-vertical').value, 'vertical');
             
             // Apply to all selected objects
             for (const selectedObj of AppState.selectedObjects) {
@@ -26271,21 +28366,21 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         // Keep for backward compatibility with canvas-level constraints
         if (!obj.constraints) return;
         
-        const c = obj.constraints;
+        const c = normalizeConstraints(obj.constraints);
         const bounds = obj.getBounds ? obj.getBounds() : { x: obj.x, y: obj.y, width: obj.width || 1, height: obj.height || 1 };
         
         // Legacy canvas-level constraint application
         if (!obj.parentId && !obj.parentFrame) {
             // Apply horizontal constraints to canvas
-            if (c.horizontal === 'center') {
+            if (c.horizontal === HorizontalConstraint.CENTER) {
                 const newX = Math.floor((AppState.canvasWidth - bounds.width) / 2);
                 const deltaX = newX - bounds.x;
                 obj.x += deltaX;
                 if (obj.x1 !== undefined) { obj.x1 += deltaX; obj.x2 += deltaX; }
-            } else if (c.horizontal === 'leftRight') {
+            } else if (c.horizontal === HorizontalConstraint.STRETCH) {
                 obj.x = 1;
                 obj.width = AppState.canvasWidth - 2;
-            } else if (c.horizontal === 'right') {
+            } else if (c.horizontal === HorizontalConstraint.MAX) {
                 const newX = AppState.canvasWidth - bounds.width - 1;
                 const deltaX = newX - bounds.x;
                 obj.x += deltaX;
@@ -26293,15 +28388,15 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             }
             
             // Apply vertical constraints to canvas
-            if (c.vertical === 'center') {
+            if (c.vertical === VerticalConstraint.CENTER) {
                 const newY = Math.floor((AppState.canvasHeight - bounds.height) / 2);
                 const deltaY = newY - bounds.y;
                 obj.y += deltaY;
                 if (obj.y1 !== undefined) { obj.y1 += deltaY; obj.y2 += deltaY; }
-            } else if (c.vertical === 'topBottom') {
+            } else if (c.vertical === VerticalConstraint.STRETCH) {
                 obj.y = 1;
                 obj.height = AppState.canvasHeight - 2;
-            } else if (c.vertical === 'bottom') {
+            } else if (c.vertical === VerticalConstraint.MAX) {
                 const newY = AppState.canvasHeight - bounds.height - 1;
                 const deltaY = newY - bounds.y;
                 obj.y += deltaY;
@@ -27684,51 +29779,13 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
         const x = 10, y = 10;
         const width = 40, height = 15;
         
-        // Create a simple ASCII chart representation
-        const chartText = this._generateChartASCII(type, width, height);
-        const textObj = new TextObject(x, y, chartText);
-        textObj.name = `${type.charAt(0).toUpperCase() + type.slice(1)} Chart`;
-        this.addObject(textObj);
+        const chart = new ChartObject(x, y, width, height);
+        chart.chartType = type;
+        chart.strokeChar = AppState.strokeChar;
+        chart.strokeColor = AppState.strokeColor;
+        chart.name = `${type.charAt(0).toUpperCase() + type.slice(1)} Chart`;
+        this.addObject(chart);
         this._updateStatus(`Inserted ${type} chart`);
-    }
-    
-    _generateChartASCII(type, width, height) {
-        // Generate a simple ASCII chart representation
-        switch (type) {
-            case 'bar':
-                return `┌${'─'.repeat(width - 2)}┐
-│ ████  Bar Chart       │
-│ ████ ██               │
-│ ████ ██ ███           │
-│ ████ ██ ███ █         │
-└${'─'.repeat(width - 2)}┘`;
-            case 'line':
-                return `┌${'─'.repeat(width - 2)}┐
-│        ╭──╮  Line     │
-│     ╭──╯  ╰──╮        │
-│  ╭──╯        ╰──      │
-│──╯                    │
-└${'─'.repeat(width - 2)}┘`;
-            case 'pie':
-                return `┌${'─'.repeat(width - 2)}┐
-│    ╭────╮  Pie Chart  │
-│   ╱ 30% ╲             │
-│  │ 40%   │ 30%        │
-│   ╲     ╱             │
-│    ╰────╯             │
-└${'─'.repeat(width - 2)}┘`;
-            case 'scatter':
-                return `┌${'─'.repeat(width - 2)}┐
-│  ·    ·   Scatter     │
-│    ·  · ·             │
-│  · ·  ·               │
-│ ·  ·                  │
-└${'─'.repeat(width - 2)}┘`;
-            default:
-                return `┌${'─'.repeat(width - 2)}┐
-│ Chart                 │
-└${'─'.repeat(width - 2)}┘`;
-        }
     }
     
     // Flowchart insertion
@@ -27993,6 +30050,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             AppState.selectedObjects = newObjects;
             this.renderAllObjects();
             this._updateStatus(`Duplicated ${newObjects.length} objects`);
+            this._renderComponentLibraries();
         }
     }
     
@@ -28007,6 +30065,7 @@ pre { font-family: monospace; line-height: 1; background: #1a1a2e; color: #eee; 
             this.renderAllObjects();
             this._updateStatusBar();
             this._updateStatus(`Deleted ${count} objects`);
+            this._renderComponentLibraries();
         }
     }
 }

@@ -1772,6 +1772,12 @@ body {
     letter-spacing: 0.5px;
 }
 
+.property-group-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
 .style-row {
     position: relative;
 }

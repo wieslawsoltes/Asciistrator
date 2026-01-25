@@ -313,12 +313,87 @@ export class Legend extends EventEmitter {
      */
     hitTest(x, y, area) {
         if (!this.interactive || !this.show) return -1;
-        
-        // Check bounds
+
+        if (!area) return -1;
         const dims = this.getDimensions();
-        // ... implement hit testing based on position
-        
-        return -1;
+        if (dims.width <= 0 || dims.height <= 0) return -1;
+
+        let startX;
+        let startY;
+
+        switch (this.position) {
+            case LegendPosition.TOP:
+                startX = area.x + Math.floor((area.width - dims.width) / 2);
+                startY = area.y;
+                break;
+            case LegendPosition.BOTTOM:
+                startX = area.x + Math.floor((area.width - dims.width) / 2);
+                startY = area.y + area.height - dims.height;
+                break;
+            case LegendPosition.LEFT:
+                startX = area.x;
+                startY = area.y + Math.floor((area.height - dims.height) / 2);
+                break;
+            case LegendPosition.RIGHT:
+                startX = area.x + area.width - dims.width;
+                startY = area.y + Math.floor((area.height - dims.height) / 2);
+                break;
+            case LegendPosition.TOP_LEFT:
+                startX = area.x;
+                startY = area.y;
+                break;
+            case LegendPosition.TOP_RIGHT:
+                startX = area.x + area.width - dims.width;
+                startY = area.y;
+                break;
+            case LegendPosition.BOTTOM_LEFT:
+                startX = area.x;
+                startY = area.y + area.height - dims.height;
+                break;
+            case LegendPosition.BOTTOM_RIGHT:
+                startX = area.x + area.width - dims.width;
+                startY = area.y + area.height - dims.height;
+                break;
+            default:
+                return -1;
+        }
+
+        const localX = x - startX;
+        const localY = y - startY;
+        if (localX < 0 || localY < 0 || localX >= dims.width || localY >= dims.height) {
+            return -1;
+        }
+
+        const isHorizontal = this.position === LegendPosition.TOP ||
+            this.position === LegendPosition.BOTTOM;
+
+        if (isHorizontal) {
+            const rowY = this.style.padding;
+            if (localY !== rowY) return -1;
+
+            let cursorX = this.style.padding;
+            for (let i = 0; i < this.items.length; i++) {
+                const text = this.items[i].toString();
+                if (localX >= cursorX && localX < cursorX + text.length) {
+                    return i;
+                }
+                cursorX += text.length + this.style.itemSpacing + 1;
+            }
+            return -1;
+        }
+
+        const rowIndex = localY - this.style.padding;
+        if (rowIndex < 0 || rowIndex >= this.items.length) {
+            return -1;
+        }
+
+        const text = this.items[rowIndex].toString();
+        const textX = this.style.padding;
+        if (localX < textX || localX >= textX + text.length) {
+            return -1;
+        }
+
+        return rowIndex;
     }
 }
 

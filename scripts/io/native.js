@@ -281,9 +281,10 @@ export class NativeDocument {
      * @param {object} obj - SceneObject
      * @returns {object}
      */
-    static serializeObjectV2(obj) {
+    static serializeObjectV2(obj, parent = null) {
         // Map internal type to Figma-style type
         const figmaType = TypeMapping.toFigma[obj.type] || obj.type.toUpperCase();
+        const relativeTransform = NativeDocument._computeRelativeTransform(obj, parent);
         
         // Base node structure
         const node = {
@@ -300,6 +301,9 @@ export class NativeDocument {
                 width: obj.width || 1,
                 height: obj.height || 1
             },
+            
+            // Relative transform (Figma-style 2x3 matrix)
+            relativeTransform: relativeTransform,
             
             // Transform (basic - rotation/scale)
             rotation: obj.rotation || 0,
@@ -336,7 +340,7 @@ export class NativeDocument {
             clipsContent: obj.clipContent || false,
             
             // Children (recursive)
-            children: (obj.children || []).map(c => NativeDocument.serializeObjectV2(c)),
+            children: (obj.children || []).map(c => NativeDocument.serializeObjectV2(c, obj)),
             
             // ASCII-specific properties (namespaced to preserve)
             ascii: {
@@ -402,6 +406,38 @@ export class NativeDocument {
         if (obj.effectStyleId) node.effectStyleId = obj.effectStyleId;
         
         return node;
+    }
+
+    static _computeRelativeTransform(obj, parent = null) {
+        if (Array.isArray(obj.relativeTransform) && obj.relativeTransform.length === 2) {
+            return obj.relativeTransform;
+        }
+
+        const rotation = (obj.rotation || 0) * Math.PI / 180;
+        const cos = Math.cos(rotation);
+        const sin = Math.sin(rotation);
+        const scaleX = Number.isFinite(obj.scaleX) ? obj.scaleX : 1;
+        const scaleY = Number.isFinite(obj.scaleY) ? obj.scaleY : 1;
+
+        let tx = obj.x || 0;
+        let ty = obj.y || 0;
+
+        if (parent) {
+            const parentX = parent.x || 0;
+            const parentY = parent.y || 0;
+            if (obj._frameOffset && Number.isFinite(obj._frameOffset.x) && Number.isFinite(obj._frameOffset.y)) {
+                tx = obj._frameOffset.x;
+                ty = obj._frameOffset.y;
+            } else {
+                tx = tx - parentX;
+                ty = ty - parentY;
+            }
+        }
+
+        return [
+            [cos * scaleX, -sin * scaleY, tx],
+            [sin * scaleX, cos * scaleY, ty]
+        ];
     }
     
     /**
@@ -605,8 +641,24 @@ export class NativeDocument {
             case 'chart':
                 node.chartType = obj.chartType;
                 // Move ASCII-specific chart data to ascii namespace
-                node.ascii.chartData = obj.chartData;
-                node.ascii.chartOptions = obj.chartOptions;
+                if (obj.chartData) {
+                    node.ascii.chartData = obj.chartData;
+                } else if (obj.data) {
+                    node.ascii.chartData = {
+                        data: obj.data,
+                        labels: obj.labels
+                    };
+                }
+                
+                if (obj.chartOptions) {
+                    node.ascii.chartOptions = obj.chartOptions;
+                } else {
+                    node.ascii.chartOptions = {
+                        title: obj.title,
+                        showAxes: obj.showAxes,
+                        showLabels: obj.showLabels
+                    };
+                }
                 break;
                 
             // Flowchart shapes

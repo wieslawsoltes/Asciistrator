@@ -7,6 +7,7 @@
 import { EventEmitter } from '../utils/events.js';
 import { BoundingBox } from '../core/math/geometry.js';
 import { AsciiBuffer } from '../core/ascii/rasterizer.js';
+import { Legend, Tooltip } from './legend.js';
 
 // ==========================================
 // CHART CONSTANTS
@@ -324,6 +325,8 @@ export class Chart extends EventEmitter {
             position: options.legend?.position ?? 'right',
             ...options.legend
         };
+        this._legend = null;
+        this._legendArea = null;
         
         // Grid
         this.grid = {
@@ -340,6 +343,7 @@ export class Chart extends EventEmitter {
             format: options.tooltip?.format ?? null,
             ...options.tooltip
         };
+        this._tooltip = null;
         
         // Animation
         this.animation = {
@@ -631,8 +635,65 @@ export class Chart extends EventEmitter {
      */
     renderLegend(buffer) {
         if (!this.legend.show || this.series.length === 0) return;
-        
-        // Legend implementation will be in legend.js
+
+        this._ensureLegendInstance();
+        this._legend.setFromSeries(this.series);
+        const area = { x: 0, y: 0, width: this.width, height: this.height };
+        this._legendArea = area;
+        this._legend.render(buffer, area);
+    }
+
+    _ensureLegendInstance() {
+        if (!this._legend) {
+            this._legend = new Legend(this.legend || {});
+            this._legend.on('toggle', ({ index, item }) => {
+                const series = this.series[index];
+                if (series) {
+                    series.visible = item.visible;
+                    this.dirty = true;
+                    this.emit('legendToggle', { chart: this, series, index, item });
+                }
+            });
+        }
+
+        if (!this.legend) return;
+        if (this.legend.show !== undefined) this._legend.show = this.legend.show;
+        if (this.legend.position) this._legend.position = this.legend.position;
+        if (this.legend.interactive !== undefined) this._legend.interactive = this.legend.interactive;
+
+        const styleSource = this.legend.style || this.legend;
+        const styleKeys = ['padding', 'itemSpacing', 'symbolWidth', 'maxWidth', 'maxHeight', 'borderChar'];
+        for (const key of styleKeys) {
+            if (styleSource && styleSource[key] !== undefined) {
+                this._legend.style[key] = styleSource[key];
+            }
+        }
+    }
+
+    renderTooltip(buffer) {
+        if (!this.tooltip.show) return;
+        this._ensureTooltipInstance();
+        if (this._tooltip) {
+            this._tooltip.render(buffer);
+        }
+    }
+
+    _ensureTooltipInstance() {
+        if (!this._tooltip) {
+            this._tooltip = new Tooltip(this.tooltip || {});
+        }
+
+        if (!this.tooltip) return;
+        if (this.tooltip.show !== undefined) this._tooltip.show = this.tooltip.show;
+        if (this.tooltip.format !== undefined) this._tooltip.format = this.tooltip.format;
+
+        const styleSource = this.tooltip.style || this.tooltip;
+        const styleKeys = ['padding', 'borderChar', 'cornerChars', 'maxWidth', 'offset'];
+        for (const key of styleKeys) {
+            if (styleSource && styleSource[key] !== undefined) {
+                this._tooltip.style[key] = styleSource[key];
+            }
+        }
     }
     
     /**
@@ -653,6 +714,7 @@ export class Chart extends EventEmitter {
         this.renderAxes(this.buffer);
         this.renderChart(this.buffer);
         this.renderLegend(this.buffer);
+        this.renderTooltip(this.buffer);
         
         this.dirty = false;
         this.emit('render', { chart: this, buffer: this.buffer });
@@ -685,7 +747,40 @@ export class Chart extends EventEmitter {
      * @param {number} y - Y coordinate
      */
     onMouseMove(x, y) {
+        if (this.legend.show && this.series.length > 0) {
+            this._ensureLegendInstance();
+            this._legend.setFromSeries(this.series);
+            const area = this._legendArea || { x: 0, y: 0, width: this.width, height: this.height };
+            const legendHit = this._legend.hitTest(x, y, area);
+            const nextIndex = legendHit >= 0 ? legendHit : -1;
+            if (this._legend.selectedIndex !== nextIndex) {
+                this._legend.selectedIndex = nextIndex;
+                this.dirty = true;
+            }
+            if (legendHit >= 0) {
+                if (this.tooltip.show) {
+                    this._ensureTooltipInstance();
+                    if (this._tooltip.visible) {
+                        this._tooltip.hide();
+                        this.dirty = true;
+                    }
+                }
+                return;
+            }
+        }
+
         const hit = this.hitTest(x, y);
+
+        if (this.tooltip.show) {
+            this._ensureTooltipInstance();
+            if (hit) {
+                this._tooltip.showAt(x, y, hit);
+                this.dirty = true;
+            } else if (this._tooltip.visible) {
+                this._tooltip.hide();
+                this.dirty = true;
+            }
+        }
         
         if (hit !== this.hoveredPoint) {
             this.hoveredPoint = hit;
@@ -699,6 +794,23 @@ export class Chart extends EventEmitter {
      * @param {number} y - Y coordinate
      */
     onClick(x, y) {
+        if (this.legend.show && this.series.length > 0) {
+            this._ensureLegendInstance();
+            this._legend.setFromSeries(this.series);
+            const area = this._legendArea || { x: 0, y: 0, width: this.width, height: this.height };
+            const legendHit = this._legend.hitTest(x, y, area);
+            if (legendHit >= 0) {
+                this._legend.toggleItem(legendHit);
+                const series = this.series[legendHit];
+                if (series) {
+                    series.visible = this._legend.items[legendHit].visible;
+                }
+                this.dirty = true;
+                this.emit('legendToggle', { chart: this, series, index: legendHit });
+                return;
+            }
+        }
+
         const hit = this.hitTest(x, y);
         
         if (hit) {

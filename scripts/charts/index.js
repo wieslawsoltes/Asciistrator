@@ -5,6 +5,12 @@
  * Exports all chart types and utilities.
  */
 
+import { Chart } from './base.js';
+import { BarChart, ColumnChart, HorizontalBarChart } from './bar.js';
+import { LineChart, AreaChart, StackedAreaChart } from './line.js';
+import { PieChart, DonutChart, GaugeChart } from './pie.js';
+import { ScatterChart, BubbleChart, CorrelationPlot } from './scatter.js';
+
 // ==========================================
 // EXPORTS
 // ==========================================

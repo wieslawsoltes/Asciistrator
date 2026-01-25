@@ -863,7 +863,7 @@ async function loadDocument(input) {
   - [x] Define PAGE type node
   - [x] Update document structure to nested tree
   - [x] Add `absoluteBoundingBox` to all objects
-  - [ ] Add `relativeTransform` matrix support
+- [x] Add `relativeTransform` matrix support
 
 - [x] **Update NativeDocument class**
   - [x] Add version detection

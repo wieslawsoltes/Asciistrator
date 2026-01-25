@@ -9,6 +9,7 @@ import { Vector2D } from '../math/vector2d.js';
 import { Matrix3x3 } from '../math/matrix3x3.js';
 import { BoundingBox } from '../math/geometry.js';
 import { EventEmitter } from '../../utils/events.js';
+import { createObjectFromJSON } from '../../objects/index.js';
 
 // ==========================================
 // VIRTUAL CANVAS
@@ -700,8 +701,19 @@ export class CanvasLayer extends EventEmitter {
             blendMode: data.blendMode
         });
         
-        // Objects would need to be deserialized based on type
-        // This is a placeholder - actual implementation depends on object registry
+        if (Array.isArray(data.objects)) {
+            for (const objData of data.objects) {
+                if (!objData) continue;
+                const obj = (objData && objData.type) ? createObjectFromJSON(objData) : objData;
+                if (obj) {
+                    obj.layer = layer;
+                    layer.objects.push(obj);
+                }
+            }
+        }
+        
+        layer.isDirty = true;
+        layer._cachedBounds = null;
         
         return layer;
     }
